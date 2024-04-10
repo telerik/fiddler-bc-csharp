@@ -1,7 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-
+using System.Threading;
+using System.Threading.Tasks;
 using Org.BouncyCastle.Tls.Crypto;
 using Org.BouncyCastle.Utilities;
 using Org.BouncyCastle.Utilities.IO;
@@ -13,7 +14,7 @@ namespace Org.BouncyCastle.Tls
     {
         /*
          * Connection States.
-         * 
+         *
          * NOTE: Redirection of handshake messages to TLS 1.3 handlers assumes CS_START, CS_CLIENT_HELLO
          * are lower than any of the other values.
          */
@@ -123,6 +124,7 @@ namespace Org.BouncyCastle.Tls
 
         internal readonly RecordStream m_recordStream;
         internal readonly object m_recordWriteLock = new object();
+        internal readonly SemaphoreSlim m_recordWrite = new SemaphoreSlim(1, 1);
 
         private int m_maxHandshakeMessageSize = -1;
 
@@ -278,6 +280,23 @@ namespace Org.BouncyCastle.Tls
             }
         }
 
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+        /// <exception cref="IOException"/>
+        protected virtual async Task HandleExceptionAsync(short alertDescription, string message, Exception e, CancellationToken cancellationToken)
+        {
+            // TODO[tls-port] Can we support interrupted IO on .NET?
+            //if ((m_appDataReady || IsResumableHandshake()) && (e is InterruptedIOException))
+            //    return;
+
+            if (!m_closed)
+            {
+                await RaiseAlertFatalAsync(alertDescription, message, e, cancellationToken);
+
+                HandleFailure();
+            }
+        }
+#endif
+
         /// <exception cref="IOException"/>
         protected virtual void HandleException(short alertDescription, string message, Exception e)
         {
@@ -338,6 +357,23 @@ namespace Org.BouncyCastle.Tls
             if (expected != m_receivedChangeCipherSpec)
                 throw new TlsFatalAlert(AlertDescription.unexpected_message);
         }
+
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+        /// <exception cref="IOException"/>
+        protected virtual async Task BlockForHandshakeAsync(CancellationToken cancellationToken)
+        {
+            while (m_connectionState != CS_END)
+            {
+                if (IsClosed)
+                {
+                    // NOTE: Any close during the handshake should have raised an exception.
+                    throw new TlsFatalAlert(AlertDescription.internal_error);
+                }
+
+                await SafeReadRecordAsync(cancellationToken);
+            }
+        }
+#endif
 
         /// <exception cref="IOException"/>
         protected virtual void BlockForHandshake()
@@ -618,7 +654,7 @@ namespace Org.BouncyCastle.Tls
                     break;
 
                 /*
-                 * For all others we automatically update the transcript immediately. 
+                 * For all others we automatically update the transcript immediately.
                  */
                 default:
                 {
@@ -637,7 +673,7 @@ namespace Org.BouncyCastle.Tls
         {
             /*
              * There is nothing we need to do here.
-             * 
+             *
              * This function could be used for callbacks when application data arrives in the future.
              */
         }
@@ -744,6 +780,37 @@ namespace Org.BouncyCastle.Tls
         }
 
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+        public virtual async Task<int> ReadApplicationDataAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+        {
+            if (!m_appDataReady)
+                throw new InvalidOperationException("Cannot read application data until initial handshake completed.");
+
+            while (m_applicationDataQueue.Available < 1)
+            {
+                if (this.m_closed)
+                {
+                    if (this.m_failedWithError)
+                        throw new IOException("Cannot read application data on failed TLS connection");
+
+                    return 0;
+                }
+
+                /*
+                 * NOTE: Only called more than once when empty records are received, so no special
+                 * InterruptedIOException handling is necessary.
+                 */
+                await SafeReadRecordAsync(cancellationToken);
+            }
+
+            int count = buffer.Length;
+            if (count > 0)
+            {
+                count = System.Math.Min(count, m_applicationDataQueue.Available);
+                m_applicationDataQueue.RemoveData(buffer[..count].Span, 0);
+            }
+            return count;
+        }
+
         public virtual int ReadApplicationData(Span<byte> buffer)
         {
             if (!m_appDataReady)
@@ -799,6 +866,51 @@ namespace Org.BouncyCastle.Tls
                 throw new TlsFatalAlert(AlertDescription.internal_error, e);
             }
         }
+
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+        /// <exception cref="IOException"/>
+        protected virtual async Task SafeReadRecordAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                if (await m_recordStream.ReadRecordAsync(cancellationToken))
+                    return;
+
+                if (!m_appDataReady)
+                    throw new TlsFatalAlert(AlertDescription.handshake_failure);
+
+                if (!Peer.RequiresCloseNotify())
+                {
+                    HandleClose(false);
+                    return;
+                }
+            }
+            catch (TlsFatalAlertReceived)
+            {
+                // Connection failure already handled at source
+                throw;
+            }
+            catch (TlsFatalAlert e)
+            {
+                await HandleExceptionAsync(e.AlertDescription, "Failed to read record", e, cancellationToken);
+                throw;
+            }
+            catch (IOException e)
+            {
+                await HandleExceptionAsync(AlertDescription.internal_error, "Failed to read record", e, cancellationToken);
+                throw;
+            }
+            catch (Exception e)
+            {
+                await HandleExceptionAsync(AlertDescription.internal_error, "Failed to read record", e, cancellationToken);
+                throw new TlsFatalAlert(AlertDescription.internal_error, e);
+            }
+
+            HandleFailure();
+
+            throw new TlsNoCloseNotifyException();
+        }
+#endif
 
         /// <exception cref="IOException"/>
         protected virtual void SafeReadRecord()
@@ -892,6 +1004,29 @@ namespace Org.BouncyCastle.Tls
         }
 
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+        protected virtual async Task SafeWriteRecordAsync(short type, ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken)
+        {
+            try
+            {
+                await m_recordStream.WriteRecordAsync(type, buffer, cancellationToken);
+            }
+            catch (TlsFatalAlert e)
+            {
+                await HandleExceptionAsync(e.AlertDescription, "Failed to write record", e, cancellationToken);
+                throw;
+            }
+            catch (IOException e)
+            {
+                await HandleExceptionAsync(AlertDescription.internal_error, "Failed to write record", e, cancellationToken);
+                throw;
+            }
+            catch (Exception e)
+            {
+                await HandleExceptionAsync(AlertDescription.internal_error, "Failed to write record", e, cancellationToken);
+                throw new TlsFatalAlert(AlertDescription.internal_error, e);
+            }
+        }
+
         /// <exception cref="IOException"/>
         protected virtual void SafeWriteRecord(short type, ReadOnlySpan<byte> buffer)
         {
@@ -953,14 +1088,14 @@ namespace Org.BouncyCastle.Tls
                     /*
                      * RFC 5246 6.2.1. Zero-length fragments of Application data MAY be sent as they are
                      * potentially useful as a traffic analysis countermeasure.
-                     * 
+                     *
                      * NOTE: Actually, implementations appear to have settled on 1/n-1 record splitting.
                      */
                     if (m_appDataSplitEnabled)
                     {
                         /*
                          * Protect against known IV attack!
-                         * 
+                         *
                          * DO NOT REMOVE THIS CODE, EXCEPT YOU KNOW EXACTLY WHAT YOU ARE DOING HERE.
                          */
                         switch (m_appDataSplitMode)
@@ -1012,6 +1147,82 @@ namespace Org.BouncyCastle.Tls
         }
 
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+        public virtual async Task WriteApplicationDataAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken)
+        {
+            if (!m_appDataReady)
+                throw new InvalidOperationException(
+                    "Cannot write application data until initial handshake completed.");
+
+            await m_recordWrite.WaitAsync();
+            try
+            {
+                while (!buffer.IsEmpty)
+                {
+                    if (m_closed)
+                        throw new IOException("Cannot write application data on closed/failed TLS connection");
+
+                    /*
+                     * RFC 5246 6.2.1. Zero-length fragments of Application data MAY be sent as they are
+                     * potentially useful as a traffic analysis countermeasure.
+                     *
+                     * NOTE: Actually, implementations appear to have settled on 1/n-1 record splitting.
+                     */
+                    if (m_appDataSplitEnabled)
+                    {
+                        /*
+                         * Protect against known IV attack!
+                         *
+                         * DO NOT REMOVE THIS CODE, EXCEPT YOU KNOW EXACTLY WHAT YOU ARE DOING HERE.
+                         */
+                        switch (m_appDataSplitMode)
+                        {
+                        case ADS_MODE_0_N_FIRSTONLY:
+                        {
+                            this.m_appDataSplitEnabled = false;
+                            await SafeWriteRecordAsync(ContentType.application_data, TlsUtilities.EmptyBytes.AsMemory(0, 0), cancellationToken);
+                            break;
+                        }
+                        case ADS_MODE_0_N:
+                        {
+                            await SafeWriteRecordAsync(ContentType.application_data, TlsUtilities.EmptyBytes.AsMemory(0, 0), cancellationToken);
+                            break;
+                        }
+                        case ADS_MODE_1_Nsub1:
+                        default:
+                        {
+                            if (buffer.Length > 1)
+                            {
+                                await SafeWriteRecordAsync(ContentType.application_data, buffer[..1], cancellationToken);
+                                buffer = buffer[1..];
+                            }
+                            break;
+                        }
+                        }
+                    }
+                    else if (m_keyUpdateEnabled)
+                    {
+                        if (m_keyUpdatePendingSend)
+                        {
+                            await Send13KeyUpdateAsync(false, cancellationToken);
+                        }
+                        else if (m_recordStream.NeedsKeyUpdate())
+                        {
+                            await Send13KeyUpdateAsync(true, cancellationToken);
+                        }
+                    }
+
+                    // Fragment data according to the current fragment limit.
+                    int toWrite = System.Math.Min(buffer.Length, m_recordStream.PlaintextLimit);
+                    await SafeWriteRecordAsync(ContentType.application_data, buffer[..toWrite], cancellationToken);
+                    buffer = buffer[toWrite..];
+                }
+            }
+            finally
+            {
+                m_recordWrite.Release();
+            }
+        }
+
         public virtual void WriteApplicationData(ReadOnlySpan<byte> buffer)
         {
             if (!m_appDataReady)
@@ -1028,14 +1239,14 @@ namespace Org.BouncyCastle.Tls
                     /*
                      * RFC 5246 6.2.1. Zero-length fragments of Application data MAY be sent as they are
                      * potentially useful as a traffic analysis countermeasure.
-                     * 
+                     *
                      * NOTE: Actually, implementations appear to have settled on 1/n-1 record splitting.
                      */
                     if (m_appDataSplitEnabled)
                     {
                         /*
                          * Protect against known IV attack!
-                         * 
+                         *
                          * DO NOT REMOVE THIS CODE, EXCEPT YOU KNOW EXACTLY WHAT YOU ARE DOING HERE.
                          */
                         switch (m_appDataSplitMode)
@@ -1102,6 +1313,66 @@ namespace Org.BouncyCastle.Tls
             set { this.m_resumableHandshake = value; }
         }
 
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+        /// <exception cref="IOException"/>
+        internal async Task WriteHandshakeMessageAsync(byte[] buf, int off, int len, CancellationToken cancellationToken)
+        {
+            if (len < 4)
+                throw new TlsFatalAlert(AlertDescription.internal_error);
+
+            short type = TlsUtilities.ReadUint8(buf, off);
+            switch (type)
+            {
+            /*
+            * These message types aren't included in the transcript.
+            */
+            case HandshakeType.hello_request:
+            case HandshakeType.key_update:
+                break;
+
+            /*
+            * Not included in the transcript for (D)TLS 1.3+
+            */
+            case HandshakeType.new_session_ticket:
+            {
+                ProtocolVersion negotiatedVersion = Context.ServerVersion;
+                if (null != negotiatedVersion && !TlsUtilities.IsTlsV13(negotiatedVersion))
+                {
+                    m_handshakeHash.Update(buf, off, len);
+                }
+
+                break;
+            }
+
+            /*
+                * These message types are deferred to the writer to explicitly update the transcript.
+                */
+            case HandshakeType.client_hello:
+                break;
+
+            /*
+            * For all others we automatically update the transcript.
+            */
+            default:
+            {
+                m_handshakeHash.Update(buf, off, len);
+                break;
+            }
+            }
+
+            int total = 0;
+            do
+            {
+                // Fragment data according to the current fragment limit.
+                int toWrite = System.Math.Min(len - total, m_recordStream.PlaintextLimit);
+                var memory = new ReadOnlyMemory<byte>(buf, off + total, toWrite);
+                await SafeWriteRecordAsync(ContentType.handshake, memory, cancellationToken);
+                total += toWrite;
+            }
+            while (total < len);
+        }
+#endif
+
         /// <exception cref="IOException"/>
         internal void WriteHandshakeMessage(byte[] buf, int off, int len)
         {
@@ -1139,7 +1410,7 @@ namespace Org.BouncyCastle.Tls
                 break;
 
             /*
-             * For all others we automatically update the transcript. 
+             * For all others we automatically update the transcript.
              */
             default:
             {
@@ -1582,6 +1853,25 @@ namespace Org.BouncyCastle.Tls
             securityParameters.m_tlsUnique = null;
         }
 
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+        /// <exception cref="IOException"/>
+        protected virtual async Task RaiseAlertFatalAsync(short alertDescription, string message, Exception cause, CancellationToken cancellationToken)
+        {
+            Peer.NotifyAlertRaised(AlertLevel.fatal, alertDescription, message, cause);
+
+            byte[] alert = new byte[]{ (byte)AlertLevel.fatal, (byte)alertDescription };
+
+            try
+            {
+                await m_recordStream.WriteRecordAsync(ContentType.alert, alert.AsMemory(0, 2), cancellationToken);
+            }
+            catch (Exception)
+            {
+                // We are already processing an exception, so just ignore this
+            }
+        }
+#endif
+
         /// <exception cref="IOException"/>
         protected virtual void RaiseAlertFatal(short alertDescription, string message, Exception cause)
         {
@@ -1738,6 +2028,28 @@ namespace Org.BouncyCastle.Tls
 
             HandshakeMessageOutput.Send(this, HandshakeType.finished, verify_data);
         }
+
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+        protected virtual async Task Send13KeyUpdateAsync(bool updateRequested, CancellationToken cancellationToken)
+        {
+            // TODO[tls13] This is interesting enough to notify the TlsPeer for possible logging/vetting
+
+            if (!(m_appDataReady && m_keyUpdateEnabled))
+                throw new TlsFatalAlert(AlertDescription.internal_error);
+
+            short requestUpdate = updateRequested
+                ? KeyUpdateRequest.update_requested
+                : KeyUpdateRequest.update_not_requested;
+
+            await HandshakeMessageOutput.SendAsync(this, HandshakeType.key_update, TlsUtilities.EncodeUint8(requestUpdate), cancellationToken);
+
+            TlsUtilities.Update13TrafficSecretLocal(Context);
+            m_recordStream.NotifyKeyUpdateSent();
+
+            //this.m_keyUpdatePendingReceive |= updateRequested;
+            this.m_keyUpdatePendingSend &= updateRequested;
+        }
+#endif
 
         /// <exception cref="IOException"/>
         protected virtual void Send13KeyUpdate(bool updateRequested)

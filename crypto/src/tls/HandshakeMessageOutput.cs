@@ -1,6 +1,7 @@
 ﻿using System;
 using System.IO;
-
+using System.Threading;
+using System.Threading.Tasks;
 using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Tls
@@ -12,6 +13,16 @@ namespace Org.BouncyCastle.Tls
         {
             return 4 + bodyLength;
         }
+
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+        /// <exception cref="IOException"/>
+        internal static async Task SendAsync(TlsProtocol protocol, short handshakeType, byte[] body, CancellationToken cancellationToken)
+        {
+            HandshakeMessageOutput message = new HandshakeMessageOutput(handshakeType, body.Length);
+            await message.WriteAsync(body, 0, body.Length, cancellationToken);
+            await message.SendAsync(protocol, cancellationToken);
+        }
+#endif
 
         /// <exception cref="IOException"/>
         internal static void Send(TlsProtocol protocol, short handshakeType, byte[] body)
@@ -36,6 +47,26 @@ namespace Org.BouncyCastle.Tls
             // Reserve space for length
             Seek(3L, SeekOrigin.Current);
         }
+
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+        /// <exception cref="IOException"/>
+        internal async Task SendAsync(TlsProtocol protocol, CancellationToken cancellationToken)
+        {
+            // Patch actual length back in
+            int bodyLength = Convert.ToInt32(Length) - 4;
+            TlsUtilities.CheckUint24(bodyLength);
+
+            Seek(1L, SeekOrigin.Begin);
+            TlsUtilities.WriteUint24(bodyLength, this);
+
+            byte[] buf = GetBuffer();
+            int count = Convert.ToInt32(Length);
+
+            await protocol.WriteHandshakeMessageAsync(buf, 0, count, cancellationToken);
+
+            Dispose();
+        }
+#endif
 
         /// <exception cref="IOException"/>
         internal void Send(TlsProtocol protocol)

@@ -1,7 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-
+using System.Threading;
+using System.Threading.Tasks;
 using Org.BouncyCastle.Tls.Crypto;
 using Org.BouncyCastle.Utilities;
 
@@ -76,6 +77,38 @@ namespace Org.BouncyCastle.Tls
             {
                 BlockForHandshake();
             }
+        }
+
+        /// <summary>Initiates a TLS handshake in the role of client.</summary>
+        /// <remarks>
+        /// In blocking mode, this will not return until the handshake is complete. In non-blocking mode, use
+        /// <see cref="TlsPeer.NotifyHandshakeComplete"/> to receive a callback when the handshake is complete.
+        /// </remarks>
+        /// <param name="tlsClient">The <see cref="TlsClient"/> to use for the handshake.</param>
+        /// <exception cref="IOException">If in blocking mode and handshake was not successful.</exception>
+        public virtual async Task ConnectAsync(TlsClient tlsClient, CancellationToken cancellationToken)
+        {
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+            if (tlsClient == null)
+                throw new ArgumentNullException("tlsClient");
+            if (m_tlsClient != null)
+                throw new InvalidOperationException("'Connect' can only be called once");
+
+            this.m_tlsClient = tlsClient;
+            this.m_tlsClientContext = new TlsClientContextImpl(tlsClient.Crypto);
+
+            tlsClient.Init(m_tlsClientContext);
+            tlsClient.NotifyCloseHandle(this);
+
+            BeginHandshake();
+
+            if (m_blocking)
+            {
+                await BlockForHandshakeAsync(cancellationToken);
+            }
+#else
+            throw new NotImplementedException();
+#endif
         }
 
         protected override void BeginHandshake()
@@ -580,7 +613,7 @@ namespace Org.BouncyCastle.Tls
                     }
                     else
                     {
-                        m_keyExchange.ProcessClientCredentials(clientAuthCredentials);                    
+                        m_keyExchange.ProcessClientCredentials(clientAuthCredentials);
                     }
 
                     var clientSupplementalData = m_tlsClient.GetClientSupplementalData();
@@ -593,7 +626,7 @@ namespace Org.BouncyCastle.Tls
                     if (m_certificateRequest != null)
                     {
                         SendCertificateMessage(clientAuthCertificate, null);
-                        this.m_connectionState = CS_CLIENT_CERTIFICATE;                    
+                        this.m_connectionState = CS_CLIENT_CERTIFICATE;
                     }
 
                     SendClientKeyExchange();
@@ -953,7 +986,7 @@ namespace Org.BouncyCastle.Tls
 
             /*
              * TODO[tls13] RFC 8446 4.4.2.1. OCSP Status and SCT Extensions.
-             * 
+             *
              * OCSP information is carried in an extension for a CertificateEntry.
              */
             securityParameters.m_statusRequestVersion =
@@ -1145,7 +1178,7 @@ namespace Org.BouncyCastle.Tls
             /*
              * RFC 3546 2.2 Note that the extended server hello message is only sent in response to an
              * extended client hello message.
-             * 
+             *
              * However, see RFC 5746 exception below. We always include the SCSV, so an Extended Server
              * Hello is always allowed.
              */
@@ -1357,7 +1390,7 @@ namespace Org.BouncyCastle.Tls
             if (postHandshakeAuth)
                 throw new TlsFatalAlert(AlertDescription.internal_error);
 
-            /* 
+            /*
              * RFC 8446 4.3.2. A server which is authenticating with a certificate MAY optionally
              * request a certificate from the client.
              */
@@ -1428,7 +1461,7 @@ namespace Org.BouncyCastle.Tls
             {
                 /*
                  * TODO[tls13] RFC 8446 4.4.2.1. OCSP Status and SCT Extensions.
-                 * 
+                 *
                  * OCSP information is carried in an extension for a CertificateEntry.
                  */
                 securityParameters.m_statusRequestVersion = m_clientExtensions.ContainsKey(ExtensionType.status_request)
@@ -1757,7 +1790,7 @@ namespace Org.BouncyCastle.Tls
             this.m_clientBinders = TlsUtilities.AddPreSharedKeyToClientHello(m_tlsClientContext, m_tlsClient,
                 m_clientExtensions, offeredCipherSuites);
 
-            // TODO[tls13-psk] Perhaps don't add key_share if external PSK(s) offered and 'psk_dhe_ke' not offered  
+            // TODO[tls13-psk] Perhaps don't add key_share if external PSK(s) offered and 'psk_dhe_ke' not offered
             this.m_clientAgreements = TlsUtilities.AddKeyShareToClientHello(m_tlsClientContext, m_tlsClient,
                 m_clientExtensions);
 
