@@ -14,16 +14,18 @@
     <Copyright>Copyright © Legion of the Bouncy Castle Inc. 2000-2026</Copyright>
     <Description>BouncyCastle.NET is a popular cryptography library for .NET</Description>
     <IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net7.0'))">True</IsAotCompatible>
+    <IsPackable>true</IsPackable>
+    <PackageVersion>2.7.0</PackageVersion>
     <PackageIcon>packageIcon.png</PackageIcon>
     <PackageIconUrl>https://www.bouncycastle.org/stable/nuget/csharp/packageIcon.png</PackageIconUrl>
-    <PackageId>BouncyCastle.Cryptography</PackageId>
+    <PackageId>Telerik.BouncyCastle.Cryptography</PackageId>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://www.bouncycastle.org/stable/nuget/csharp/website</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/telerik/fiddler-bc-csharp</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/telerik/fiddler-bc-csharp</RepositoryUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageReleaseNotes>https://www.bouncycastle.org/stable/nuget/csharp/release_notes</PackageReleaseNotes>
     <PackageTags>bouncycastle cryptography dtls encryption open-source openpgp post-quantum security tls</PackageTags>
     <Product>BouncyCastle.NET</Product>
-    <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <Title>BouncyCastle.NET Cryptography</Title>
     <Configurations>Debug;Release;Publish</Configurations>
   </PropertyGroup>
@@ -48,8 +50,6 @@
 
   <!--Package Validation-->
   <PropertyGroup>
-    <EnablePackageValidation>false</EnablePackageValidation>
-    <PackageValidationBaselineVersion>2.0.0</PackageValidationBaselineVersion>
 
     <!-- In case we disable signing for local builds, ignore identity mismatch with baseline version. -->
     <NoWarn Condition="'$(SignAssembly)' != 'true'">$(NoWarn);CP0003</NoWarn>
@@ -89,27 +89,9 @@
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
-    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
-    <PackageReference Include="Nerdbank.GitVersioning" Version="3.9.50">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
-  </ItemGroup>
-
   <Target Name="FixAssemblyAttributes" AfterTargets="GetBuildVersion">
     <PropertyGroup>
       <!-- Here we can override/use any MSBuild properties set by Nerdbank.GitVersioning -->
     </PropertyGroup>
-  </Target>
-  <Target Name="SignAssemblies" AfterTargets="PostBuildEvent" Condition="'$(Configuration)'=='Publish'">
-    <Exec Command="call &quot;$(ProjectDir)..\..\signfile.bat&quot; &quot;$(TargetPath)&quot;" IgnoreStandardErrorWarningFormat="true" />
   </Target>
 </Project>
