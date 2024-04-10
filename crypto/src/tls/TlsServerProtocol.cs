@@ -1,7 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-
+using System.Threading;
+using System.Threading.Tasks;
 using Org.BouncyCastle.Tls.Crypto;
 using Org.BouncyCastle.Utilities;
 
@@ -71,6 +72,31 @@ namespace Org.BouncyCastle.Tls
             {
                 BlockForHandshake();
             }
+        }
+
+        public async Task AcceptAsync(TlsServer tlsServer, CancellationToken cancellationToken)
+        {
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+            if (tlsServer == null)
+                throw new ArgumentNullException("tlsServer");
+            if (m_tlsServer != null)
+                throw new InvalidOperationException("'Accept' can only be called once");
+
+            this.m_tlsServer = tlsServer;
+            this.m_tlsServerContext = new TlsServerContextImpl(tlsServer.Crypto);
+
+            tlsServer.Init(m_tlsServerContext);
+            tlsServer.NotifyCloseHandle(this);
+
+            BeginHandshake();
+
+            if (m_blocking)
+            {
+                await BlockForHandshakeAsync(cancellationToken);
+            }
+#else
+            throw new NotImplementedException();
+#endif
         }
 
         protected override void CleanupHandshake()
@@ -168,7 +194,7 @@ namespace Org.BouncyCastle.Tls
 
                 /*
                  * TODO[tls13] Confirm fields in the ClientHello haven't changed
-                 * 
+                 *
                  * RFC 8446 4.1.2 [..] when the server has responded to its ClientHello with a
                  * HelloRetryRequest [..] the client MUST send the same ClientHello without
                  * modification, except as follows: [key_share, early_data, cookie, pre_shared_key,
@@ -220,7 +246,7 @@ namespace Org.BouncyCastle.Tls
 
                 /*
                  * NOTE: Currently no server support for session resumption
-                 * 
+                 *
                  * If adding support, ensure securityParameters.tlsUnique is set to the localVerifyData, but
                  * ONLY when extended_master_secret has been negotiated (otherwise NULL).
                  */
@@ -333,7 +359,7 @@ namespace Org.BouncyCastle.Tls
 
             /*
              * TODO[tls13] RFC 8446 4.4.2.1. OCSP Status and SCT Extensions.
-             * 
+             *
              * OCSP information is carried in an extension for a CertificateEntry.
              */
             securityParameters.m_statusRequestVersion =
@@ -401,7 +427,7 @@ namespace Org.BouncyCastle.Tls
             this.m_offeredCipherSuites = clientHello.CipherSuites;
 
 
- 
+
             SecurityParameters securityParameters = m_tlsServerContext.SecurityParameters;
 
             m_tlsServerContext.SetClientSupportedVersions(
@@ -422,7 +448,7 @@ namespace Org.BouncyCastle.Tls
                 clientVersion = ProtocolVersion.GetLatestTls(m_tlsServerContext.ClientSupportedVersions);
             }
 
-            // Set the legacy_record_version to use for early alerts 
+            // Set the legacy_record_version to use for early alerts
             m_recordStream.SetWriteVersion(clientVersion);
 
             if (!ProtocolVersion.SERVER_EARLIEST_SUPPORTED_TLS.IsEqualOrEarlierVersionOf(clientVersion))
@@ -758,7 +784,7 @@ namespace Org.BouncyCastle.Tls
 
             /*
              * TODO[tls13] Abbreviated handshakes (PSK resumption)
-             * 
+             *
              * NOTE: No CertificateRequest, Certificate, CertificateVerify messages, but client
              * might now send EndOfEarlyData after receiving server Finished message.
              */
@@ -1163,7 +1189,7 @@ namespace Org.BouncyCastle.Tls
                             /*
                              * RFC 5246 If no suitable certificate is available, the client MUST send a
                              * certificate message containing no certificates.
-                             * 
+                             *
                              * NOTE: In previous RFCs, this was SHOULD instead of MUST.
                              */
                             throw new TlsFatalAlert(AlertDescription.unexpected_message);

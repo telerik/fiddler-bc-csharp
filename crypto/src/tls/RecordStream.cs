@@ -2,7 +2,8 @@
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.ExceptionServices;
-
+using System.Threading;
+using System.Threading.Tasks;
 using Org.BouncyCastle.Tls.Crypto;
 using Org.BouncyCastle.Tls.Crypto.Impl;
 using Org.BouncyCastle.Utilities;
@@ -211,6 +212,45 @@ namespace Org.BouncyCastle.Tls
             return true;
         }
 
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+        /// <exception cref="IOException"/>
+        internal async Task<bool> ReadRecordAsync(CancellationToken cancellationToken)
+        {
+            if (!await m_inputRecord.ReadHeaderAsync(m_input, cancellationToken))
+                return false;
+
+            short recordType = CheckRecordType(m_inputRecord.m_buf, RecordFormat.TypeOffset);
+
+            ProtocolVersion recordVersion = TlsUtilities.ReadVersion(m_inputRecord.m_buf, RecordFormat.VersionOffset);
+
+            int length = TlsUtilities.ReadUint16(m_inputRecord.m_buf, RecordFormat.LengthOffset);
+
+            CheckLength(length, m_ciphertextLimit, AlertDescription.record_overflow);
+
+            await m_inputRecord.ReadFragmentAsync(m_input, length, cancellationToken);
+
+            TlsDecodeResult decoded;
+            try
+            {
+                if (m_ignoreChangeCipherSpec && ContentType.change_cipher_spec == recordType)
+                {
+                    CheckChangeCipherSpec(m_inputRecord.m_buf, RecordFormat.FragmentOffset, length);
+                    return true;
+                }
+
+                decoded = DecodeAndVerify(recordType, recordVersion, m_inputRecord.m_buf, RecordFormat.FragmentOffset,
+                    length);
+            }
+            finally
+            {
+                m_inputRecord.Reset();
+            }
+
+            m_handler.ProcessRecord(decoded.contentType, decoded.buf, decoded.off, decoded.len);
+            return true;
+        }
+#endif
+
         /// <exception cref="IOException"/>
         internal bool ReadRecord()
         {
@@ -318,6 +358,50 @@ namespace Org.BouncyCastle.Tls
         }
 
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+        internal async Task WriteRecordAsync(short contentType, ReadOnlyMemory<byte> plaintext, CancellationToken cancellationToken)
+        {
+            // Never send anything until a valid ClientHello has been received
+            if (m_writeVersion == null)
+                return;
+
+            /*
+             * RFC 5246 6.2.1 The length should not exceed 2^14.
+             */
+            CheckLength(plaintext.Length, m_plaintextLimit, AlertDescription.internal_error);
+
+            /*
+             * RFC 5246 6.2.1 Implementations MUST NOT send zero-length fragments of Handshake, Alert,
+             * or ChangeCipherSpec content types.
+             */
+            if (plaintext.Length < 1 && contentType != ContentType.application_data)
+                throw new TlsFatalAlert(AlertDescription.internal_error);
+
+            long seqNo = m_writeSeqNo.NextValue(AlertDescription.internal_error);
+            ProtocolVersion recordVersion = m_writeVersion;
+
+            TlsEncodeResult encoded = m_writeCipher.EncodePlaintext(seqNo, contentType, recordVersion,
+                RecordFormat.FragmentOffset, plaintext.Span);
+
+            int ciphertextLength = encoded.len - RecordFormat.FragmentOffset;
+            TlsUtilities.CheckUint16(ciphertextLength);
+
+            TlsUtilities.WriteUint8(encoded.recordType, encoded.buf, encoded.off + RecordFormat.TypeOffset);
+            TlsUtilities.WriteVersion(recordVersion, encoded.buf, encoded.off + RecordFormat.VersionOffset);
+            TlsUtilities.WriteUint16(ciphertextLength, encoded.buf, encoded.off + RecordFormat.LengthOffset);
+
+            // TODO[tls-port] Can we support interrupted IO on .NET?
+            //try
+            //{
+            await m_output.WriteAsync(encoded.buf, encoded.off, encoded.len, cancellationToken);
+            //}
+            //catch (InterruptedIOException e)
+            //{
+            //    throw new TlsFatalAlert(AlertDescription.internal_error, e);
+            //}
+
+            await m_output.FlushAsync(cancellationToken);
+        }
+
         /// <exception cref="IOException"/>
         internal void WriteRecord(short contentType, ReadOnlySpan<byte> plaintext)
         {
@@ -483,6 +567,41 @@ namespace Org.BouncyCastle.Tls
                 this.m_pos = 0;
             }
 
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+            /// <exception cref="IOException"/>
+            internal async Task FillToAsync(Stream input, int length, CancellationToken cancellationToken)
+            {
+                while (m_pos < length)
+                {
+                    // TODO[tls-port] Can we support interrupted IO on .NET?
+                    //try
+                    //{
+                    int numRead = await input.ReadAsync(m_buf, m_pos, length - m_pos, cancellationToken);
+                    if (numRead < 1)
+                        break;
+
+                    m_pos += numRead;
+                    //}
+                    //catch (InterruptedIOException e)
+                    //{
+                    //    /*
+                    //     * Although modifying the bytesTransferred doesn't seem ideal, it's the simplest
+                    //     * way to make sure we don't break client code that depends on the exact type,
+                    //     * e.g. in Apache's httpcomponents-core-4.4.9, BHttpConnectionBase.isStale
+                    //     * depends on the exception type being SocketTimeoutException (or a subclass).
+                    //     *
+                    //     * We can set to 0 here because the only relevant callstack (via
+                    //     * TlsProtocol.readApplicationData) only ever processes one non-empty record (so
+                    //     * interruption after partial output cannot occur).
+                    //     */
+                    //    m_pos += e.bytesTransferred;
+                    //    e.bytesTransferred = 0;
+                    //    throw e;
+                    //}
+                }
+            }
+#endif
+
             /// <exception cref="IOException"/>
             internal void FillTo(Stream input, int length)
             {
@@ -516,6 +635,18 @@ namespace Org.BouncyCastle.Tls
                 }
             }
 
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+            /// <exception cref="IOException"/>
+            internal async Task ReadFragmentAsync(Stream input, int fragmentLength, CancellationToken cancellationToken)
+            {
+                int recordLength = RecordFormat.FragmentOffset + fragmentLength;
+                Resize(recordLength);
+                await FillToAsync(input, recordLength, cancellationToken);
+                if (m_pos < recordLength)
+                    throw new EndOfStreamException();
+            }
+#endif
+
             /// <exception cref="IOException"/>
             internal void ReadFragment(Stream input, int fragmentLength)
             {
@@ -525,6 +656,21 @@ namespace Org.BouncyCastle.Tls
                 if (m_pos < recordLength)
                     throw new EndOfStreamException();
             }
+
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+            /// <exception cref="IOException"/>
+            internal async Task<bool> ReadHeaderAsync(Stream input, CancellationToken cancellationToken)
+            {
+                await FillToAsync(input, RecordFormat.FragmentOffset, cancellationToken);
+                if (m_pos == 0)
+                    return false;
+
+                if (m_pos < RecordFormat.FragmentOffset)
+                    throw new EndOfStreamException();
+
+                return true;
+            }
+#endif
 
             /// <exception cref="IOException"/>
             internal bool ReadHeader(Stream input)
