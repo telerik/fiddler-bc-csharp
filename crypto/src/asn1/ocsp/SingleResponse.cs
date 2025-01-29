@@ -25,6 +25,13 @@ namespace Org.BouncyCastle.Asn1.Ocsp
 #pragma warning restore CS0618 // Type or member is obsolete
         }
 
+        public static SingleResponse GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit)
+        {
+#pragma warning disable CS0618 // Type or member is obsolete
+            return new SingleResponse(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
+#pragma warning restore CS0618 // Type or member is obsolete
+        }
+
         private readonly CertID m_certID;
         private readonly CertStatus m_certStatus;
         private readonly Asn1GeneralizedTime m_thisUpdate;
@@ -53,8 +60,8 @@ namespace Org.BouncyCastle.Asn1.Ocsp
             m_certID = CertID.GetInstance(seq[pos++]);
             m_certStatus = CertStatus.GetInstance(seq[pos++]);
             m_thisUpdate = Asn1GeneralizedTime.GetInstance(seq[pos++]);
-            m_nextUpdate = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 0, true, Asn1GeneralizedTime.GetInstance);
-            m_singleExtensions = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 1, true, X509Extensions.GetInstance);
+            m_nextUpdate = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 0, true, Asn1GeneralizedTime.GetTagged);
+            m_singleExtensions = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 1, true, X509Extensions.GetTagged);
 
             if (pos != count)
                 throw new ArgumentException("Unexpected elements in sequence", nameof(seq));

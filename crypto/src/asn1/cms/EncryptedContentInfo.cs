@@ -25,48 +25,45 @@ namespace Org.BouncyCastle.Asn1.Cms
 #pragma warning restore CS0618 // Type or member is obsolete
         }
 
-        private DerObjectIdentifier	contentType;
-        private AlgorithmIdentifier	contentEncryptionAlgorithm;
-        private Asn1OctetString		encryptedContent;
-
-		public EncryptedContentInfo(
-            DerObjectIdentifier	contentType,
-            AlgorithmIdentifier	contentEncryptionAlgorithm,
-            Asn1OctetString		encryptedContent)
+        public static EncryptedContentInfo GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit)
         {
-            this.contentType = contentType;
-            this.contentEncryptionAlgorithm = contentEncryptionAlgorithm;
-            this.encryptedContent = encryptedContent;
+#pragma warning disable CS0618 // Type or member is obsolete
+            return new EncryptedContentInfo(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
+#pragma warning restore CS0618 // Type or member is obsolete
+        }
+
+        private DerObjectIdentifier m_contentType;
+        private AlgorithmIdentifier m_contentEncryptionAlgorithm;
+        private Asn1OctetString m_encryptedContent;
+
+        public EncryptedContentInfo(DerObjectIdentifier contentType, AlgorithmIdentifier contentEncryptionAlgorithm,
+            Asn1OctetString encryptedContent)
+        {
+            m_contentType = contentType ?? throw new ArgumentNullException(nameof(contentType));
+            m_contentEncryptionAlgorithm = contentEncryptionAlgorithm ?? throw new ArgumentNullException(nameof(contentEncryptionAlgorithm));
+            m_encryptedContent = encryptedContent;
         }
 
         [Obsolete("Use 'GetInstance' instead")]
-        public EncryptedContentInfo(
-            Asn1Sequence seq)
+        public EncryptedContentInfo(Asn1Sequence seq)
         {
-            contentType = (DerObjectIdentifier) seq[0];
-            contentEncryptionAlgorithm = AlgorithmIdentifier.GetInstance(seq[1]);
+            int count = seq.Count, pos = 0;
+            if (count < 2 || count > 3)
+                throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
 
-			if (seq.Count > 2)
-            {
-                encryptedContent = Asn1OctetString.GetInstance(
-					(Asn1TaggedObject) seq[2], false);
-            }
+            m_contentType = DerObjectIdentifier.GetInstance(seq[pos++]);
+            m_contentEncryptionAlgorithm = AlgorithmIdentifier.GetInstance(seq[pos++]);
+            m_encryptedContent = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 0, false, Asn1OctetString.GetTagged);
+
+            if (pos != count)
+                throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
         }
 
-        public DerObjectIdentifier ContentType
-        {
-            get { return contentType; }
-        }
+        public DerObjectIdentifier ContentType => m_contentType;
 
-		public AlgorithmIdentifier ContentEncryptionAlgorithm
-        {
-			get { return contentEncryptionAlgorithm; }
-        }
+        public AlgorithmIdentifier ContentEncryptionAlgorithm => m_contentEncryptionAlgorithm;
 
-		public Asn1OctetString EncryptedContent
-        {
-			get { return encryptedContent; }
-        }
+        public Asn1OctetString EncryptedContent => m_encryptedContent;
 
 		/**
          * Produce an object suitable for an Asn1OutputStream.
@@ -80,12 +77,12 @@ namespace Org.BouncyCastle.Asn1.Cms
          */
         public override Asn1Object ToAsn1Object()
         {
-            Asn1EncodableVector v = new Asn1EncodableVector(
-				contentType, contentEncryptionAlgorithm);
+            Asn1EncodableVector v = new Asn1EncodableVector(3);
+            v.Add(m_contentType, m_contentEncryptionAlgorithm);
 
-			if (encryptedContent != null)
+			if (m_encryptedContent != null)
             {
-                v.Add(new BerTaggedObject(false, 0, encryptedContent));
+                v.Add(new BerTaggedObject(false, 0, m_encryptedContent));
             }
 
 			return new BerSequence(v);

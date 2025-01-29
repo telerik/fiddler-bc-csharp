@@ -29,10 +29,11 @@ namespace Org.BouncyCastle.Asn1.Esf
             return new OtherHashAlgAndValue(Asn1Sequence.GetInstance(obj));
         }
 
-        public static OtherHashAlgAndValue GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
-        {
-            return new OtherHashAlgAndValue(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
-        }
+        public static OtherHashAlgAndValue GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new OtherHashAlgAndValue(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
+
+        public static OtherHashAlgAndValue GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new OtherHashAlgAndValue(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
         private readonly AlgorithmIdentifier m_hashAlgorithm;
         private readonly Asn1OctetString m_hashValue;
@@ -49,13 +50,8 @@ namespace Org.BouncyCastle.Asn1.Esf
 
 		public OtherHashAlgAndValue(AlgorithmIdentifier	hashAlgorithm, byte[] hashValue)
 		{
-			if (hashAlgorithm == null)
-				throw new ArgumentNullException(nameof(hashAlgorithm));
-			if (hashValue == null)
-				throw new ArgumentNullException(nameof(hashValue));
-
-			m_hashAlgorithm = hashAlgorithm;
-			m_hashValue = new DerOctetString(hashValue);
+			m_hashAlgorithm = hashAlgorithm ?? throw new ArgumentNullException(nameof(hashAlgorithm));
+			m_hashValue = DerOctetString.FromContents(hashValue);
 		}
 
         public OtherHashAlgAndValue(AlgorithmIdentifier hashAlgorithm, Asn1OctetString hashValue)

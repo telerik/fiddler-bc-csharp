@@ -127,37 +127,37 @@ namespace Org.BouncyCastle.Asn1.X509
 		/**
          * Authority Info Access
          */
-		public static readonly DerObjectIdentifier AuthorityInfoAccess = new DerObjectIdentifier("1.3.6.1.5.5.7.1.1");
+		public static readonly DerObjectIdentifier AuthorityInfoAccess = X509ObjectIdentifiers.IdPE.Branch("1");
 
-		/**
-		 * Subject Info Access
-		 */
-		public static readonly DerObjectIdentifier SubjectInfoAccess = new DerObjectIdentifier("1.3.6.1.5.5.7.1.11");
-
-		/**
-		 * Logo Type
-		 */
-		public static readonly DerObjectIdentifier LogoType = new DerObjectIdentifier("1.3.6.1.5.5.7.1.12");
-
-		/**
+        /**
 		 * BiometricInfo
 		 */
-		public static readonly DerObjectIdentifier BiometricInfo = new DerObjectIdentifier("1.3.6.1.5.5.7.1.2");
+        public static readonly DerObjectIdentifier BiometricInfo = X509ObjectIdentifiers.IdPE.Branch("2");
 
-		/**
+        /**
 		 * QCStatements
 		 */
-		public static readonly DerObjectIdentifier QCStatements = new DerObjectIdentifier("1.3.6.1.5.5.7.1.3");
+        public static readonly DerObjectIdentifier QCStatements = X509ObjectIdentifiers.IdPE.Branch("3");
 
-		/**
+        /**
 		 * Audit identity extension in attribute certificates.
 		 */
-		public static readonly DerObjectIdentifier AuditIdentity = new DerObjectIdentifier("1.3.6.1.5.5.7.1.4");
+        public static readonly DerObjectIdentifier AuditIdentity = X509ObjectIdentifiers.IdPE.Branch("4");
 
-		/**
+        /**
+		 * Subject Info Access
+		 */
+        public static readonly DerObjectIdentifier SubjectInfoAccess = X509ObjectIdentifiers.IdPE.Branch("11");
+
+        /**
+		 * Logo Type
+		 */
+        public static readonly DerObjectIdentifier LogoType = X509ObjectIdentifiers.IdPE.Branch("12");
+
+        /**
 		 * NoRevAvail extension in attribute certificates.
 		 */
-		public static readonly DerObjectIdentifier NoRevAvail = new DerObjectIdentifier("2.5.29.56");
+        public static readonly DerObjectIdentifier NoRevAvail = new DerObjectIdentifier("2.5.29.56");
 
 		/**
 		 * TargetInformation extension in attribute certificates.
@@ -170,7 +170,7 @@ namespace Org.BouncyCastle.Asn1.X509
         public static readonly DerObjectIdentifier ExpiredCertsOnCrl = new DerObjectIdentifier("2.5.29.60");
 
         /**
-         * the subject’s alternative public key information
+         * the subjectï¿½s alternative public key information
          */
         public static readonly DerObjectIdentifier SubjectAltPublicKeyInfo = new DerObjectIdentifier("2.5.29.72");
 
@@ -184,6 +184,12 @@ namespace Org.BouncyCastle.Asn1.X509
          */
         public static readonly DerObjectIdentifier AltSignatureValue = new DerObjectIdentifier("2.5.29.74");
 
+        /**
+         * delta certificate extension - prototype value will change!
+         */
+        public static readonly DerObjectIdentifier DRAFT_DeltaCertificateDescriptor =
+            new DerObjectIdentifier("2.16.840.1.114027.80.6.1");
+
         private readonly Dictionary<DerObjectIdentifier, X509Extension> m_extensions =
             new Dictionary<DerObjectIdentifier, X509Extension>();
         private readonly List<DerObjectIdentifier> m_ordering;
@@ -196,11 +202,6 @@ namespace Org.BouncyCastle.Asn1.X509
 
         public static Asn1OctetString GetExtensionValue(X509Extensions extensions, DerObjectIdentifier oid) =>
             extensions?.GetExtensionValue(oid);
-
-		public static X509Extensions GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
-        {
-            return GetInstance(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
-        }
 
         public static X509Extensions GetInstance(object obj)
         {
@@ -220,6 +221,27 @@ namespace Org.BouncyCastle.Asn1.X509
             throw new ArgumentException("unknown object in factory: " + Platform.GetTypeName(obj), nameof(obj));
         }
 
+        public static X509Extensions GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new X509Extensions(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
+
+        public static X509Extensions GetOptional(Asn1Encodable element)
+        {
+            if (element == null)
+                throw new ArgumentNullException(nameof(element));
+
+            if (element is X509Extensions existing)
+                return existing;
+
+            Asn1Sequence asn1Sequence = Asn1Sequence.GetOptional(element);
+            if (asn1Sequence != null)
+                return new X509Extensions(asn1Sequence);
+
+            return null;
+        }
+
+        public static X509Extensions GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new X509Extensions(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
+
         /**
          * Constructor from Asn1Sequence.
          *
@@ -233,6 +255,8 @@ namespace Org.BouncyCastle.Asn1.X509
 
 			foreach (Asn1Encodable ae in seq)
 			{
+                // TODO Move this block to an X509Extension.GetInstance method
+
 				Asn1Sequence s = Asn1Sequence.GetInstance(ae);
 
 				if (s.Count < 2 || s.Count > 3)

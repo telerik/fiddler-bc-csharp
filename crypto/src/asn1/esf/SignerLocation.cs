@@ -28,10 +28,11 @@ namespace Org.BouncyCastle.Asn1.Esf
             return new SignerLocation(Asn1Sequence.GetInstance(obj));
         }
 
-        public static SignerLocation GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
-        {
-            return new SignerLocation(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
-        }
+        public static SignerLocation GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new SignerLocation(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
+
+        public static SignerLocation GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new SignerLocation(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
         private readonly DirectoryString m_countryName;
         private readonly DirectoryString m_localityName;
@@ -45,10 +46,10 @@ namespace Org.BouncyCastle.Asn1.Esf
 
             int pos = 0;
 
-            m_countryName = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 0, true, DirectoryString.GetInstance);
-            m_localityName = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 1, true, DirectoryString.GetInstance);
+            m_countryName = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 0, true, DirectoryString.GetTagged);
+            m_localityName = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 1, true, DirectoryString.GetTagged);
 
-            m_postalAddress = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 2, true, Asn1Sequence.GetInstance);
+            m_postalAddress = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 2, true, Asn1Sequence.GetTagged);
             if (m_postalAddress != null)
             {
                 if (m_postalAddress.Count > 6)

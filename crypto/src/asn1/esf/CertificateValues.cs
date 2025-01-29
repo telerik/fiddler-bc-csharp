@@ -23,10 +23,11 @@ namespace Org.BouncyCastle.Asn1.Esf
             return new CertificateValues(Asn1Sequence.GetInstance(obj));
 		}
 
-        public static CertificateValues GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
-        {
-            return new CertificateValues(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
-        }
+        public static CertificateValues GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new CertificateValues(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
+
+        public static CertificateValues GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new CertificateValues(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
         private readonly Asn1Sequence m_certificates;
 
@@ -38,9 +39,6 @@ namespace Org.BouncyCastle.Asn1.Esf
 
         public CertificateValues(params X509CertificateStructure[] certificates)
 		{
-			if (certificates == null)
-				throw new ArgumentNullException(nameof(certificates));
-
 			m_certificates = DerSequence.FromElements(certificates);
 		}
 

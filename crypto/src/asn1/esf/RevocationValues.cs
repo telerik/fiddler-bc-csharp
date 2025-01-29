@@ -28,10 +28,11 @@ namespace Org.BouncyCastle.Asn1.Esf
 			return new RevocationValues(Asn1Sequence.GetInstance(obj));
 		}
 
-        public static RevocationValues GetInstance(Asn1TaggedObject obj, bool explicitly)
-        {
-            return new RevocationValues(Asn1Sequence.GetInstance(obj, explicitly));
-        }
+        public static RevocationValues GetInstance(Asn1TaggedObject obj, bool explicitly) =>
+            new RevocationValues(Asn1Sequence.GetInstance(obj, explicitly));
+
+        public static RevocationValues GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new RevocationValues(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
         private readonly Asn1Sequence m_crlVals;
         private readonly Asn1Sequence m_ocspVals;
@@ -45,13 +46,13 @@ namespace Org.BouncyCastle.Asn1.Esf
 
 			int pos = 0;
 
-			m_crlVals = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 0, true, Asn1Sequence.GetInstance);
+			m_crlVals = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 0, true, Asn1Sequence.GetTagged);
             m_crlVals?.MapElements(CertificateList.GetInstance); // Validate
 
-            m_ocspVals = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 1, true, Asn1Sequence.GetInstance);
+            m_ocspVals = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 1, true, Asn1Sequence.GetTagged);
             m_ocspVals?.MapElements(BasicOcspResponse.GetInstance); // Validate
 
-            m_otherRevVals = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 2, true, OtherRevVals.GetInstance);
+            m_otherRevVals = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 2, true, OtherRevVals.GetTagged);
 
             if (pos != count)
                 throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
@@ -59,16 +60,8 @@ namespace Org.BouncyCastle.Asn1.Esf
 
         public RevocationValues(CertificateList[] crlVals, BasicOcspResponse[] ocspVals, OtherRevVals otherRevVals)
 		{
-			if (crlVals != null)
-			{
-				m_crlVals = DerSequence.FromElements(crlVals);
-			}
-
-			if (ocspVals != null)
-			{
-				m_ocspVals = DerSequence.FromElements(ocspVals);
-			}
-
+            m_crlVals = DerSequence.FromElementsOptional(crlVals);
+            m_ocspVals = DerSequence.FromElementsOptional(ocspVals);
 			m_otherRevVals = otherRevVals;
 		}
 

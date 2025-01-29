@@ -49,6 +49,8 @@
 
   <!--Package Validation-->
   <PropertyGroup>
+    <EnablePackageValidation>false</EnablePackageValidation>
+    <PackageValidationBaselineVersion>2.0.0</PackageValidationBaselineVersion>
 
 	<!-- In case we disable signing for local builds, ignore identity mismatch with baseline version. -->
     <NoWarn Condition="'$(SignAssembly)' != 'true'">$(NoWarn);CP0003</NoWarn>
@@ -88,9 +90,27 @@
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Nerdbank.GitVersioning" Version="3.6.146">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
   <Target Name="FixAssemblyAttributes" AfterTargets="GetBuildVersion">
     <PropertyGroup>
 		<!-- Here we can override/use any MSBuild properties set by Nerdbank.GitVersioning -->
     </PropertyGroup>
+  </Target>
+  <Target Name="SignAssemblies" AfterTargets="PostBuildEvent" Condition="'$(Configuration)'=='Publish'">
+    <Exec Command="call &quot;$(ProjectDir)..\..\signfile.bat&quot; &quot;$(TargetPath)&quot;" IgnoreStandardErrorWarningFormat="true" />
   </Target>
 </Project>

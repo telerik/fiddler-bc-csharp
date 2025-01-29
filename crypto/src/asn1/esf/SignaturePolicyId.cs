@@ -28,10 +28,11 @@ namespace Org.BouncyCastle.Asn1.Esf
 			return new SignaturePolicyId(Asn1Sequence.GetInstance(obj));
 		}
 
-        public static SignaturePolicyId GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
-        {
-            return new SignaturePolicyId(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
-        }
+        public static SignaturePolicyId GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new SignaturePolicyId(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
+
+        public static SignaturePolicyId GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new SignaturePolicyId(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
         private readonly DerObjectIdentifier m_sigPolicyIdentifier;
         private readonly OtherHashAlgAndValue m_sigPolicyHash;
@@ -62,11 +63,7 @@ namespace Org.BouncyCastle.Asn1.Esf
 		{
 			m_sigPolicyIdentifier = sigPolicyIdentifier ?? throw new ArgumentNullException(nameof(sigPolicyIdentifier));
             m_sigPolicyHash = sigPolicyHash ?? throw new ArgumentNullException(nameof(sigPolicyHash));
-
-            if (sigPolicyQualifiers != null)
-			{
-				m_sigPolicyQualifiers = DerSequence.FromElements(sigPolicyQualifiers);
-			}
+            m_sigPolicyQualifiers = DerSequence.FromElementsOptional(sigPolicyQualifiers);
 		}
 
 		public SignaturePolicyId(DerObjectIdentifier sigPolicyIdentifier, OtherHashAlgAndValue sigPolicyHash,

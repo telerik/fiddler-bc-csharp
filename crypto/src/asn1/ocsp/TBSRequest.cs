@@ -16,12 +16,13 @@ namespace Org.BouncyCastle.Asn1.Ocsp
             return new TbsRequest(Asn1Sequence.GetInstance(obj));
         }
 
-        public static TbsRequest GetInstance(Asn1TaggedObject obj, bool explicitly)
-        {
-            return new TbsRequest(Asn1Sequence.GetInstance(obj, explicitly));
-        }
+        public static TbsRequest GetInstance(Asn1TaggedObject obj, bool explicitly) =>
+            new TbsRequest(Asn1Sequence.GetInstance(obj, explicitly));
 
-        private static readonly DerInteger V1 = new DerInteger(0);
+        public static TbsRequest GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new TbsRequest(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
+
+        private static readonly DerInteger V1 = DerInteger.Zero;
 
         private readonly DerInteger m_version;
         private readonly bool m_versionPresent;
@@ -47,15 +48,15 @@ namespace Org.BouncyCastle.Asn1.Ocsp
             int pos = 0;
 
             {
-                DerInteger version = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 0, true, DerInteger.GetInstance);
+                DerInteger version = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 0, true, DerInteger.GetTagged);
 
                 m_version = version ?? V1;
                 m_versionPresent = version != null;
             }
 
-            m_requestorName = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 1, true, GeneralName.GetInstance);
+            m_requestorName = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 1, true, GeneralName.GetTagged);
 			m_requestList = Asn1Sequence.GetInstance(seq[pos++]);
-            m_requestExtensions = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 2, true, X509Extensions.GetInstance);
+            m_requestExtensions = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 2, true, X509Extensions.GetTagged);
 
             if (pos != count)
                 throw new ArgumentException("Unexpected elements in sequence", nameof(seq));

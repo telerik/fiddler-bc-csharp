@@ -21,10 +21,11 @@ namespace Org.BouncyCastle.Asn1.Esf
 			return new CompleteCertificateRefs(Asn1Sequence.GetInstance(obj));
 		}
 
-        public static CompleteCertificateRefs GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
-        {
-            return new CompleteCertificateRefs(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
-        }
+        public static CompleteCertificateRefs GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new CompleteCertificateRefs(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
+
+        public static CompleteCertificateRefs GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new CompleteCertificateRefs(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
         private readonly Asn1Sequence m_otherCertIDs;
 
@@ -36,9 +37,6 @@ namespace Org.BouncyCastle.Asn1.Esf
 
 		public CompleteCertificateRefs(params OtherCertID[] otherCertIDs)
 		{
-			if (otherCertIDs == null)
-				throw new ArgumentNullException(nameof(otherCertIDs));
-
 			m_otherCertIDs = DerSequence.FromElements(otherCertIDs);
 		}
 

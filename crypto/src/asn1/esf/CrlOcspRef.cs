@@ -24,10 +24,11 @@ namespace Org.BouncyCastle.Asn1.Esf
             return new CrlOcspRef(Asn1Sequence.GetInstance(obj));
         }
 
-        public static CrlOcspRef GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
-        {
-            return new CrlOcspRef(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
-        }
+        public static CrlOcspRef GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new CrlOcspRef(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
+
+        public static CrlOcspRef GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new CrlOcspRef(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
         private readonly CrlListID m_crlids;
         private readonly OcspListID m_ocspids;
@@ -41,9 +42,9 @@ namespace Org.BouncyCastle.Asn1.Esf
 
             int pos = 0;
 
-			m_crlids = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 0, true, CrlListID.GetInstance);
-            m_ocspids = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 1, true, OcspListID.GetInstance);
-            m_otherRev = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 2, true, OtherRevRefs.GetInstance);
+			m_crlids = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 0, true, CrlListID.GetTagged);
+            m_ocspids = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 1, true, OcspListID.GetTagged);
+            m_otherRev = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 2, true, OtherRevRefs.GetTagged);
 
             if (pos != count)
                 throw new ArgumentException("Unexpected elements in sequence", nameof(seq));

@@ -14,10 +14,11 @@ namespace Org.BouncyCastle.Asn1.Ocsp
             return new OcspResponse(Asn1Sequence.GetInstance(obj));
 		}
 
-        public static OcspResponse GetInstance(Asn1TaggedObject obj, bool explicitly)
-        {
-            return new OcspResponse(Asn1Sequence.GetInstance(obj, explicitly));
-        }
+        public static OcspResponse GetInstance(Asn1TaggedObject obj, bool explicitly) =>
+            new OcspResponse(Asn1Sequence.GetInstance(obj, explicitly));
+
+        public static OcspResponse GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new OcspResponse(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
         private readonly OcspResponseStatus m_responseStatus;
         private readonly ResponseBytes m_responseBytes;
@@ -37,7 +38,7 @@ namespace Org.BouncyCastle.Asn1.Ocsp
             int pos = 0;
 
             m_responseStatus = new OcspResponseStatus(DerEnumerated.GetInstance(seq[pos++]));
-            m_responseBytes = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 0, true, ResponseBytes.GetInstance);
+            m_responseBytes = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 0, true, ResponseBytes.GetTagged);
 
             if (pos != count)
                 throw new ArgumentException("Unexpected elements in sequence", nameof(seq));

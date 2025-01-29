@@ -25,10 +25,11 @@ namespace Org.BouncyCastle.Asn1.Esf
 			return new OtherSigningCertificate(Asn1Sequence.GetInstance(obj));
 		}
 
-        public static OtherSigningCertificate GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
-        {
-            return new OtherSigningCertificate(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
-        }
+        public static OtherSigningCertificate GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new OtherSigningCertificate(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
+
+        public static OtherSigningCertificate GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new OtherSigningCertificate(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
         private readonly Asn1Sequence m_certs;
         private readonly Asn1Sequence m_policies;
@@ -54,15 +55,8 @@ namespace Org.BouncyCastle.Asn1.Esf
 
 		public OtherSigningCertificate(OtherCertID[] certs, params PolicyInformation[] policies)
 		{
-			if (certs == null)
-                throw new ArgumentNullException(nameof(certs));
-
             m_certs = DerSequence.FromElements(certs);
-
-			if (policies != null)
-			{
-				m_policies = DerSequence.FromElements(policies);
-			}
+            m_policies = DerSequence.FromElementsOptional(policies);
 		}
 
 		public OtherSigningCertificate(IEnumerable<OtherCertID> certs)
