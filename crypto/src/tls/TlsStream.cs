@@ -88,6 +88,21 @@ namespace Org.BouncyCastle.Tls
         {
             return Streams.ReadAsync(this, buffer, cancellationToken);
         }
+
+        public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            return await m_handler.ReadApplicationDataAsync(buffer.AsMemory(offset, count), cancellationToken);
+        }
+
+        public override IAsyncResult BeginRead(byte[] buffer, int offset, int count, AsyncCallback callback, object state)
+        {
+            return this.ReadAsync(buffer, offset, count).ToBegin(callback, state);
+        }
+
+        public override int EndRead(IAsyncResult asyncResult)
+        {
+            return asyncResult.ToEnd<int>();
+        }
 #endif
 
         public override int ReadByte()
@@ -121,6 +136,21 @@ namespace Org.BouncyCastle.Tls
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
         {
             return Streams.WriteAsync(this, buffer, cancellationToken);
+        }
+
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            return m_handler.WriteApplicationDataAsync(buffer.AsMemory(offset, count), cancellationToken);
+        }
+
+        public override IAsyncResult BeginWrite(byte[] buffer, int offset, int count, AsyncCallback callback, object state)
+        {
+            return this.WriteAsync(buffer, offset, count).ToBegin(callback, state);
+        }
+
+        public override void EndWrite(IAsyncResult asyncResult)
+        {
+            asyncResult.ToEnd();
         }
 #endif
 
