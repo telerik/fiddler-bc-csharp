@@ -67,8 +67,8 @@ namespace Org.BouncyCastle.Tsp
 
         private PkiStatusInfo GetPkiStatusInfo()
         {
-            Asn1EncodableVector v = new Asn1EncodableVector(
-                new DerInteger((int)status));
+            Asn1EncodableVector v = new Asn1EncodableVector(3);
+            v.Add(DerInteger.ValueOf((int)status));
 
             if (statusStrings.Count > 0)
             {
@@ -119,9 +119,8 @@ namespace Org.BouncyCastle.Tsp
                 try
                 {
                     TimeStampToken token = tokenGenerator.Generate(request, serialNumber, genTime.Value);
-                    byte[] encoded = token.ToCmsSignedData().GetEncoded();
 
-                    tstTokenContentInfo = ContentInfo.GetInstance(Asn1Object.FromByteArray(encoded));
+                    tstTokenContentInfo = token.ToCmsSignedData().ContentInfo;
                 }
                 catch (IOException e)
                 {
@@ -173,10 +172,10 @@ namespace Org.BouncyCastle.Tsp
                 ContentInfo tstTokenContentInfo;
                 try
                 {
-                    TimeStampToken token = tokenGenerator.Generate(request, serialNumber, genTime.Value,additionalExtensions);
-                    byte[] encoded = token.ToCmsSignedData().GetEncoded();
+                    TimeStampToken token = tokenGenerator.Generate(request, serialNumber, genTime.Value,
+                        additionalExtensions);
 
-                    tstTokenContentInfo = ContentInfo.GetInstance(Asn1Object.FromByteArray(encoded));
+                    tstTokenContentInfo = token.ToCmsSignedData().ContentInfo;
                 }
                 catch (IOException e)
                 {
@@ -206,10 +205,8 @@ namespace Org.BouncyCastle.Tsp
                 throw new TspException("created badly formatted response!", e);
             }
         }
-       
 
-
-        class FailInfo
+        internal class FailInfo
             : DerBitString
         {
             internal FailInfo(int failInfoValue)

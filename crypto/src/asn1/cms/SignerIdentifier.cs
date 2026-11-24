@@ -1,70 +1,90 @@
 using System;
 
-using Org.BouncyCastle.Utilities;
+using Org.BouncyCastle.Asn1.X509;
 
 namespace Org.BouncyCastle.Asn1.Cms
 {
     public class SignerIdentifier
         : Asn1Encodable, IAsn1Choice
     {
-        public static SignerIdentifier GetInstance(object o)
-        {
-            if (o == null)
-                return null;
+        // TODO[api] Rename 'o' to 'obj'
+        public static SignerIdentifier GetInstance(object o) => Asn1Utilities.GetInstanceChoice(o, GetOptional);
 
-            if (o is SignerIdentifier signerIdentifier)
+        public static SignerIdentifier GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            Asn1Utilities.GetInstanceChoice(taggedObject, declaredExplicit, GetInstance);
+
+        public static SignerIdentifier GetOptional(Asn1Encodable element)
+        {
+            if (element == null)
+                throw new ArgumentNullException(nameof(element));
+
+            if (element is SignerIdentifier signerIdentifier)
                 return signerIdentifier;
 
-            if (o is IssuerAndSerialNumber issuerAndSerialNumber)
+            IssuerAndSerialNumber issuerAndSerialNumber = IssuerAndSerialNumber.GetOptional(element);
+            if (issuerAndSerialNumber != null)
                 return new SignerIdentifier(issuerAndSerialNumber);
 
-            if (o is Asn1OctetString octetString)
-                return new SignerIdentifier(octetString);
+            Asn1TaggedObject taggedObject = Asn1TaggedObject.GetOptional(element);
+            if (taggedObject != null)
+            {
+                if (taggedObject.HasContextTag(0))
+                    return new SignerIdentifier(SubjectKeyIdentifier.GetTagged(taggedObject, false));
+            }
 
-            if (o is Asn1Object asn1Object)
+#pragma warning disable CS0618 // Type or member is obsolete
+            // TODO[api] Remove this handler
+            if (element is Asn1OctetString asn1OctetString)
+                return new SignerIdentifier(asn1OctetString);
+            // TODO[api] Remove this handler
+            if (element is Asn1Object asn1Object)
                 return new SignerIdentifier(asn1Object);
+#pragma warning restore CS0618 // Type or member is obsolete
 
-            throw new ArgumentException("Illegal object in SignerIdentifier: " + Platform.GetTypeName(o), nameof(o));
+            return null;
         }
 
-        public static SignerIdentifier GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
+        public static SignerIdentifier GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            Asn1Utilities.GetTaggedChoice(taggedObject, declaredExplicit, GetInstance);
+
+        private readonly Asn1Encodable m_id;
+
+        public SignerIdentifier(IssuerAndSerialNumber id)
         {
-            return Asn1Utilities.GetInstanceFromChoice(taggedObject, declaredExplicit, GetInstance);
+            m_id = id ?? throw new ArgumentNullException(nameof(id));
         }
 
-        private Asn1Encodable id;
-
-		public SignerIdentifier(
-            IssuerAndSerialNumber id)
+        public SignerIdentifier(SubjectKeyIdentifier id)
         {
-            this.id = id;
+            m_id = new DerTaggedObject(false, 0, id);
         }
 
-		public SignerIdentifier(
-            Asn1OctetString id)
+        [Obsolete("Use constructor taking a 'SubjectKeyIdentifier' instead")]
+        public SignerIdentifier(Asn1OctetString id)
         {
-            this.id = new DerTaggedObject(false, 0, id);
+            m_id = new DerTaggedObject(false, 0, id);
         }
 
-		public SignerIdentifier(
-            Asn1Object id)
+        [Obsolete("Will be removed")]
+        public SignerIdentifier(Asn1Object id)
         {
-            this.id = id;
+            m_id = id ?? throw new ArgumentNullException(nameof(id));
         }
 
-		public bool IsTagged
-		{
-			get { return (id is Asn1TaggedObject); }
-		}
+        public bool IsTagged => m_id is Asn1TaggedObject;
 
         public Asn1Encodable ID
         {
             get
             {
-                if (id is Asn1TaggedObject taggedObject)
-                    return Asn1OctetString.GetInstance(taggedObject, false);
+                // TODO[api] Return this as a SubjectKeyIdentifier
+                if (Asn1Utilities.TryGetOptionalContextTagged(m_id, 0, false, out var subjectKeyIdentifier,
+                    Asn1OctetString.GetTagged))
+                {
+                    return subjectKeyIdentifier;
+                }
 
-                return id;
+                return IssuerAndSerialNumber.GetInstance(m_id);
             }
         }
 
@@ -79,9 +99,6 @@ namespace Org.BouncyCastle.Asn1.Cms
          * SubjectKeyIdentifier ::= OCTET STRING
          * </pre>
          */
-        public override Asn1Object ToAsn1Object()
-        {
-            return id.ToAsn1Object();
-        }
+        public override Asn1Object ToAsn1Object() => m_id.ToAsn1Object();
     }
 }

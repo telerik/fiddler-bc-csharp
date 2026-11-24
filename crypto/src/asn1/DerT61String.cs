@@ -23,7 +23,7 @@ namespace Org.BouncyCastle.Asn1
             }
         }
 
-		/**
+        /**
          * return a T61 string from the passed in object.
          *
          * @exception ArgumentException if the object cannot be converted.
@@ -38,8 +38,7 @@ namespace Org.BouncyCastle.Asn1
 
             if (obj is IAsn1Convertible asn1Convertible)
             {
-                Asn1Object asn1Object = asn1Convertible.ToAsn1Object();
-                if (asn1Object is DerT61String converted)
+                if (!(obj is Asn1Object) && asn1Convertible.ToAsn1Object() is DerT61String converted)
                     return converted;
             }
             else if (obj is byte[] bytes)
@@ -50,11 +49,11 @@ namespace Org.BouncyCastle.Asn1
                 }
                 catch (IOException e)
                 {
-                    throw new ArgumentException("failed to construct T61 string from byte[]: " + e.Message);
+                    throw new ArgumentException("failed to construct T61 string from byte[]", nameof(obj), e);
                 }
             }
 
-            throw new ArgumentException("illegal object in GetInstance: " + Platform.GetTypeName(obj));
+            throw new ArgumentException("illegal object in GetInstance: " + Platform.GetTypeName(obj), nameof(obj));
         }
 
         /**
@@ -66,15 +65,31 @@ namespace Org.BouncyCastle.Asn1
          */
         public static DerT61String GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
         {
-            return (DerT61String)Meta.Instance.GetContextInstance(taggedObject, declaredExplicit);
+            return (DerT61String)Meta.Instance.GetContextTagged(taggedObject, declaredExplicit);
+        }
+
+        public static DerT61String GetOptional(Asn1Encodable element)
+        {
+            if (element == null)
+                throw new ArgumentNullException(nameof(element));
+
+            if (element is DerT61String existing)
+                return existing;
+
+            return null;
+        }
+
+        public static DerT61String GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit)
+        {
+            return (DerT61String)Meta.Instance.GetTagged(taggedObject, declaredExplicit);
         }
 
         private readonly byte[] m_contents;
 
         public DerT61String(string str)
         {
-			if (str == null)
-				throw new ArgumentNullException("str");
+            if (str == null)
+                throw new ArgumentNullException("str");
 
             m_contents = Strings.ToByteArray(str);
         }
@@ -87,7 +102,7 @@ namespace Org.BouncyCastle.Asn1
         internal DerT61String(byte[] contents, bool clone)
         {
             if (null == contents)
-                throw new ArgumentNullException("contents");
+                throw new ArgumentNullException(nameof(contents));
 
             m_contents = clone ? Arrays.Clone(contents) : contents;
         }

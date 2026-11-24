@@ -1,8 +1,14 @@
 namespace Org.BouncyCastle.Bcpg.Sig
 {
-    /**
-    * packet giving whether or not the signature is signed using the primary user ID for the key.
-    */
+    /// <summary>Signature Subpacket marking a User ID as primary.</summary>
+    /// <remarks>
+    /// <see href="https://datatracker.ietf.org/doc/html/rfc4880#section-5.2.3.19">
+    /// RFC4880 - Primary User ID
+    /// </see>
+    /// <see href="https://www.rfc-editor.org/rfc/rfc9580.html#name-primary-user-id">
+    /// RFC9580 - Primary User ID
+    /// </see>
+    /// </remarks>
     public class PrimaryUserId
         : SignatureSubpacket
     {
@@ -12,10 +18,11 @@ namespace Org.BouncyCastle.Bcpg.Sig
         }
 
         public PrimaryUserId(bool critical, bool isPrimaryUserId)
-            : base(SignatureSubpacketTag.PrimaryUserId, critical, false, Utilities.BooleanToBytes(isPrimaryUserId))
+            : base(SignatureSubpacketTag.PrimaryUserId, critical, isLongLength: false,
+                Utilities.BooleanToBytes(isPrimaryUserId))
         {
         }
 
-        public bool IsPrimaryUserId() => Utilities.BooleanFromBytes(data);
+        public bool IsPrimaryUserId() => Utilities.BooleanFromBytes(Data);
     }
 }

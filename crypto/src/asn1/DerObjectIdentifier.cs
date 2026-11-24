@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -19,7 +20,7 @@ namespace Org.BouncyCastle.Asn1
 
             internal override Asn1Object FromImplicitPrimitive(DerOctetString octetString)
             {
-                return CreatePrimitive(octetString.GetOctets(), false);
+                return CreatePrimitive(octetString.GetOctets(), clone: false);
             }
         }
 
@@ -33,19 +34,9 @@ namespace Org.BouncyCastle.Asn1
         private const int MaxContentsLength = 4096;
         private const int MaxIdentifierLength = MaxContentsLength * 4 + 1;
 
-        public static DerObjectIdentifier FromContents(byte[] contents)
-        {
-            if (contents == null)
-                throw new ArgumentNullException(nameof(contents));
+        public static DerObjectIdentifier FromContents(byte[] contents) =>
+            CreatePrimitive(contents ?? throw new ArgumentNullException(nameof(contents)), clone: true);
 
-            return CreatePrimitive(contents, true);
-        }
-
-        /**
-         * return an OID from the passed in object
-         *
-         * @exception ArgumentException if the object cannot be converted.
-         */
         public static DerObjectIdentifier GetInstance(object obj)
         {
             if (obj == null)
@@ -56,8 +47,7 @@ namespace Org.BouncyCastle.Asn1
 
             if (obj is IAsn1Convertible asn1Convertible)
             {
-                Asn1Object asn1Object = asn1Convertible.ToAsn1Object();
-                if (asn1Object is DerObjectIdentifier converted)
+                if (!(obj is Asn1Object) && asn1Convertible.ToAsn1Object() is DerObjectIdentifier converted)
                     return converted;
             }
             else if (obj is byte[] bytes)
@@ -68,11 +58,11 @@ namespace Org.BouncyCastle.Asn1
                 }
                 catch (IOException e)
                 {
-                    throw new ArgumentException("failed to construct object identifier from byte[]: " + e.Message);
+                    throw new ArgumentException("failed to construct object identifier from byte[]", nameof(obj), e);
                 }
             }
 
-            throw new ArgumentException("illegal object in GetInstance: " + Platform.GetTypeName(obj), "obj");
+            throw new ArgumentException("illegal object in GetInstance: " + Platform.GetTypeName(obj), nameof(obj));
         }
 
         public static DerObjectIdentifier GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
@@ -89,7 +79,23 @@ namespace Org.BouncyCastle.Asn1
                     return FromContents(Asn1OctetString.GetInstance(baseObject).GetOctets());
             }
 
-            return (DerObjectIdentifier)Meta.Instance.GetContextInstance(taggedObject, declaredExplicit);
+            return (DerObjectIdentifier)Meta.Instance.GetContextTagged(taggedObject, declaredExplicit);
+        }
+
+        public static DerObjectIdentifier GetOptional(Asn1Encodable element)
+        {
+            if (element == null)
+                throw new ArgumentNullException(nameof(element));
+
+            if (element is DerObjectIdentifier existing)
+                return existing;
+
+            return null;
+        }
+
+        public static DerObjectIdentifier GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit)
+        {
+            return (DerObjectIdentifier)Meta.Instance.GetTagged(taggedObject, declaredExplicit);
         }
 
         public static bool TryFromID(string identifier, out DerObjectIdentifier oid)
@@ -138,12 +144,31 @@ namespace Org.BouncyCastle.Asn1
         {
             Asn1RelativeOid.CheckIdentifier(branchID);
 
-            byte[] branchContents = Asn1RelativeOid.ParseIdentifier(branchID);
-            CheckContentsLength(m_contents.Length + branchContents.Length);
+            byte[] contents;
+            if (branchID.Length <= 2)
+            {
+                CheckContentsLength(m_contents.Length + 1);
+                int subID = branchID[0] - '0';
+                if (branchID.Length == 2)
+                {
+                    subID *= 10;
+                    subID += branchID[1] - '0';
+                }
 
-            return new DerObjectIdentifier(
-                contents: Arrays.Concatenate(m_contents, branchContents),
-                identifier: GetID() + "." + branchID);
+                contents = Arrays.Append(m_contents, (byte)subID);
+            }
+            else
+            {
+                byte[] branchContents = Asn1RelativeOid.ParseIdentifier(branchID);
+                CheckContentsLength(m_contents.Length + branchContents.Length);
+
+                contents = Arrays.Concatenate(m_contents, branchContents);
+            }
+
+            string rootID = GetID();
+            string identifier = string.Concat(rootID, ".", branchID);
+
+            return new DerObjectIdentifier(contents, identifier);
         }
 
         public string GetID()
@@ -155,11 +180,9 @@ namespace Org.BouncyCastle.Asn1
         //[Obsolete("Use 'GetID' instead")]
         public string Id => GetID();
 
-        /**
-         * Return  true if this oid is an extension of the passed in branch, stem.
-         * @param stem the arc or branch that is a possible parent.
-         * @return  true if the branch is on the passed in stem, false otherwise.
-         */
+        /// <summary>Return  true if this oid is an extension of the passed in branch, stem.</summary>
+        /// <param name="stem">The arc or branch that is a possible parent.</param>
+        /// <returns>true if the branch is on the passed in stem, false otherwise.</returns>
         public virtual bool On(DerObjectIdentifier stem)
         {
             byte[] contents = m_contents, stemContents = stem.m_contents;
@@ -202,10 +225,11 @@ namespace Org.BouncyCastle.Asn1
             return new PrimitiveDerEncoding(tagClass, tagNo, m_contents);
         }
 
-        internal static void CheckContentsLength(int contentsLength)
+        private static int CheckContentsLength(int contentsLength)
         {
             if (contentsLength > MaxContentsLength)
                 throw new ArgumentException("exceeded OID contents length limit");
+            return contentsLength;
         }
 
         internal static void CheckIdentifier(string identifier)
@@ -218,29 +242,52 @@ namespace Org.BouncyCastle.Asn1
                 throw new FormatException("string " + identifier + " not a valid OID");
         }
 
-        internal static DerObjectIdentifier CreatePrimitive(byte[] contents, bool clone)
-        {
-            CheckContentsLength(contents.Length);
+        private static bool ContentsEquals(byte[] a, byte[] b, int bLen) => Arrays.AreEqual(a, 0, a.Length, b, 0, bLen);
 
-            uint index = (uint)Arrays.GetHashCode(contents);
+        internal static DerObjectIdentifier CreatePrimitive(DefiniteLengthInputStream defIn, byte[] tmp)
+        {
+            int contentsLength = CheckContentsLength(defIn.Remaining);
+
+            bool useTmp = contentsLength <= tmp.Length;
+            if (useTmp)
+            {
+                defIn.ReadAllIntoByteArray(tmp);
+            }
+            else
+            {
+                tmp = defIn.ToArray();
+            }
+
+            return CreatePrimitive(contents: tmp, contentsLength, clone: useTmp);
+        }
+
+        private static DerObjectIdentifier CreatePrimitive(byte[] contents, bool clone) =>
+            CreatePrimitive(contents, CheckContentsLength(contents.Length), clone);
+
+        private static DerObjectIdentifier CreatePrimitive(byte[] contents, int contentsLength, bool clone)
+        {
+            Debug.Assert(clone || contents.Length == contentsLength);
+
+            uint index = (uint)Arrays.GetHashCode(contents, 0, contentsLength);
 
             index ^= index >> 20;
             index ^= index >> 10;
             index &= 1023;
 
             var originalEntry = Volatile.Read(ref Cache[index]);
-            if (originalEntry != null && Arrays.AreEqual(contents, originalEntry.m_contents))
+            if (originalEntry != null && ContentsEquals(originalEntry.m_contents, contents, contentsLength))
                 return originalEntry;
 
-            if (!Asn1RelativeOid.IsValidContents(contents))
+            if (!Asn1RelativeOid.IsValidContents(contents, contentsLength))
                 throw new ArgumentException("invalid OID contents", nameof(contents));
 
-            var newEntry = new DerObjectIdentifier(clone ? Arrays.Clone(contents) : contents, identifier: null);
+            var newContents = clone ? Arrays.CopySegment(contents, 0, contentsLength) : contents;
+            var newEntry = new DerObjectIdentifier(newContents, identifier: null);
 
             var exchangedEntry = Interlocked.CompareExchange(ref Cache[index], newEntry, originalEntry);
             if (exchangedEntry != originalEntry)
             {
-                if (exchangedEntry != null && Arrays.AreEqual(contents, exchangedEntry.m_contents))
+                if (exchangedEntry != null && ContentsEquals(exchangedEntry.m_contents, contents, contentsLength))
                     return exchangedEntry;
             }
 
@@ -346,38 +393,84 @@ namespace Org.BouncyCastle.Asn1
             return objId.ToString();
         }
 
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
         private static byte[] ParseIdentifier(string identifier)
         {
-            MemoryStream bOut = new MemoryStream();
-            OidTokenizer tok = new OidTokenizer(identifier);
+            int contentsLimit = identifier.Length / 2;
+            Span<byte> buf = contentsLimit <= 1024
+                ? stackalloc byte[contentsLimit]
+                : new byte[contentsLimit];
 
-            string token = tok.NextToken();
-            int first = int.Parse(token) * 40;
+            uint extra = (uint)(identifier[0] - '0') * 40U;
 
-            token = tok.NextToken();
-            if (token.Length <= 18)
+            int i = 2, j = 2, off = 0;
+            while (++j < identifier.Length)
             {
-                Asn1RelativeOid.WriteField(bOut, first + long.Parse(token));
+                if (identifier[j] == '.')
+                {
+                    WriteField(buf, ref off, identifier, i, j, extra);
+                    extra = 0U;
+                    i = j + 1;
+                    j = i;
+                }
+            }
+            WriteField(buf, ref off, identifier, i, j, extra);
+
+            return buf[..off].ToArray();
+        }
+
+        private static void WriteField(Span<byte> buf, ref int off, string identifier, int from, int to, uint extra)
+        {
+            int length = to - from;
+            if (length <= 19)
+            {
+                var fieldValue = ulong.Parse(identifier.AsSpan(from, length)) + extra;
+                Asn1RelativeOid.WriteField(buf, ref off, fieldValue);
             }
             else
             {
-                Asn1RelativeOid.WriteField(bOut, new BigInteger(token).Add(BigInteger.ValueOf(first)));
+                var fieldValue = new BigInteger(identifier.Substring(from, length)).Add(BigInteger.ValueOf(extra));
+                Asn1RelativeOid.WriteField(buf, ref off, fieldValue);
             }
-
-            while (tok.HasMoreTokens)
-            {
-                token = tok.NextToken();
-                if (token.Length <= 18)
-                {
-                    Asn1RelativeOid.WriteField(bOut, long.Parse(token));
-                }
-                else
-                {
-                    Asn1RelativeOid.WriteField(bOut, new BigInteger(token));
-                }
-            }
-
-            return bOut.ToArray();
         }
+#else
+        private static byte[] ParseIdentifier(string identifier)
+        {
+            int contentsLimit = identifier.Length / 2;
+            MemoryStream buf = new MemoryStream(capacity: contentsLimit);
+
+            uint extra = (uint)(identifier[0] - '0') * 40U;
+
+            int i = 2, j = 2;
+            while (++j < identifier.Length)
+            {
+                if (identifier[j] == '.')
+                {
+                    WriteField(buf, identifier, i, j, extra);
+                    extra = 0U;
+                    i = j + 1;
+                    j = i;
+                }
+            }
+            WriteField(buf, identifier, i, j, extra);
+
+            return buf.ToArray();
+        }
+
+        private static void WriteField(MemoryStream buf, string identifier, int from, int to, uint extra)
+        {
+            string token = identifier.Substring(from, to - from);
+            if (token.Length <= 19)
+            {
+                var fieldValue = ulong.Parse(token) + extra;
+                Asn1RelativeOid.WriteField(buf, fieldValue);
+            }
+            else
+            {
+                var fieldValue = new BigInteger(token).Add(BigInteger.ValueOf(extra));
+                Asn1RelativeOid.WriteField(buf, fieldValue);
+            }
+        }
+#endif
     }
 }

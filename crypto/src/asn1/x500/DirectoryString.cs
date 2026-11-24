@@ -1,69 +1,67 @@
 using System;
 
-using Org.BouncyCastle.Utilities;
-
 namespace Org.BouncyCastle.Asn1.X500
 {
-	public class DirectoryString
-		: Asn1Encodable, IAsn1Choice, IAsn1String
-	{
-		private readonly DerStringBase str;
+    public class DirectoryString
+        : Asn1Encodable, IAsn1Choice, IAsn1String
+    {
+        public static DirectoryString GetInstance(object obj) => Asn1Utilities.GetInstanceChoice(obj, GetOptional);
 
-		public static DirectoryString GetInstance(object obj)
-		{
-			if (obj == null || obj is DirectoryString)
-				return (DirectoryString) obj;
+        public static DirectoryString GetInstance(Asn1TaggedObject obj, bool isExplicit) =>
+            Asn1Utilities.GetInstanceChoice(obj, isExplicit, GetInstance);
 
-            if (obj is DerStringBase)
-			{
-				if (obj is DerT61String
-					|| obj is DerPrintableString
-					|| obj is DerUniversalString
-					|| obj is DerUtf8String
-					|| obj is DerBmpString)
-				{
-					return new DirectoryString((DerStringBase) obj);
-				}
-			}
-
-            throw new ArgumentException("unknown object in factory: " + Platform.GetTypeName(obj), "obj");
-		}
-
-        public static DirectoryString GetInstance(Asn1TaggedObject obj, bool isExplicit)
+        public static DirectoryString GetOptional(Asn1Encodable element)
         {
-            return Asn1Utilities.GetInstanceFromChoice(obj, isExplicit, GetInstance);
+            if (element == null)
+                throw new ArgumentNullException(nameof(element));
+
+            if (element is DirectoryString directoryString)
+                return directoryString;
+
+            var innerObject = GetOptionalInnerObject(element);
+            if (innerObject != null)
+                return new DirectoryString(innerObject);
+
+            return null;
         }
 
-		private DirectoryString(
-			DerStringBase str)
-		{
-			this.str = str;
-		}
+        public static DirectoryString GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            Asn1Utilities.GetTaggedChoice(taggedObject, declaredExplicit, GetInstance);
 
-		public DirectoryString(
-			string str)
-		{
-			this.str = new DerUtf8String(str);
-		}
+        private static DerStringBase GetOptionalInnerObject(Asn1Encodable element)
+        {
+            return DerT61String.GetOptional(element)
+                ?? DerPrintableString.GetOptional(element)
+                ?? DerUniversalString.GetOptional(element)
+                ?? DerUtf8String.GetOptional(element)
+                ?? DerBmpString.GetOptional(element)
+                ?? (DerStringBase)null;
+        }
 
-		public string GetString()
-		{
-			return str.GetString();
-		}
+        private readonly DerStringBase m_str;
 
-		/**
-		 * <pre>
-		 *  DirectoryString ::= CHOICE {
-		 *    teletexString               TeletexString (SIZE (1..MAX)),
-		 *    printableString             PrintableString (SIZE (1..MAX)),
-		 *    universalString             UniversalString (SIZE (1..MAX)),
-		 *    utf8String                  UTF8String (SIZE (1..MAX)),
-		 *    bmpString                   BMPString (SIZE (1..MAX))  }
-		 * </pre>
-		 */
-		public override Asn1Object ToAsn1Object()
-		{
-			return str.ToAsn1Object();
-		}
-	}
+        private DirectoryString(DerStringBase str)
+        {
+            m_str = str;
+        }
+
+        public DirectoryString(string str)
+        {
+            m_str = new DerUtf8String(str);
+        }
+
+        public string GetString() => m_str.GetString();
+
+        /**
+         * <pre>
+         *  DirectoryString ::= CHOICE {
+         *    teletexString               TeletexString (SIZE (1..MAX)),
+         *    printableString             PrintableString (SIZE (1..MAX)),
+         *    universalString             UniversalString (SIZE (1..MAX)),
+         *    utf8String                  UTF8String (SIZE (1..MAX)),
+         *    bmpString                   BMPString (SIZE (1..MAX))  }
+         * </pre>
+         */
+        public override Asn1Object ToAsn1Object() => m_str.ToAsn1Object();
+    }
 }

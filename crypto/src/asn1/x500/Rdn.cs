@@ -18,6 +18,9 @@ namespace Org.BouncyCastle.Asn1.X500
         public static Rdn GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
             new Rdn(Asn1Set.GetInstance(taggedObject, declaredExplicit));
 
+        public static Rdn GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new Rdn(Asn1Set.GetTagged(taggedObject, declaredExplicit));
+
         private readonly Asn1Set m_values;
 
         private Rdn(Asn1Set values)
@@ -66,6 +69,29 @@ namespace Org.BouncyCastle.Asn1.X500
 
         public virtual AttributeTypeAndValue[] GetTypesAndValues() =>
             m_values.MapElements(AttributeTypeAndValue.GetInstance);
+
+        internal int CollectAttributeTypes(DerObjectIdentifier[] oids, int oidsOff)
+        {
+            int count = m_values.Count;
+            for (int i = 0; i < count; ++i)
+            {
+                AttributeTypeAndValue attr = AttributeTypeAndValue.GetInstance(m_values[i]);
+                oids[oidsOff + i] = attr.Type;
+            }
+            return m_values.Count;
+        }
+
+        internal bool ContainsAttributeType(DerObjectIdentifier attributeType)
+        {
+            int count = m_values.Count;
+            for (int i = 0; i < count; ++i)
+            {
+                AttributeTypeAndValue attr = AttributeTypeAndValue.GetInstance(m_values[i]);
+                if (attr.Type.Equals(attributeType))
+                    return true;
+            }
+            return false;
+        }
 
         /**
          * <pre>

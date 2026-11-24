@@ -14,15 +14,34 @@ namespace Org.BouncyCastle.Asn1.Cmp
             return new PkiFreeText(Asn1Sequence.GetInstance(obj));
 		}
 
-        public static PkiFreeText GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
+        public static PkiFreeText GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new PkiFreeText(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
+
+        public static PkiFreeText GetOptional(Asn1Encodable element)
         {
-            return new PkiFreeText(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
+            if (element == null)
+                throw new ArgumentNullException(nameof(element));
+
+            if (element is PkiFreeText pkiFreeText)
+                return pkiFreeText;
+
+            Asn1Sequence asn1Sequence = Asn1Sequence.GetOptional(element);
+            if (asn1Sequence != null)
+                return new PkiFreeText(asn1Sequence);
+
+            return null;
         }
+
+        public static PkiFreeText GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new PkiFreeText(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
         private readonly Asn1Sequence m_strings;
 
         internal PkiFreeText(Asn1Sequence seq)
 		{
+			if (seq == null)
+				throw new ArgumentNullException(nameof(seq));
+
 			foreach (var element in seq)
 			{
 				if (!(element is DerUtf8String))
@@ -47,15 +66,10 @@ namespace Org.BouncyCastle.Asn1.Cmp
 			m_strings = new DerSequence(strs);
 		}
 
-		public PkiFreeText(string[] strs)
-		{
-			Asn1EncodableVector v = new Asn1EncodableVector(strs.Length);
-			for (int i = 0; i < strs.Length; i++)
-			{
-				v.Add(new DerUtf8String(strs[i]));
-			}
-			m_strings = new DerSequence(v);
-		}
+        public PkiFreeText(string[] strs)
+        {
+            m_strings = DerSequence.Map(strs, str => new DerUtf8String(str));
+        }
 
 		public virtual int Count => m_strings.Count;
 

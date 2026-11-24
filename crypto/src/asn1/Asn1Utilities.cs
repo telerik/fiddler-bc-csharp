@@ -8,27 +8,27 @@ namespace Org.BouncyCastle.Asn1
     // TODO[api] Make static
     public abstract class Asn1Utilities
     {
-        internal static Asn1TaggedObject CheckContextTag(Asn1TaggedObject taggedObject, int tagNo)
+        public static Asn1TaggedObject CheckContextTag(Asn1TaggedObject taggedObject, int tagNo)
         {
             return CheckTag(taggedObject, Asn1Tags.ContextSpecific, tagNo);
         }
 
-        internal static Asn1TaggedObjectParser CheckContextTag(Asn1TaggedObjectParser taggedObjectParser, int tagNo)
+        public static Asn1TaggedObjectParser CheckContextTag(Asn1TaggedObjectParser taggedObjectParser, int tagNo)
         {
             return CheckTag(taggedObjectParser, Asn1Tags.ContextSpecific, tagNo);
         }
 
-        internal static Asn1TaggedObject CheckContextTagClass(Asn1TaggedObject taggedObject)
+        public static Asn1TaggedObject CheckContextTagClass(Asn1TaggedObject taggedObject)
         {
             return CheckTagClass(taggedObject, Asn1Tags.ContextSpecific);
         }
 
-        internal static Asn1TaggedObjectParser CheckContextTagClass(Asn1TaggedObjectParser taggedObjectParser)
+        public static Asn1TaggedObjectParser CheckContextTagClass(Asn1TaggedObjectParser taggedObjectParser)
         {
             return CheckTagClass(taggedObjectParser, Asn1Tags.ContextSpecific);
         }
 
-        internal static Asn1TaggedObject CheckTag(Asn1TaggedObject taggedObject, int tagClass, int tagNo)
+        public static Asn1TaggedObject CheckTag(Asn1TaggedObject taggedObject, int tagClass, int tagNo)
         {
             if (!taggedObject.HasTag(tagClass, tagNo))
             {
@@ -39,7 +39,7 @@ namespace Org.BouncyCastle.Asn1
             return taggedObject;
         }
 
-        internal static Asn1TaggedObjectParser CheckTag(Asn1TaggedObjectParser taggedObjectParser, int tagClass,
+        public static Asn1TaggedObjectParser CheckTag(Asn1TaggedObjectParser taggedObjectParser, int tagClass,
             int tagNo)
         {
             if (!taggedObjectParser.HasTag(tagClass, tagNo))
@@ -51,7 +51,7 @@ namespace Org.BouncyCastle.Asn1
             return taggedObjectParser;
         }
 
-        internal static Asn1TaggedObject CheckTagClass(Asn1TaggedObject taggedObject, int tagClass)
+        public static Asn1TaggedObject CheckTagClass(Asn1TaggedObject taggedObject, int tagClass)
         {
             if (!taggedObject.HasTagClass(tagClass))
             {
@@ -62,7 +62,7 @@ namespace Org.BouncyCastle.Asn1
             return taggedObject;
         }
 
-        internal static Asn1TaggedObjectParser CheckTagClass(Asn1TaggedObjectParser taggedObjectParser, int tagClass)
+        public static Asn1TaggedObjectParser CheckTagClass(Asn1TaggedObjectParser taggedObjectParser, int tagClass)
         {
             if (taggedObjectParser.TagClass != tagClass)
             {
@@ -73,8 +73,55 @@ namespace Org.BouncyCastle.Asn1
             return taggedObjectParser;
         }
 
-        internal static TChoice GetInstanceFromChoice<TChoice>(Asn1TaggedObject taggedObject, bool declaredExplicit,
-            Func<object, TChoice> constructor)
+        public static TChoice GetInstanceChoice<TChoice>(object obj, Func<Asn1Encodable, TChoice> optionalConstructor)
+            where TChoice : Asn1Encodable, IAsn1Choice
+        {
+            if (obj == null)
+                return null;
+
+            if (obj is byte[] bytes)
+            {
+                try
+                {
+                    obj = Asn1Object.FromByteArray(bytes);
+                }
+                catch (IOException e)
+                {
+                    var choiceName = Platform.GetTypeName(typeof(TChoice));
+                    throw new ArgumentException($"failed to construct {choiceName} from byte[]", nameof(obj), e);
+                }
+            }
+
+            if (obj is Asn1Encodable element)
+            {
+                var result = optionalConstructor(element);
+                if (result != null)
+                    return result;
+            }
+
+            throw new ArgumentException("Invalid object: " + Platform.GetTypeName(obj), nameof(obj));
+        }
+
+        public static TChoice GetInstanceChoice<TChoice>(Asn1TaggedObject taggedObject, bool declaredExplicit,
+            Func<Asn1Encodable, TChoice> constructor)
+            where TChoice : Asn1Encodable, IAsn1Choice
+        {
+            if (!declaredExplicit)
+            {
+                var message = string.Format(
+                    "Implicit tagging cannot be used with untagged choice type {0} (X.680 30.6, 30.8).",
+                    Platform.GetTypeName(typeof(TChoice)));
+
+                throw new ArgumentException(message, nameof(declaredExplicit));
+            }
+            if (taggedObject == null)
+                throw new ArgumentNullException(nameof(taggedObject));
+
+            return constructor(GetExplicitContextBaseObject(taggedObject));
+        }
+
+        public static TChoice GetTaggedChoice<TChoice>(Asn1TaggedObject taggedObject, bool declaredExplicit,
+            Func<Asn1Encodable, TChoice> constructor)
             where TChoice : Asn1Encodable, IAsn1Choice
         {
             if (!declaredExplicit)
@@ -121,8 +168,10 @@ namespace Org.BouncyCastle.Asn1
                 return "CONTEXT";
             case Asn1Tags.Private:
                 return "PRIVATE";
-            default:
+            case Asn1Tags.Universal:
                 return "UNIVERSAL";
+            default:
+                return string.Format("UNKNOWN({0})", tagClass);
             }
         }
 
@@ -151,8 +200,10 @@ namespace Org.BouncyCastle.Asn1
                 return string.Format("[CONTEXT {0}]", tagNo);
             case Asn1Tags.Private:
                 return string.Format("[PRIVATE {0}]", tagNo);
-            default:
+            case Asn1Tags.Universal:
                 return string.Format("[UNIVERSAL {0}]", tagNo);
+            default:
+                return string.Format("[UNKNOWN({0}) {1}]", tagClass, tagNo);
             }
         }
 
@@ -161,15 +212,17 @@ namespace Org.BouncyCastle.Asn1
          * Wrappers for Asn1TaggedObject.GetExplicitBaseObject
          */
 
-        public static Asn1Encodable GetExplicitBaseObject(Asn1TaggedObject taggedObject, int tagClass, int tagNo)
-        {
-            return CheckTag(taggedObject, tagClass, tagNo).GetExplicitBaseObject();
-        }
+        public static Asn1Encodable GetExplicitBaseObject(Asn1TaggedObject taggedObject, int tagClass) =>
+            CheckTagClass(taggedObject, tagClass).GetExplicitBaseObject();
 
-        public static Asn1Encodable GetExplicitContextBaseObject(Asn1TaggedObject taggedObject, int tagNo)
-        {
-            return GetExplicitBaseObject(taggedObject, Asn1Tags.ContextSpecific, tagNo);
-        }
+        public static Asn1Encodable GetExplicitBaseObject(Asn1TaggedObject taggedObject, int tagClass, int tagNo) =>
+            CheckTag(taggedObject, tagClass, tagNo).GetExplicitBaseObject();
+
+        public static Asn1Encodable GetExplicitContextBaseObject(Asn1TaggedObject taggedObject) =>
+            GetExplicitBaseObject(taggedObject, Asn1Tags.ContextSpecific);
+
+        public static Asn1Encodable GetExplicitContextBaseObject(Asn1TaggedObject taggedObject, int tagNo) =>
+            GetExplicitBaseObject(taggedObject, Asn1Tags.ContextSpecific, tagNo);
 
         [Obsolete("Will be removed")]
         public static Asn1Encodable TryGetExplicitBaseObject(Asn1TaggedObject taggedObject, int tagClass, int tagNo)
@@ -178,6 +231,14 @@ namespace Org.BouncyCastle.Asn1
                 return null;
 
             return taggedObject.GetExplicitBaseObject();
+        }
+
+        public static bool TryGetExplicitBaseObject(Asn1TaggedObject taggedObject, int tagClass,
+            out Asn1Encodable baseObject)
+        {
+            bool result = taggedObject.HasTagClass(tagClass);
+            baseObject = result ? taggedObject.GetExplicitBaseObject() : null;
+            return result;
         }
 
         public static bool TryGetExplicitBaseObject(Asn1TaggedObject taggedObject, int tagClass, int tagNo,
@@ -194,10 +255,56 @@ namespace Org.BouncyCastle.Asn1
             return TryGetExplicitBaseObject(taggedObject, Asn1Tags.ContextSpecific, tagNo);
         }
 
+        public static bool TryGetExplicitContextBaseObject(Asn1TaggedObject taggedObject, out Asn1Encodable baseObject)
+        {
+            return TryGetExplicitBaseObject(taggedObject, Asn1Tags.ContextSpecific, out baseObject);
+        }
+
         public static bool TryGetExplicitContextBaseObject(Asn1TaggedObject taggedObject, int tagNo,
             out Asn1Encodable baseObject)
         {
             return TryGetExplicitBaseObject(taggedObject, Asn1Tags.ContextSpecific, tagNo, out baseObject);
+        }
+
+
+        /*
+         * Wrappers for Asn1TaggedObject.GetOptional
+         */
+
+        public static TResult GetOptionalContextTagged<TState, TResult>(Asn1Encodable element, int tagNo, TState state,
+            Func<Asn1TaggedObject, TState, TResult> constructor)
+            where TResult : class
+        {
+            return GetOptionalTagged(element, Asn1Tags.ContextSpecific, tagNo, state, constructor);
+        }
+
+        public static TResult GetOptionalTagged<TState, TResult>(Asn1Encodable element, int tagClass, int tagNo,
+            TState state, Func<Asn1TaggedObject, TState, TResult> constructor)
+            where TResult : class
+        {
+            var taggedObject = Asn1TaggedObject.GetOptional(element, tagClass, tagNo);
+
+            return taggedObject == null ? null : constructor(taggedObject, state);
+        }
+
+        public static bool TryGetOptionalContextTagged<TState, TResult>(Asn1Encodable element, int tagNo, TState state,
+            out TResult result, Func<Asn1TaggedObject, TState, TResult> constructor)
+        {
+            return TryGetOptionalTagged(element, Asn1Tags.ContextSpecific, tagNo, state, out result, constructor);
+        }
+
+        public static bool TryGetOptionalTagged<TState, TResult>(Asn1Encodable element, int tagClass, int tagNo,
+            TState state, out TResult result, Func<Asn1TaggedObject, TState, TResult> constructor)
+        {
+            var taggedObject = Asn1TaggedObject.GetOptional(element, tagClass, tagNo);
+            if (taggedObject != null)
+            {
+                result = constructor(taggedObject, state);
+                return true;
+            }
+
+            result = default;
+            return false;
         }
 
 
@@ -650,25 +757,63 @@ namespace Org.BouncyCastle.Asn1
             return TryParseExplicitBaseObject(taggedObjectParser, Asn1Tags.ContextSpecific, tagNo, out baseObject);
         }
 
+
         #region Sequence cursor
 
-        public static TResult ReadOptionalContextTagged<TState, TResult>(Asn1Sequence sequence, ref int sequencePosition,
+        public static TResult Read<TResult>(Asn1Sequence sequence, ref int sequencePosition,
+            Func<Asn1Encodable, TResult> constructor)
+            where TResult : class
+        {
+            var element = RequireElement(sequence, ref sequencePosition);
+            return constructor(element);
+        }
+
+        public static TResult ReadContextTagged<TState, TResult>(Asn1Sequence sequence, ref int sequencePosition,
             int tagNo, TState state, Func<Asn1TaggedObject, TState, TResult> constructor)
+        {
+            return ReadTagged(sequence, ref sequencePosition, Asn1Tags.ContextSpecific, tagNo, state, constructor);
+        }
+
+        public static TResult ReadTagged<TState, TResult>(Asn1Sequence sequence, ref int sequencePosition, int tagClass,
+            int tagNo, TState state, Func<Asn1TaggedObject, TState, TResult> constructor)
+        {
+            var element = RequireElement(sequence, ref sequencePosition);
+            var taggedObject = Asn1TaggedObject.GetInstance(element, tagClass, tagNo);
+            return constructor(taggedObject, state);
+        }
+
+        public static TResult ReadOptional<TResult>(Asn1Sequence sequence, ref int sequencePosition,
+            Func<Asn1Encodable, TResult> constructor)
+            where TResult : class
+        {
+            if (sequencePosition < sequence.Count)
+            {
+                var result = constructor(sequence[sequencePosition]);
+                if (result != null)
+                {
+                    sequencePosition++;
+                    return result;
+                }
+            }
+
+            return null;
+        }
+
+        public static TResult ReadOptionalContextTagged<TState, TResult>(Asn1Sequence sequence,
+            ref int sequencePosition, int tagNo, TState state, Func<Asn1TaggedObject, TState, TResult> constructor)
             where TResult : class
         {
             return ReadOptionalTagged(sequence, ref sequencePosition, Asn1Tags.ContextSpecific, tagNo, state,
                 constructor);
         }
 
-        public static TResult ReadOptionalTagged<TState, TResult>(Asn1Sequence sequence, ref int sequencePosition, int tagClass,
-            int tagNo, TState state, Func<Asn1TaggedObject, TState, TResult> constructor)
+        public static TResult ReadOptionalTagged<TState, TResult>(Asn1Sequence sequence, ref int sequencePosition,
+            int tagClass, int tagNo, TState state, Func<Asn1TaggedObject, TState, TResult> constructor)
             where TResult : class
         {
             if (sequencePosition < sequence.Count &&
-                sequence[sequencePosition] is Asn1TaggedObject taggedObject &&
-                taggedObject.HasTag(tagClass, tagNo))
+                TryGetOptionalTagged(sequence[sequencePosition], tagClass, tagNo, state, out var result, constructor))
             {
-                var result = constructor(taggedObject, state);
                 sequencePosition++;
                 return result;
             }
@@ -689,16 +834,24 @@ namespace Org.BouncyCastle.Asn1
             Func<Asn1TaggedObject, TState, TResult> constructor)
         {
             if (sequencePosition < sequence.Count &&
-                sequence[sequencePosition] is Asn1TaggedObject taggedObject &&
-                taggedObject.HasTag(tagClass, tagNo))
+                TryGetOptionalTagged(sequence[sequencePosition], tagClass, tagNo, state, out result, constructor))
             {
-                result = constructor(taggedObject, state);
                 sequencePosition++;
                 return true;
             }
 
             result = default;
             return false;
+        }
+
+        private static Asn1Encodable RequireElement(Asn1Sequence sequence, ref int sequencePosition)
+        {
+            if (sequencePosition < 0)
+                throw new ArgumentOutOfRangeException(nameof(sequencePosition));
+            if (sequencePosition >= sequence.Count)
+                throw new ArgumentException("Premature end of sequence", nameof(sequence));
+
+            return sequence[sequencePosition++];
         }
 
         #endregion

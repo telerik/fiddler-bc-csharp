@@ -52,7 +52,7 @@ namespace Org.BouncyCastle.Cms
 		{
 			byte[] keyBytes = contentEncryptionKey.GetKey();
 
-            IWrapper keyWrapper = WrapperUtilities.GetWrapper(keyEncryptionAlgorithm.Algorithm.Id);
+            IWrapper keyWrapper = WrapperUtilities.GetWrapper(keyEncryptionAlgorithm.Algorithm);
 			keyWrapper.Init(true, new ParametersWithRandom(keyEncryptionKey, random));
         	Asn1OctetString encryptedKey = new DerOctetString(
 				keyWrapper.Wrap(keyBytes, 0, keyBytes.Length));
@@ -73,7 +73,7 @@ namespace Org.BouncyCastle.Cms
 			{
 				return new AlgorithmIdentifier(
 					PkcsObjectIdentifiers.IdAlgCmsRC2Wrap,
-					new DerInteger(58));
+					DerInteger.ValueOf(58));
 			}
 			else if (Platform.StartsWith(algorithm, "AES"))
 			{

@@ -1,19 +1,30 @@
+using System;
+
 namespace Org.BouncyCastle.Bcpg
 {
     public class InputStreamPacket
         : Packet
     {
-        private readonly BcpgInputStream bcpgIn;
+        private readonly BcpgInputStream m_bcpgIn;
 
-		public InputStreamPacket(BcpgInputStream bcpgIn)
+        [Obsolete("WIll be removed")]
+        public InputStreamPacket(BcpgInputStream bcpgIn)
         {
-            this.bcpgIn = bcpgIn;
+            m_bcpgIn = bcpgIn;
         }
 
-		/// <summary>Note: you can only read from this once...</summary>
-		public BcpgInputStream GetInputStream()
+        internal InputStreamPacket(BcpgInputStream bcpgIn, PacketTag packetTag)
+            : this(bcpgIn, packetTag, newPacketFormat: false)
         {
-            return bcpgIn;
         }
+
+        internal InputStreamPacket(BcpgInputStream bcpgIn, PacketTag packetTag, bool newPacketFormat)
+            : base(packetTag, newPacketFormat)
+        {
+            m_bcpgIn = bcpgIn;
+        }
+
+        /// <summary>Note: you can only read from this once...</summary>
+        public BcpgInputStream GetInputStream() => m_bcpgIn;
     }
 }

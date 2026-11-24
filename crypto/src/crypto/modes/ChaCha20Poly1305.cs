@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 using Org.BouncyCastle.Crypto.Engines;
 using Org.BouncyCastle.Crypto.Macs;
@@ -8,6 +8,21 @@ using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Crypto.Modes
 {
+    /// <summary>
+    /// Implementation of the ChaCha20-Poly1305 AEAD construction as defined in RFC 7539 / RFC 8439.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ChaCha20-Poly1305 is an Authenticated Encryption with Associated Data (AEAD) algorithm 
+    /// combining the ChaCha20 stream cipher with the Poly1305 message authentication code.
+    /// </para>
+    /// <para>
+    /// <b>CRITICAL SECURITY WARNING:</b> For encryption, a unique nonce (IV) MUST be used for every 
+    /// invocation with the same key. Reusing a nonce with the same key catastrophically compromises 
+    /// the security of the cipher, allowing an attacker to recover the authentication key (Poly1305) 
+    /// and plaintext.
+    /// </para>
+    /// </remarks>
     public class ChaCha20Poly1305
         : IAeadCipher
     {
@@ -26,52 +41,78 @@ namespace Org.BouncyCastle.Crypto.Modes
 
         private const int BufSize = 64;
         private const int KeySize = 32;
-        private const int NonceSize = 12;
         private const int MacSize = 16;
-        private static readonly byte[] Zeroes = new byte[MacSize - 1];
+        private static readonly byte[] Zeros = new byte[MacSize - 1];
 
         private const ulong AadLimit = ulong.MaxValue;
         private const ulong DataLimit = ((1UL << 32) - 1) * 64;
 
-        private readonly ChaCha7539Engine mChacha20;
-        private readonly IMac mPoly1305;
+        private readonly ChaCha7539Engine m_chacha20;
+        private readonly IMac m_poly1305;
+        private readonly int m_nonceSize;
 
-        private readonly byte[] mKey = new byte[KeySize];
-        private readonly byte[] mNonce = new byte[NonceSize];
-        private readonly byte[] mBuf = new byte[BufSize + MacSize];
-        private readonly byte[] mMac = new byte[MacSize];
+        private readonly byte[] m_key = new byte[KeySize];
+        private readonly byte[] m_nonce;
+        private readonly byte[] m_buf = new byte[BufSize + MacSize];
+        private readonly byte[] m_mac = new byte[MacSize];
 
-        private byte[] mInitialAad;
+        private byte[] m_initialAad;
 
-        private ulong mAadCount;
-        private ulong mDataCount;
-        private State mState = State.Uninitialized;
-        private int mBufPos;
+        private ulong m_aadCount;
+        private ulong m_dataCount;
+        private State m_state = State.Uninitialized;
+        private int m_bufPos;
 
+        /// <summary>
+        /// Default constructor using the standard <see cref="Poly1305"/> MAC.
+        /// </summary>
         public ChaCha20Poly1305()
             : this(new Poly1305())
         {
         }
 
+        /// <summary>
+        /// Constructor allowing a custom Poly1305 implementation.
+        /// </summary>
+        /// <param name="poly1305">The Poly1305 MAC implementation to use.</param>
+        /// <exception cref="ArgumentNullException">If poly1305 is null.</exception>
+        /// <exception cref="ArgumentException">If poly1305 is not a 128-bit MAC.</exception>
         public ChaCha20Poly1305(IMac poly1305)
+            : this(new ChaCha7539Engine(), poly1305, 12)
         {
+        }
+
+        /// <summary>
+        /// Constructor for subclasses to inject an alternative ChaCha20 engine (e.g. XChaCha20)
+        /// and the matching nonce size.
+        /// </summary>
+        protected ChaCha20Poly1305(ChaCha7539Engine chacha20, IMac poly1305, int nonceSize)
+        {
+            if (null == chacha20)
+                throw new ArgumentNullException(nameof(chacha20));
             if (null == poly1305)
-                throw new ArgumentNullException("poly1305");
+                throw new ArgumentNullException(nameof(poly1305));
             if (MacSize != poly1305.GetMacSize())
-                throw new ArgumentException("must be a 128-bit MAC", "poly1305");
+                throw new ArgumentException("must be a 128-bit MAC", nameof(poly1305));
 
-            this.mChacha20 = new ChaCha7539Engine();
-            this.mPoly1305 = poly1305;
+            m_chacha20 = chacha20;
+            m_poly1305 = poly1305;
+            m_nonceSize = nonceSize;
+            m_nonce = new byte[nonceSize];
         }
 
-        public virtual string AlgorithmName
-        {
-            get { return "ChaCha20Poly1305"; }
-        }
+        /// <summary>The name of the algorithm ("ChaCha20Poly1305").</summary>
+        public virtual string AlgorithmName => "ChaCha20Poly1305";
 
+        /// <summary>
+        /// Initialise the ChaCha20Poly1305 cipher.
+        /// </summary>
+        /// <param name="forEncryption">True if initializing for encryption, false for decryption.</param>
+        /// <param name="parameters">The parameters required (typically <see cref="AeadParameters"/> or <see cref="ParametersWithIV"/>).</param>
+        /// <exception cref="ArgumentException">If parameters are invalid or nonce is reused for encryption.</exception>
         public virtual void Init(bool forEncryption, ICipherParameters parameters)
         {
-            KeyParameter initKeyParam;
+            KeyParameter keyParameter = null;
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
             ReadOnlySpan<byte> initNonce;
 #else
@@ -79,109 +120,120 @@ namespace Org.BouncyCastle.Crypto.Modes
 #endif
             ICipherParameters chacha20Params;
 
-            if (parameters is AeadParameters aeadParams)
+            if (parameters is AeadParameters aeadParameters)
             {
-                int macSizeBits = aeadParams.MacSize;
-                if ((MacSize * 8) != macSizeBits)
-                    throw new ArgumentException("Invalid value for MAC size: " + macSizeBits);
+                int macSizeInBits = aeadParameters.MacSize;
+                if ((MacSize * 8) != macSizeInBits)
+                    throw new ArgumentException("Invalid value for MAC size: " + macSizeInBits);
 
-                initKeyParam = aeadParams.Key;
+                keyParameter = aeadParameters.Key;
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
-                initNonce = aeadParams.Nonce;
+                initNonce = aeadParameters.Nonce;
 #else
-                initNonce = aeadParams.GetNonce();
+                initNonce = aeadParameters.GetNonce();
 #endif
-                chacha20Params = new ParametersWithIV(initKeyParam, initNonce);
+                chacha20Params = new ParametersWithIV(keyParameter, initNonce);
 
-                this.mInitialAad = aeadParams.GetAssociatedText();
+                m_initialAad = aeadParameters.GetAssociatedText();
             }
-            else if (parameters is ParametersWithIV ivParams)
+            else if (parameters is ParametersWithIV withIV)
             {
-                initKeyParam = (KeyParameter)ivParams.Parameters;
-#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
-                initNonce = ivParams.IV;
-#else
-                initNonce = ivParams.GetIV();
-#endif
-                chacha20Params = ivParams;
+                if (withIV.Parameters != null)
+                {
+                    keyParameter = withIV.Parameters as KeyParameter ?? throw new ArgumentException(
+                        $"invalid parameters passed to {AlgorithmName}", nameof(parameters));
+                }
 
-                this.mInitialAad = null;
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+                initNonce = withIV.InternalIV;
+#else
+                initNonce = withIV.GetIV();
+#endif
+                chacha20Params = withIV;
+
+                m_initialAad = null;
             }
             else
             {
-                throw new ArgumentException("invalid parameters passed to ChaCha20Poly1305", "parameters");
+                throw new ArgumentException($"invalid parameters passed to {AlgorithmName}", nameof(parameters));
             }
 
             // Validate key
-            if (null == initKeyParam)
+            if (null == keyParameter)
             {
-                if (State.Uninitialized == mState)
+                if (State.Uninitialized == m_state)
                     throw new ArgumentException("Key must be specified in initial init");
             }
             else
             {
-                if (KeySize != initKeyParam.KeyLength)
+                if (KeySize != keyParameter.KeyLength)
                     throw new ArgumentException("Key must be 256 bits");
             }
 
             // Validate nonce
-            if (NonceSize != initNonce.Length)
-                throw new ArgumentException("Nonce must be 96 bits");
+            if (m_nonceSize != initNonce.Length)
+                throw new ArgumentException("Nonce must be " + (m_nonceSize * 8) + " bits");
 
             // Check for encryption with reused nonce
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
-            if (State.Uninitialized != mState && forEncryption && initNonce.SequenceEqual(mNonce))
+            if (State.Uninitialized != m_state && forEncryption && initNonce.SequenceEqual(m_nonce))
 #else
-            if (State.Uninitialized != mState && forEncryption && Arrays.AreEqual(mNonce, initNonce))
+            if (State.Uninitialized != m_state && forEncryption && Arrays.AreEqual(m_nonce, initNonce))
 #endif
             {
-                if (null == initKeyParam || initKeyParam.FixedTimeEquals(mKey))
-                    throw new ArgumentException("cannot reuse nonce for ChaCha20Poly1305 encryption");
+                if (null == keyParameter || keyParameter.FixedTimeEquals(m_key))
+                    throw new ArgumentException($"cannot reuse nonce for {AlgorithmName} encryption");
             }
 
-            if (null != initKeyParam)
+            if (null != keyParameter)
             {
-                initKeyParam.CopyTo(mKey, 0, KeySize);
+                keyParameter.CopyKeyTo(m_key, 0, KeySize);
             }
 
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
-            initNonce.CopyTo(mNonce);
+            initNonce.CopyTo(m_nonce);
 #else
-            Array.Copy(initNonce, 0, mNonce, 0, NonceSize);
+            Array.Copy(initNonce, 0, m_nonce, 0, m_nonceSize);
 #endif
 
-            mChacha20.Init(true, chacha20Params);
+            m_chacha20.Init(forEncryption: true, chacha20Params);
 
-            this.mState = forEncryption ? State.EncInit : State.DecInit;
+            m_state = forEncryption ? State.EncInit : State.DecInit;
 
-            Reset(true, false);
+            Reset(clearMac: true, resetCipher: false);
         }
 
+        /// <summary>Return the size of the output buffer required for an input of <paramref name="len"/> bytes.</summary>
+        /// <param name="len">Input length.</param>
+        /// <returns>Required output buffer size.</returns>
         public virtual int GetOutputSize(int len)
         {
             int total = System.Math.Max(0, len);
 
-            switch (mState)
+            switch (m_state)
             {
             case State.DecInit:
             case State.DecAad:
                 return System.Math.Max(0, total - MacSize);
             case State.DecData:
             case State.DecFinal:
-                return System.Math.Max(0, total + mBufPos - MacSize);
+                return System.Math.Max(0, total + m_bufPos - MacSize);
             case State.EncData:
             case State.EncFinal:
-                return total + mBufPos + MacSize;
+                return total + m_bufPos + MacSize;
             default:
                 return total + MacSize;
             }
         }
 
+        /// <summary>Return the size of the output buffer required for a <c>ProcessBytes</c> call with <paramref name="len"/> bytes.</summary>
+        /// <param name="len">Input length.</param>
+        /// <returns>Update output size.</returns>
         public virtual int GetUpdateOutputSize(int len)
         {
             int total = System.Math.Max(0, len);
 
-            switch (mState)
+            switch (m_state)
             {
             case State.DecInit:
             case State.DecAad:
@@ -189,11 +241,11 @@ namespace Org.BouncyCastle.Crypto.Modes
                 break;
             case State.DecData:
             case State.DecFinal:
-                total = System.Math.Max(0, total + mBufPos - MacSize);
+                total = System.Math.Max(0, total + m_bufPos - MacSize);
                 break;
             case State.EncData:
             case State.EncFinal:
-                total += mBufPos;
+                total += m_bufPos;
                 break;
             default:
                 break;
@@ -202,14 +254,20 @@ namespace Org.BouncyCastle.Crypto.Modes
             return total - total % BufSize;
         }
 
+        /// <summary>Process a single byte of Additional Authenticated Data (AAD).</summary>
+        /// <param name="input">The byte to be processed.</param>
         public virtual void ProcessAadByte(byte input)
         {
             CheckAad();
 
-            this.mAadCount = IncrementCount(mAadCount, 1, AadLimit);
-            mPoly1305.Update(input);
+            m_aadCount = IncrementCount(m_aadCount, 1, AadLimit);
+            m_poly1305.Update(input);
         }
 
+        /// <summary>Process a sequence of bytes of Additional Authenticated Data (AAD).</summary>
+        /// <param name="inBytes">The input buffer containing AAD.</param>
+        /// <param name="inOff">The offset into the input buffer.</param>
+        /// <param name="len">The length of the data to process.</param>
         public virtual void ProcessAadBytes(byte[] inBytes, int inOff, int len)
         {
             if (null == inBytes)
@@ -224,43 +282,50 @@ namespace Org.BouncyCastle.Crypto.Modes
 
             if (len > 0)
             {
-                this.mAadCount = IncrementCount(mAadCount, (uint)len, AadLimit);
-                mPoly1305.BlockUpdate(inBytes, inOff, len);
+                m_aadCount = IncrementCount(m_aadCount, (uint)len, AadLimit);
+                m_poly1305.BlockUpdate(inBytes, inOff, len);
             }
         }
 
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+        /// <summary>Process a span of bytes of Additional Authenticated Data (AAD).</summary>
+        /// <param name="input">The input span containing AAD.</param>
         public virtual void ProcessAadBytes(ReadOnlySpan<byte> input)
         {
             CheckAad();
 
             if (!input.IsEmpty)
             {
-                this.mAadCount = IncrementCount(mAadCount, (uint)input.Length, AadLimit);
-                mPoly1305.BlockUpdate(input);
+                m_aadCount = IncrementCount(m_aadCount, (uint)input.Length, AadLimit);
+                m_poly1305.BlockUpdate(input);
             }
         }
 #endif
 
+        /// <summary>Process a single byte of data.</summary>
+        /// <param name="input">The input byte.</param>
+        /// <param name="outBytes">The output buffer.</param>
+        /// <param name="outOff">The offset into the output buffer.</param>
+        /// <returns>Number of bytes written to the output buffer.</returns>
         public virtual int ProcessByte(byte input, byte[] outBytes, int outOff)
         {
             CheckData();
 
-            switch (mState)
+            switch (m_state)
             {
             case State.DecData:
             {
-                mBuf[mBufPos] = input;
-                if (++mBufPos == mBuf.Length)
+                m_buf[m_bufPos] = input;
+                if (++m_bufPos == m_buf.Length)
                 {
-                    mPoly1305.BlockUpdate(mBuf, 0, BufSize);
+                    m_poly1305.BlockUpdate(m_buf, 0, BufSize);
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
-                    ProcessBlock(mBuf, outBytes.AsSpan(outOff));
+                    ProcessBlock(m_buf, outBytes.AsSpan(outOff));
 #else
-                    ProcessBlock(mBuf, 0, outBytes, outOff);
+                    ProcessBlock(m_buf, 0, outBytes, outOff);
 #endif
-                    Array.Copy(mBuf, BufSize, mBuf, 0, MacSize);
-                    this.mBufPos = MacSize;
+                    Array.Copy(m_buf, BufSize, m_buf, 0, MacSize);
+                    m_bufPos = MacSize;
                     return BufSize;
                 }
 
@@ -268,16 +333,16 @@ namespace Org.BouncyCastle.Crypto.Modes
             }
             case State.EncData:
             {
-                mBuf[mBufPos] = input;
-                if (++mBufPos == BufSize)
+                m_buf[m_bufPos] = input;
+                if (++m_bufPos == BufSize)
                 {
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
-                    ProcessBlock(mBuf, outBytes.AsSpan(outOff));
+                    ProcessBlock(m_buf, outBytes.AsSpan(outOff));
 #else
-                    ProcessBlock(mBuf, 0, outBytes, outOff);
+                    ProcessBlock(m_buf, 0, outBytes, outOff);
 #endif
-                    mPoly1305.BlockUpdate(outBytes, outOff, BufSize);
-                    this.mBufPos = 0;
+                    m_poly1305.BlockUpdate(outBytes, outOff, BufSize);
+                    m_bufPos = 0;
                     return BufSize;
                 }
 
@@ -289,21 +354,25 @@ namespace Org.BouncyCastle.Crypto.Modes
         }
 
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+        /// <summary>Process a single byte of data using Spans.</summary>
+        /// <param name="input">The input byte.</param>
+        /// <param name="output">The output span.</param>
+        /// <returns>Number of bytes written to the output span.</returns>
         public virtual int ProcessByte(byte input, Span<byte> output)
         {
             CheckData();
 
-            switch (mState)
+            switch (m_state)
             {
             case State.DecData:
             {
-                mBuf[mBufPos] = input;
-                if (++mBufPos == mBuf.Length)
+                m_buf[m_bufPos] = input;
+                if (++m_bufPos == m_buf.Length)
                 {
-                    mPoly1305.BlockUpdate(mBuf.AsSpan(0, BufSize));
-                    ProcessBlock(mBuf, output);
-                    Array.Copy(mBuf, BufSize, mBuf, 0, MacSize);
-                    this.mBufPos = MacSize;
+                    m_poly1305.BlockUpdate(m_buf.AsSpan(0, BufSize));
+                    ProcessBlock(m_buf, output);
+                    Array.Copy(m_buf, BufSize, m_buf, 0, MacSize);
+                    m_bufPos = MacSize;
                     return BufSize;
                 }
 
@@ -311,12 +380,12 @@ namespace Org.BouncyCastle.Crypto.Modes
             }
             case State.EncData:
             {
-                mBuf[mBufPos] = input;
-                if (++mBufPos == BufSize)
+                m_buf[m_bufPos] = input;
+                if (++m_bufPos == BufSize)
                 {
-                    ProcessBlock(mBuf, output);
-                    mPoly1305.BlockUpdate(output[..BufSize]);
-                    this.mBufPos = 0;
+                    ProcessBlock(m_buf, output);
+                    m_poly1305.BlockUpdate(output[..BufSize]);
+                    m_bufPos = 0;
                     return BufSize;
                 }
 
@@ -328,6 +397,13 @@ namespace Org.BouncyCastle.Crypto.Modes
         }
 #endif
 
+        /// <summary>Process a sequence of bytes from the input buffer.</summary>
+        /// <param name="inBytes">The input buffer.</param>
+        /// <param name="inOff">The offset into the input buffer.</param>
+        /// <param name="len">The length of data to process.</param>
+        /// <param name="outBytes">The output buffer.</param>
+        /// <param name="outOff">The offset into the output buffer.</param>
+        /// <returns>The number of bytes written to the output buffer.</returns>
         public virtual int ProcessBytes(byte[] inBytes, int inOff, int len, byte[] outBytes, int outOff)
         {
             if (null == inBytes)
@@ -355,47 +431,47 @@ namespace Org.BouncyCastle.Crypto.Modes
 
             int resultLen = 0;
 
-            switch (mState)
+            switch (m_state)
             {
             case State.DecData:
             {
-                int available = mBuf.Length - mBufPos;
+                int available = m_buf.Length - m_bufPos;
                 if (len < available)
                 {
-                    Array.Copy(inBytes, inOff, mBuf, mBufPos, len);
-                    mBufPos += len;
+                    Array.Copy(inBytes, inOff, m_buf, m_bufPos, len);
+                    m_bufPos += len;
                     break;
                 }
 
-                if (mBufPos >= BufSize)
+                if (m_bufPos >= BufSize)
                 {
-                    mPoly1305.BlockUpdate(mBuf, 0, BufSize);
-                    ProcessBlock(mBuf, 0, outBytes, outOff);
-                    Array.Copy(mBuf, BufSize, mBuf, 0, mBufPos -= BufSize);
+                    m_poly1305.BlockUpdate(m_buf, 0, BufSize);
+                    ProcessBlock(m_buf, 0, outBytes, outOff);
+                    Array.Copy(m_buf, BufSize, m_buf, 0, m_bufPos -= BufSize);
                     resultLen = BufSize;
 
                     available += BufSize;
                     if (len < available)
                     {
-                        Array.Copy(inBytes, inOff, mBuf, mBufPos, len);
-                        mBufPos += len;
+                        Array.Copy(inBytes, inOff, m_buf, m_bufPos, len);
+                        m_bufPos += len;
                         break;
                     }
                 }
 
-                int inLimit1 = inOff + len - mBuf.Length;
+                int inLimit1 = inOff + len - m_buf.Length;
                 int inLimit2 = inLimit1 - BufSize;
 
-                available = BufSize - mBufPos;
-                Array.Copy(inBytes, inOff, mBuf, mBufPos, available);
-                mPoly1305.BlockUpdate(mBuf, 0, BufSize);
-                ProcessBlock(mBuf, 0, outBytes, outOff + resultLen);
+                available = BufSize - m_bufPos;
+                Array.Copy(inBytes, inOff, m_buf, m_bufPos, available);
+                m_poly1305.BlockUpdate(m_buf, 0, BufSize);
+                ProcessBlock(m_buf, 0, outBytes, outOff + resultLen);
                 inOff += available;
                 resultLen += BufSize;
 
                 while (inOff <= inLimit2)
                 {
-                    mPoly1305.BlockUpdate(inBytes, inOff, BufSize * 2);
+                    m_poly1305.BlockUpdate(inBytes, inOff, BufSize * 2);
                     ProcessBlocks2(inBytes, inOff, outBytes, outOff + resultLen);
                     inOff += BufSize * 2;
                     resultLen += BufSize * 2;
@@ -403,33 +479,33 @@ namespace Org.BouncyCastle.Crypto.Modes
 
                 if (inOff <= inLimit1)
                 {
-                    mPoly1305.BlockUpdate(inBytes, inOff, BufSize);
+                    m_poly1305.BlockUpdate(inBytes, inOff, BufSize);
                     ProcessBlock(inBytes, inOff, outBytes, outOff + resultLen);
                     inOff += BufSize;
                     resultLen += BufSize;
                 }
 
-                mBufPos = mBuf.Length + inLimit1 - inOff;
-                Array.Copy(inBytes, inOff, mBuf, 0, mBufPos);
+                m_bufPos = m_buf.Length + inLimit1 - inOff;
+                Array.Copy(inBytes, inOff, m_buf, 0, m_bufPos);
                 break;
             }
             case State.EncData:
             {
-                int available = BufSize - mBufPos;
+                int available = BufSize - m_bufPos;
                 if (len < available)
                 {
-                    Array.Copy(inBytes, inOff, mBuf, mBufPos, len);
-                    mBufPos += len;
+                    Array.Copy(inBytes, inOff, m_buf, m_bufPos, len);
+                    m_bufPos += len;
                     break;
                 }
 
                 int inLimit1 = inOff + len - BufSize;
                 int inLimit2 = inLimit1 - BufSize;
 
-                if (mBufPos > 0)
+                if (m_bufPos > 0)
                 {
-                    Array.Copy(inBytes, inOff, mBuf, mBufPos, available);
-                    ProcessBlock(mBuf, 0, outBytes, outOff);
+                    Array.Copy(inBytes, inOff, m_buf, m_bufPos, available);
+                    ProcessBlock(m_buf, 0, outBytes, outOff);
                     inOff += available;
                     resultLen = BufSize;
                 }
@@ -448,10 +524,10 @@ namespace Org.BouncyCastle.Crypto.Modes
                     resultLen += BufSize;
                 }
 
-                mPoly1305.BlockUpdate(outBytes, outOff, resultLen);
+                m_poly1305.BlockUpdate(outBytes, outOff, resultLen);
 
-                mBufPos = BufSize + inLimit1 - inOff;
-                Array.Copy(inBytes, inOff, mBuf, 0, mBufPos);
+                m_bufPos = BufSize + inLimit1 - inOff;
+                Array.Copy(inBytes, inOff, m_buf, 0, m_bufPos);
                 break;
             }
             default:
@@ -463,53 +539,57 @@ namespace Org.BouncyCastle.Crypto.Modes
         }
 
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+        /// <summary>Process a span of bytes from the input.</summary>
+        /// <param name="input">The input span.</param>
+        /// <param name="output">The output span.</param>
+        /// <returns>The number of bytes written to the output span.</returns>
         public virtual int ProcessBytes(ReadOnlySpan<byte> input, Span<byte> output)
         {
             CheckData();
 
             int resultLen = 0;
 
-            switch (mState)
+            switch (m_state)
             {
             case State.DecData:
             {
-                int available = mBuf.Length - mBufPos;
+                int available = m_buf.Length - m_bufPos;
                 if (input.Length < available)
                 {
-                    input.CopyTo(mBuf.AsSpan(mBufPos));
-                    mBufPos += input.Length;
+                    input.CopyTo(m_buf.AsSpan(m_bufPos));
+                    m_bufPos += input.Length;
                     break;
                 }
 
-                if (mBufPos >= BufSize)
+                if (m_bufPos >= BufSize)
                 {
-                    mPoly1305.BlockUpdate(mBuf.AsSpan(0, BufSize));
-                    ProcessBlock(mBuf, output);
-                    Array.Copy(mBuf, BufSize, mBuf, 0, mBufPos -= BufSize);
+                    m_poly1305.BlockUpdate(m_buf.AsSpan(0, BufSize));
+                    ProcessBlock(m_buf, output);
+                    Array.Copy(m_buf, BufSize, m_buf, 0, m_bufPos -= BufSize);
                     resultLen = BufSize;
 
                     available += BufSize;
                     if (input.Length < available)
                     {
-                        input.CopyTo(mBuf.AsSpan(mBufPos));
-                        mBufPos += input.Length;
+                        input.CopyTo(m_buf.AsSpan(m_bufPos));
+                        m_bufPos += input.Length;
                         break;
                     }
                 }
 
-                int inLimit1 = mBuf.Length;
+                int inLimit1 = m_buf.Length;
                 int inLimit2 = inLimit1 + BufSize;
 
-                available = BufSize - mBufPos;
-                input[..available].CopyTo(mBuf.AsSpan(mBufPos));
-                mPoly1305.BlockUpdate(mBuf.AsSpan(0, BufSize));
-                ProcessBlock(mBuf, output[resultLen..]);
+                available = BufSize - m_bufPos;
+                input[..available].CopyTo(m_buf.AsSpan(m_bufPos));
+                m_poly1305.BlockUpdate(m_buf.AsSpan(0, BufSize));
+                ProcessBlock(m_buf, output[resultLen..]);
                 input = input[available..];
                 resultLen += BufSize;
 
                 while (input.Length >= inLimit2)
                 {
-                    mPoly1305.BlockUpdate(input[..(BufSize * 2)]);
+                    m_poly1305.BlockUpdate(input[..(BufSize * 2)]);
                     ProcessBlocks2(input, output[resultLen..]);
                     input = input[(BufSize * 2)..];
                     resultLen += BufSize * 2;
@@ -517,30 +597,30 @@ namespace Org.BouncyCastle.Crypto.Modes
 
                 if (input.Length >= inLimit1)
                 {
-                    mPoly1305.BlockUpdate(input[..BufSize]);
+                    m_poly1305.BlockUpdate(input[..BufSize]);
                     ProcessBlock(input, output[resultLen..]);
                     input = input[BufSize..];
                     resultLen += BufSize;
                 }
 
-                mBufPos = input.Length;
-                input.CopyTo(mBuf);
+                m_bufPos = input.Length;
+                input.CopyTo(m_buf);
                 break;
             }
             case State.EncData:
             {
-                int available = BufSize - mBufPos;
+                int available = BufSize - m_bufPos;
                 if (input.Length < available)
                 {
-                    input.CopyTo(mBuf.AsSpan(mBufPos));
-                    mBufPos += input.Length;
+                    input.CopyTo(m_buf.AsSpan(m_bufPos));
+                    m_bufPos += input.Length;
                     break;
                 }
 
-                if (mBufPos > 0)
+                if (m_bufPos > 0)
                 {
-                    input[..available].CopyTo(mBuf.AsSpan(mBufPos));
-                    ProcessBlock(mBuf, output);
+                    input[..available].CopyTo(m_buf.AsSpan(m_bufPos));
+                    ProcessBlock(m_buf, output);
                     input = input[available..];
                     resultLen = BufSize;
                 }
@@ -559,10 +639,10 @@ namespace Org.BouncyCastle.Crypto.Modes
                     resultLen += BufSize;
                 }
 
-                mPoly1305.BlockUpdate(output[..resultLen]);
+                m_poly1305.BlockUpdate(output[..resultLen]);
 
-                mBufPos = input.Length;
-                input.CopyTo(mBuf);
+                m_bufPos = input.Length;
+                input.CopyTo(m_buf);
                 break;
             }
             default:
@@ -573,6 +653,11 @@ namespace Org.BouncyCastle.Crypto.Modes
         }
 #endif
 
+        /// <summary>Finish the operation, generating or verifying the MAC.</summary>
+        /// <param name="outBytes">The output buffer for remaining processed data and/or MAC.</param>
+        /// <param name="outOff">The offset into the output buffer.</param>
+        /// <returns>Number of bytes written to the output buffer.</returns>
+        /// <exception cref="InvalidCipherTextException">If the MAC check fails.</exception>
         public virtual int DoFinal(byte[] outBytes, int outOff)
         {
             if (null == outBytes)
@@ -585,140 +670,141 @@ namespace Org.BouncyCastle.Crypto.Modes
 #else
             CheckData();
 
-            Array.Clear(mMac, 0, MacSize);
+            Array.Clear(m_mac, 0, MacSize);
 
             int resultLen = 0;
 
-            switch (mState)
+            switch (m_state)
             {
             case State.DecData:
             {
-                if (mBufPos < MacSize)
+                if (m_bufPos < MacSize)
                     throw new InvalidCipherTextException("data too short");
 
-                resultLen = mBufPos - MacSize;
+                resultLen = m_bufPos - MacSize;
 
                 Check.OutputLength(outBytes, outOff, resultLen, "output buffer too short");
 
                 if (resultLen > 0)
                 {
-                    mPoly1305.BlockUpdate(mBuf, 0, resultLen);
-                    ProcessData(mBuf, 0, resultLen, outBytes, outOff);
+                    m_poly1305.BlockUpdate(m_buf, 0, resultLen);
+                    ProcessData(m_buf, 0, resultLen, outBytes, outOff);
                 }
 
                 FinishData(State.DecFinal);
 
-                if (!Arrays.FixedTimeEquals(MacSize, mMac, 0, mBuf, resultLen))
-                    throw new InvalidCipherTextException("mac check in ChaCha20Poly1305 failed");
+                if (!Arrays.FixedTimeEquals(MacSize, m_mac, 0, m_buf, resultLen))
+                    throw new InvalidCipherTextException($"mac check in {AlgorithmName} failed");
 
                 break;
             }
             case State.EncData:
             {
-                resultLen = mBufPos + MacSize;
+                resultLen = m_bufPos + MacSize;
 
                 Check.OutputLength(outBytes, outOff, resultLen, "output buffer too short");
 
-                if (mBufPos > 0)
+                if (m_bufPos > 0)
                 {
-                    ProcessData(mBuf, 0, mBufPos, outBytes, outOff);
-                    mPoly1305.BlockUpdate(outBytes, outOff, mBufPos);
+                    ProcessData(m_buf, 0, m_bufPos, outBytes, outOff);
+                    m_poly1305.BlockUpdate(outBytes, outOff, m_bufPos);
                 }
 
                 FinishData(State.EncFinal);
 
-                Array.Copy(mMac, 0, outBytes, outOff + mBufPos, MacSize);
+                Array.Copy(m_mac, 0, outBytes, outOff + m_bufPos, MacSize);
                 break;
             }
             default:
                 throw new InvalidOperationException();
             }
 
-            Reset(false, true);
+            Reset(clearMac: false, resetCipher: true);
 
             return resultLen;
 #endif
         }
 
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+        /// <summary>Finish the operation using Spans, generating or verifying the MAC.</summary>
+        /// <param name="output">The output span for remaining data and/or MAC.</param>
+        /// <returns>Number of bytes written to the output span.</returns>
+        /// <exception cref="InvalidCipherTextException">If the MAC check fails.</exception>
         public virtual int DoFinal(Span<byte> output)
         {
             CheckData();
 
-            Array.Clear(mMac, 0, MacSize);
+            Array.Clear(m_mac, 0, MacSize);
 
             int resultLen = 0;
 
-            switch (mState)
+            switch (m_state)
             {
             case State.DecData:
             {
-                if (mBufPos < MacSize)
+                if (m_bufPos < MacSize)
                     throw new InvalidCipherTextException("data too short");
 
-                resultLen = mBufPos - MacSize;
+                resultLen = m_bufPos - MacSize;
 
                 Check.OutputLength(output, resultLen, "output buffer too short");
 
                 if (resultLen > 0)
                 {
-                    mPoly1305.BlockUpdate(mBuf, 0, resultLen);
-                    ProcessData(mBuf.AsSpan(0, resultLen), output);
+                    m_poly1305.BlockUpdate(m_buf, 0, resultLen);
+                    ProcessData(m_buf.AsSpan(0, resultLen), output);
                 }
 
                 FinishData(State.DecFinal);
 
-                if (!Arrays.FixedTimeEquals(MacSize, mMac, 0, mBuf, resultLen))
-                    throw new InvalidCipherTextException("mac check in ChaCha20Poly1305 failed");
+                if (!Arrays.FixedTimeEquals(MacSize, m_mac, 0, m_buf, resultLen))
+                    throw new InvalidCipherTextException($"mac check in {AlgorithmName} failed");
 
                 break;
             }
             case State.EncData:
             {
-                resultLen = mBufPos + MacSize;
+                resultLen = m_bufPos + MacSize;
 
                 Check.OutputLength(output, resultLen, "output buffer too short");
 
-                if (mBufPos > 0)
+                if (m_bufPos > 0)
                 {
-                    ProcessData(mBuf.AsSpan(0, mBufPos), output);
-                    mPoly1305.BlockUpdate(output[..mBufPos]);
+                    ProcessData(m_buf.AsSpan(0, m_bufPos), output);
+                    m_poly1305.BlockUpdate(output[..m_bufPos]);
                 }
 
                 FinishData(State.EncFinal);
 
-                mMac.AsSpan(0, MacSize).CopyTo(output[mBufPos..]);
+                m_mac.AsSpan(0, MacSize).CopyTo(output[m_bufPos..]);
                 break;
             }
             default:
                 throw new InvalidOperationException();
             }
 
-            Reset(false, true);
+            Reset(clearMac: false, resetCipher: true);
 
             return resultLen;
         }
 #endif
 
-        public virtual byte[] GetMac()
-        {
-            return Arrays.Clone(mMac);
-        }
+        /// <summary>Return the Message Authentication Code (MAC) generated or verified by the cipher.</summary>
+        /// <returns>A byte array containing the MACBlock.</returns>
+        public virtual byte[] GetMac() => Arrays.Clone(m_mac);
 
-        public virtual void Reset()
-        {
-            Reset(true, true);
-        }
+        /// <summary>Reset the cipher to its initial state (ready for a new message with the same key but DIFFERENT nonce).</summary>
+        public virtual void Reset() => Reset(clearMac: true, resetCipher: true);
 
         private void CheckAad()
         {
-            switch (mState)
+            switch (m_state)
             {
             case State.DecInit:
-                this.mState = State.DecAad;
+                m_state = State.DecAad;
                 break;
             case State.EncInit:
-                this.mState = State.EncAad;
+                m_state = State.EncAad;
                 break;
             case State.DecAad:
             case State.EncAad:
@@ -732,7 +818,7 @@ namespace Org.BouncyCastle.Crypto.Modes
 
         private void CheckData()
         {
-            switch (mState)
+            switch (m_state)
             {
             case State.DecInit:
             case State.DecAad:
@@ -754,23 +840,22 @@ namespace Org.BouncyCastle.Crypto.Modes
 
         private void FinishAad(State nextState)
         {
-            PadMac(mAadCount);
+            PadMac(m_aadCount);
 
-            this.mState = nextState;
+            m_state = nextState;
         }
 
         private void FinishData(State nextState)
         {
-            PadMac(mDataCount);
+            PadMac(m_dataCount);
 
             byte[] lengths = new byte[16];
-            Pack.UInt64_To_LE(mAadCount, lengths, 0);
-            Pack.UInt64_To_LE(mDataCount, lengths, 8);
-            mPoly1305.BlockUpdate(lengths, 0, 16);
+            Pack.UInt64_To_LE(m_aadCount, lengths, 0);
+            Pack.UInt64_To_LE(m_dataCount, lengths, 8);
+            m_poly1305.BlockUpdate(lengths, 0, 16);
+            m_poly1305.DoFinal(m_mac, 0);
 
-            mPoly1305.DoFinal(mMac, 0);
-
-            this.mState = nextState;
+            m_state = nextState;
         }
 
         private ulong IncrementCount(ulong count, uint increment, ulong limit)
@@ -787,8 +872,8 @@ namespace Org.BouncyCastle.Crypto.Modes
             Span<byte> firstBlock = stackalloc byte[64];
             try
             {
-                mChacha20.ProcessBytes(firstBlock, firstBlock);
-                mPoly1305.Init(new KeyParameter(firstBlock[..32]));
+                m_chacha20.ProcessBytes(firstBlock, firstBlock);
+                m_poly1305.Init(new KeyParameter(firstBlock[..32]));
             }
             finally
             {
@@ -798,8 +883,8 @@ namespace Org.BouncyCastle.Crypto.Modes
             byte[] firstBlock = new byte[64];
             try
             {
-                mChacha20.ProcessBytes(firstBlock, 0, 64, firstBlock, 0);
-                mPoly1305.Init(new KeyParameter(firstBlock, 0, 32));
+                m_chacha20.ProcessBytes(firstBlock, 0, 64, firstBlock, 0);
+                m_poly1305.Init(new KeyParameter(firstBlock, 0, 32));
             }
             finally
             {
@@ -813,7 +898,7 @@ namespace Org.BouncyCastle.Crypto.Modes
             int partial = (int)count & (MacSize - 1);
             if (0 != partial)
             {
-                mPoly1305.BlockUpdate(Zeroes, 0, MacSize - partial);
+                m_poly1305.BlockUpdate(Zeros, 0, MacSize - partial);
             }
         }
 
@@ -822,71 +907,65 @@ namespace Org.BouncyCastle.Crypto.Modes
         {
             Check.OutputLength(output, 64, "output buffer too short");
 
-            mChacha20.ProcessBlock(input, output);
-
-            this.mDataCount = IncrementCount(mDataCount, 64U, DataLimit);
+            m_chacha20.ProcessBlock(input, output);
+            m_dataCount = IncrementCount(m_dataCount, 64U, DataLimit);
         }
 
         private void ProcessBlocks2(ReadOnlySpan<byte> input, Span<byte> output)
         {
             Check.OutputLength(output, 128, "output buffer too short");
 
-            mChacha20.ProcessBlocks2(input, output);
-
-            this.mDataCount = IncrementCount(mDataCount, 128U, DataLimit);
+            m_chacha20.ProcessBlocks2(input, output);
+            m_dataCount = IncrementCount(m_dataCount, 128U, DataLimit);
         }
 
         private void ProcessData(ReadOnlySpan<byte> input, Span<byte> output)
         {
             Check.OutputLength(output, input.Length, "output buffer too short");
 
-            mChacha20.ProcessBytes(input, output);
-
-            this.mDataCount = IncrementCount(mDataCount, (uint)input.Length, DataLimit);
+            m_chacha20.ProcessBytes(input, output);
+            m_dataCount = IncrementCount(m_dataCount, (uint)input.Length, DataLimit);
         }
 #else
         private void ProcessBlock(byte[] inBytes, int inOff, byte[] outBytes, int outOff)
         {
             Check.OutputLength(outBytes, outOff, 64, "output buffer too short");
 
-            mChacha20.ProcessBlock(inBytes, inOff, outBytes, outOff);
-
-            this.mDataCount = IncrementCount(mDataCount, 64U, DataLimit);
+            m_chacha20.ProcessBlock(inBytes, inOff, outBytes, outOff);
+            m_dataCount = IncrementCount(m_dataCount, 64U, DataLimit);
         }
 
         private void ProcessBlocks2(byte[] inBytes, int inOff, byte[] outBytes, int outOff)
         {
             Check.OutputLength(outBytes, outOff, 128, "output buffer too short");
 
-            mChacha20.ProcessBlocks2(inBytes, inOff, outBytes, outOff);
-
-            this.mDataCount = IncrementCount(mDataCount, 128U, DataLimit);
+            m_chacha20.ProcessBlocks2(inBytes, inOff, outBytes, outOff);
+            m_dataCount = IncrementCount(m_dataCount, 128U, DataLimit);
         }
 
         private void ProcessData(byte[] inBytes, int inOff, int inLen, byte[] outBytes, int outOff)
         {
             Check.OutputLength(outBytes, outOff, inLen, "output buffer too short");
 
-            mChacha20.ProcessBytes(inBytes, inOff, inLen, outBytes, outOff);
-
-            this.mDataCount = IncrementCount(mDataCount, (uint)inLen, DataLimit);
+            m_chacha20.ProcessBytes(inBytes, inOff, inLen, outBytes, outOff);
+            m_dataCount = IncrementCount(m_dataCount, (uint)inLen, DataLimit);
         }
 #endif
 
         private void Reset(bool clearMac, bool resetCipher)
         {
-            Array.Clear(mBuf, 0, mBuf.Length);
+            Array.Clear(m_buf, 0, m_buf.Length);
 
             if (clearMac)
             {
-                Array.Clear(mMac, 0, mMac.Length);
+                Array.Clear(m_mac, 0, m_mac.Length);
             }
 
-            this.mAadCount = 0UL;
-            this.mDataCount = 0UL;
-            this.mBufPos = 0;
+            m_aadCount = 0UL;
+            m_dataCount = 0UL;
+            m_bufPos = 0;
 
-            switch (mState)
+            switch (m_state)
             {
             case State.DecInit:
             case State.EncInit:
@@ -894,12 +973,12 @@ namespace Org.BouncyCastle.Crypto.Modes
             case State.DecAad:
             case State.DecData:
             case State.DecFinal:
-                this.mState = State.DecInit;
+                m_state = State.DecInit;
                 break;
             case State.EncAad:
             case State.EncData:
             case State.EncFinal:
-                this.mState = State.EncFinal;
+                m_state = State.EncFinal;
                 return;
             default:
                 throw new InvalidOperationException(AlgorithmName + " needs to be initialized");
@@ -907,17 +986,17 @@ namespace Org.BouncyCastle.Crypto.Modes
 
             if (resetCipher)
             {
-                mChacha20.Reset();
+                m_chacha20.Reset();
             }
 
             InitMac();
 
-            if (null != mInitialAad)
+            if (null != m_initialAad)
             {
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
-                ProcessAadBytes(mInitialAad);
+                ProcessAadBytes(m_initialAad);
 #else
-                ProcessAadBytes(mInitialAad, 0, mInitialAad.Length);
+                ProcessAadBytes(m_initialAad, 0, m_initialAad.Length);
 #endif
             }
         }

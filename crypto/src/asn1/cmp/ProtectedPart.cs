@@ -1,3 +1,5 @@
+using System;
+
 namespace Org.BouncyCastle.Asn1.Cmp
 {
 	public class ProtectedPart
@@ -12,24 +14,32 @@ namespace Org.BouncyCastle.Asn1.Cmp
             return new ProtectedPart(Asn1Sequence.GetInstance(obj));
         }
 
-        public static ProtectedPart GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
-        {
-            return new ProtectedPart(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
-        }
+        public static ProtectedPart GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new ProtectedPart(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
+
+        public static ProtectedPart GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new ProtectedPart(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
         private readonly PkiHeader m_header;
 		private readonly PkiBody m_body;
 
 		private ProtectedPart(Asn1Sequence seq)
 		{
-			m_header = PkiHeader.GetInstance(seq[0]);
-			m_body = PkiBody.GetInstance(seq[1]);
+            int count = seq.Count, pos = 0;
+            if (count != 2)
+                throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
+
+            m_header = Asn1Utilities.Read(seq, ref pos, PkiHeader.GetInstance);
+			m_body = Asn1Utilities.Read(seq, ref pos, PkiBody.GetInstance);
+
+            if (pos != count)
+                throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
 		}
 
 		public ProtectedPart(PkiHeader header, PkiBody body)
 		{
-			m_header = header;
-			m_body = body;
+			m_header = header ?? throw new ArgumentNullException(nameof(header));
+			m_body = body ?? throw new ArgumentNullException(nameof(body));
 		}
 
 		public virtual PkiHeader Header => m_header;

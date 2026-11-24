@@ -3,14 +3,13 @@ using System.IO;
 
 using Org.BouncyCastle.Asn1;
 using Org.BouncyCastle.Asn1.Cms;
-using Asn1Pkcs = Org.BouncyCastle.Asn1.Pkcs;
 using Org.BouncyCastle.Asn1.X509;
 using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Crypto.Parameters;
-using Org.BouncyCastle.Security;
-using Org.BouncyCastle.X509;
-using Org.BouncyCastle.Asn1.Pkcs;
 using Org.BouncyCastle.Crypto.Operators;
+using Org.BouncyCastle.Crypto.Parameters;
+using Org.BouncyCastle.Crypto.Utilities;
+using Org.BouncyCastle.Security;
+using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Cms
 {
@@ -22,32 +21,31 @@ namespace Org.BouncyCastle.Cms
     public class KeyTransRecipientInformation
         : RecipientInformation
     {
-        private KeyTransRecipientInfo info;
+        private readonly KeyTransRecipientInfo m_info;
 
-		internal KeyTransRecipientInformation(
-			KeyTransRecipientInfo	info,
-			CmsSecureReadable		secureReadable)
-			: base(info.KeyEncryptionAlgorithm, secureReadable)
-		{
-            this.info = info;
+        internal KeyTransRecipientInformation(KeyTransRecipientInfo info, CmsSecureReadable secureReadable)
+            : base(info.KeyEncryptionAlgorithm, secureReadable)
+        {
             this.rid = new RecipientID();
 
-			RecipientIdentifier r = info.RecipientIdentifier;
+            m_info = info;
 
-			try
+            RecipientIdentifier r = info.RecipientIdentifier;
+
+            try
             {
                 if (r.IsTagged)
                 {
-                    Asn1OctetString octs = Asn1OctetString.GetInstance(r.ID);
+                    var subjectKeyIdentifier = SubjectKeyIdentifier.GetInstance(r.ID);
 
-					rid.SubjectKeyIdentifier = octs.GetEncoded(Asn1Encodable.Der);
+                    rid.SubjectKeyIdentifier = subjectKeyIdentifier.GetEncoded(Asn1Encodable.Der);
                 }
                 else
                 {
-                    Asn1.Cms.IssuerAndSerialNumber iAnds = Asn1.Cms.IssuerAndSerialNumber.GetInstance(r.ID);
+                    var issuerAndSerialNumber = IssuerAndSerialNumber.GetInstance(r.ID);
 
-					rid.Issuer = iAnds.Name;
-                    rid.SerialNumber = iAnds.SerialNumber.Value;
+                    rid.Issuer = issuerAndSerialNumber.Issuer;
+                    rid.SerialNumber = issuerAndSerialNumber.SerialNumber.Value;
                 }
             }
             catch (IOException)
@@ -56,77 +54,95 @@ namespace Org.BouncyCastle.Cms
             }
         }
 
-		private string GetExchangeEncryptionAlgorithmName(
-			AlgorithmIdentifier algo)
-		{
-		    DerObjectIdentifier oid = algo.Algorithm;
+        private string GetExchangeEncryptionAlgorithmName(AlgorithmIdentifier algID)
+        {
+            var algOid = algID.Algorithm;
 
-            if (Asn1Pkcs.PkcsObjectIdentifiers.RsaEncryption.Equals(oid))
-			{
-				return "RSA//PKCS1Padding";
-			} else if (Asn1Pkcs.PkcsObjectIdentifiers.IdRsaesOaep.Equals(oid))
+            if (Asn1.Pkcs.PkcsObjectIdentifiers.RsaEncryption.Equals(algOid))
             {
-                 Asn1Pkcs.RsaesOaepParameters rsaParams = Asn1Pkcs.RsaesOaepParameters.GetInstance(algo.Parameters);                       
-                return "RSA//OAEPWITH"+DigestUtilities.GetAlgorithmName(rsaParams.HashAlgorithm.Algorithm)+"ANDMGF1Padding";
+                return "RSA//PKCS1Padding";
+            }
+            else if (Asn1.Pkcs.PkcsObjectIdentifiers.IdRsaesOaep.Equals(algOid))
+            {
+                var rsaesOaepParameters = Asn1.Pkcs.RsaesOaepParameters.GetInstance(algID.Parameters);
+                var digestName = DigestUtilities.GetAlgorithmName(rsaesOaepParameters.HashAlgorithm.Algorithm);
+                return "RSA//OAEPWITH" + digestName + "ANDMGF1Padding";
             }
 
-			return oid.Id;
-		}
+            return algOid.GetID();
+        }
 
-		internal KeyParameter UnwrapKey(ICipherParameters key)
-		{
-			byte[] encryptedKey = info.EncryptedKey.GetOctets();
-            
-
-			try
-			{
-				if (keyEncAlg.Algorithm.Equals(PkcsObjectIdentifiers.IdRsaesOaep))
-				{
-					IKeyUnwrapper keyWrapper = new Asn1KeyUnwrapper(keyEncAlg.Algorithm, keyEncAlg.Parameters, key);
-
-					return ParameterUtilities.CreateKeyParameter(
-							GetContentAlgorithmName(), keyWrapper.Unwrap(encryptedKey, 0, encryptedKey.Length).Collect());
-				}
-				else
-				{
-					string keyExchangeAlgorithm = GetExchangeEncryptionAlgorithmName(keyEncAlg);
-					IWrapper keyWrapper = WrapperUtilities.GetWrapper(keyExchangeAlgorithm);
-					keyWrapper.Init(false, key);
-
-					// FIXME Support for MAC algorithm parameters similar to cipher parameters
-					return ParameterUtilities.CreateKeyParameter(
-						GetContentAlgorithmName(), keyWrapper.Unwrap(encryptedKey, 0, encryptedKey.Length));
-				}
-			}
-			catch (SecurityUtilityException e)
-			{
-				throw new CmsException("couldn't create cipher.", e);
-			}
-			catch (InvalidKeyException e)
-			{
-				throw new CmsException("key invalid in message.", e);
-			}
-//			catch (IllegalBlockSizeException e)
-			catch (DataLengthException e)
-			{
-				throw new CmsException("illegal blocksize in message.", e);
-			}
-//			catch (BadPaddingException e)
-			catch (InvalidCipherTextException e)
-			{
-				throw new CmsException("bad padding in message.", e);
-			}
-		}
-		
-		/**
-        * decrypt the content and return it as a byte array.
-        */
-        public override CmsTypedStream GetContentStream(
-            ICipherParameters key)
+        internal KeyParameter UnwrapKey(ICipherParameters key)
         {
-			KeyParameter sKey = UnwrapKey(key);
+            byte[] encryptedKey = m_info.EncryptedKey.GetOctets();
 
-			return GetContentFromSessionKey(sKey);
-		}
+            try
+            {
+                string contentAlgorithmName = GetContentAlgorithmName();
+
+                if (Asn1.Pkcs.PkcsObjectIdentifiers.RsaEncryption.Equals(keyEncAlg.Algorithm))
+                {
+                    if (GeneratorUtilities.TryGetFixedKeySize(contentAlgorithmName, out int fixedKeySizeBits) &&
+                        (fixedKeySizeBits & 7) == 0)
+                    {
+                        int fixedLength = fixedKeySizeBits / 8;
+
+                        var rsaKeyParameters = (RsaKeyParameters)ParameterUtilities.GetRandom(key, out var providedRandom);
+                        var secureRandom = CryptoServicesRegistrar.GetSecureRandom(providedRandom);
+
+                        byte[] keyBytes = RsaPkcs1Utilities.DecryptToFixedLength(fixedLength, encryptedKey, 0,
+                            encryptedKey.Length, rsaKeyParameters, secureRandom);
+
+                        return ParameterUtilities.CreateKeyParameter(contentAlgorithmName, keyBytes);
+                    }
+
+                    // The legacy unwrap provides a Bleichenbacher padding Oracle, so require user intervention to allow
+                    if (Properties.GetBoolean(Properties.CmsAllowLenientRsaPkcs1, false))
+                    {
+                        IKeyUnwrapper keyWrapper = new Asn1KeyUnwrapper(keyEncAlg.Algorithm, keyEncAlg.Parameters, key);
+                        byte[] keyBytes = keyWrapper.Unwrap(encryptedKey, 0, encryptedKey.Length).Collect();
+                        return ParameterUtilities.CreateKeyParameter(contentAlgorithmName, keyBytes);
+                    }
+
+                    throw new CmsException("no fixed size for content-encryption key; constant-time RSA unwrap unavailable.");
+                }
+
+                if (Asn1.Pkcs.PkcsObjectIdentifiers.IdRsaesOaep.Equals(keyEncAlg.Algorithm))
+                {
+                    IKeyUnwrapper keyWrapper = new Asn1KeyUnwrapper(keyEncAlg.Algorithm, keyEncAlg.Parameters, key);
+                    byte[] keyBytes = keyWrapper.Unwrap(encryptedKey, 0, encryptedKey.Length).Collect();
+                    return ParameterUtilities.CreateKeyParameter(contentAlgorithmName, keyBytes);
+                }
+
+                {
+                    string keyExchangeAlgorithm = GetExchangeEncryptionAlgorithmName(keyEncAlg);
+                    IWrapper keyWrapper = WrapperUtilities.GetWrapper(keyExchangeAlgorithm);
+                    keyWrapper.Init(forWrapping: false, key);
+                    byte[] keyBytes = keyWrapper.Unwrap(encryptedKey, 0, encryptedKey.Length);
+
+                    // FIXME Support for MAC algorithm parameters similar to cipher parameters
+                    return ParameterUtilities.CreateKeyParameter(contentAlgorithmName, keyBytes);
+                }
+            }
+            catch (SecurityUtilityException e)
+            {
+                throw new CmsException("couldn't create cipher.", e);
+            }
+            catch (InvalidKeyException e)
+            {
+                throw new CmsException("key invalid in message.", e);
+            }
+            catch (DataLengthException e)
+            {
+                throw new CmsException("illegal blocksize in message.", e);
+            }
+            catch (InvalidCipherTextException e)
+            {
+                throw new CmsException("bad padding in message.", e);
+            }
+        }
+
+        /// <summary>Decrypt the content and return it as a byte array.</summary>
+        public override CmsTypedStream GetContentStream(ICipherParameters key) => GetContentFromSessionKey(UnwrapKey(key));
     }
 }

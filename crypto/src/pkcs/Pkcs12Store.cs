@@ -8,23 +8,34 @@ using Org.BouncyCastle.Asn1.Oiw;
 using Org.BouncyCastle.Asn1.Pkcs;
 using Org.BouncyCastle.Asn1.X509;
 using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Operators.Utilities;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Utilities;
 using Org.BouncyCastle.Utilities.Collections;
 using Org.BouncyCastle.Utilities.Encoders;
 using Org.BouncyCastle.X509;
+using Org.BouncyCastle.X509.Extension;
 
 namespace Org.BouncyCastle.Pkcs
 {
+    /// <summary>
+    /// In-memory PKCS#12 keystore (PFX) as defined in RFC 7292. Loads and saves password-protected bags of
+    /// private keys and X.509 certificates. Create instances via <see cref="Pkcs12StoreBuilder"/>.
+    /// </summary>
     public class Pkcs12Store
     {
+        /// <summary>
+        /// Environment variable that, when set to <c>true</c>, suppresses the error raised when
+        /// <see cref="Load"/> is called with a password but the file does not require one.
+        /// </summary>
+        [Obsolete("Use 'Properties.Pkcs12IgnoreUselessPassword' instead")]
         public const string IgnoreUselessPasswordProperty = "Org.BouncyCastle.Pkcs12.IgnoreUselessPassword";
 
         private readonly Dictionary<string, AsymmetricKeyEntry> m_keys =
             new Dictionary<string, AsymmetricKeyEntry>(StringComparer.OrdinalIgnoreCase);
         private readonly List<string> m_keysOrder = new List<string>();
 
-        private readonly Dictionary<string, string> m_localIds = new Dictionary<string, string>();
+        private readonly Dictionary<string, string> m_localIDs = new Dictionary<string, string>();
 
         private readonly Dictionary<string, X509CertificateEntry> m_certs =
             new Dictionary<string, X509CertificateEntry>(StringComparer.OrdinalIgnoreCase);
@@ -35,26 +46,21 @@ namespace Org.BouncyCastle.Pkcs
         private readonly List<CertID> m_chainCertsOrder = new List<CertID>();
 
         private readonly Dictionary<string, X509CertificateEntry> m_keyCerts =
-            new Dictionary<string, X509CertificateEntry>();
+            new Dictionary<string, X509CertificateEntry>(StringComparer.OrdinalIgnoreCase);
 
+        private readonly DerObjectIdentifier certAlgorithm;
+        private readonly DerObjectIdentifier certPrfAlgorithm;
         private readonly DerObjectIdentifier keyAlgorithm;
         private readonly DerObjectIdentifier keyPrfAlgorithm;
-        private readonly DerObjectIdentifier certAlgorithm;
         private readonly bool useDerEncoding;
         private readonly bool reverseCertificates;
-
-        private AsymmetricKeyEntry unmarkedKeyEntry = null;
+        private readonly bool overwriteFriendlyName;
+        private readonly bool enableOracleTrustedKeyUsage;
 
         private const int MinIterations = 1024;
         private const int SaltSize = 20;
 
-        private static SubjectKeyIdentifier CreateSubjectKeyID(AsymmetricKeyParameter pubKey)
-        {
-            return new SubjectKeyIdentifier(
-                SubjectPublicKeyInfoFactory.CreateSubjectPublicKeyInfo(pubKey));
-        }
-
-        internal struct CertID
+        private struct CertID
             : IEquatable<CertID>
         {
             private readonly byte[] m_id;
@@ -65,13 +71,13 @@ namespace Org.BouncyCastle.Pkcs
             }
 
             internal CertID(X509Certificate cert)
-                : this(CreateSubjectKeyID(cert.GetPublicKey()).GetKeyIdentifier())
+                : this(CreateLocalKeyID(cert))
             {
             }
 
-            internal CertID(byte[] id)
+            internal CertID(Asn1OctetString id)
             {
-                m_id = id;
+                m_id = id.GetOctets();
             }
 
             internal byte[] ID => m_id;
@@ -83,17 +89,22 @@ namespace Org.BouncyCastle.Pkcs
             public override int GetHashCode() => Arrays.GetHashCode(m_id);
         }
 
-        internal Pkcs12Store(DerObjectIdentifier keyAlgorithm, DerObjectIdentifier keyPrfAlgorithm,
-            DerObjectIdentifier certAlgorithm, bool useDerEncoding, bool reverseCertificates)
+        internal Pkcs12Store(DerObjectIdentifier certAlgorithm, DerObjectIdentifier certPrfAlgorithm,
+            DerObjectIdentifier keyAlgorithm, DerObjectIdentifier keyPrfAlgorithm, bool useDerEncoding,
+            bool reverseCertificates, bool overwriteFriendlyName, bool enableOracleTrustedKeyUsage)
         {
+            this.certAlgorithm = certAlgorithm;
+            this.certPrfAlgorithm = certPrfAlgorithm;
             this.keyAlgorithm = keyAlgorithm;
             this.keyPrfAlgorithm = keyPrfAlgorithm;
-            this.certAlgorithm = certAlgorithm;
             this.useDerEncoding = useDerEncoding;
             this.reverseCertificates = reverseCertificates;
+            this.overwriteFriendlyName = overwriteFriendlyName;
+            this.enableOracleTrustedKeyUsage = enableOracleTrustedKeyUsage;
         }
 
-        protected virtual void LoadKeyBag(PrivateKeyInfo privKeyInfo, Asn1Set bagAttributes)
+        protected virtual void LoadKeyBag(PrivateKeyInfo privKeyInfo, Asn1Set bagAttributes,
+            ref AsymmetricKeyEntry unmarkedKeyEntry)
         {
             AsymmetricKeyParameter privKey = PrivateKeyFactory.CreateKey(privKeyInfo);
 
@@ -101,51 +112,51 @@ namespace Org.BouncyCastle.Pkcs
             AsymmetricKeyEntry keyEntry = new AsymmetricKeyEntry(privKey, attributes);
 
             string alias = null;
-            Asn1OctetString localId = null;
+            Asn1OctetString localID = null;
 
             if (bagAttributes != null)
             {
-                foreach (Asn1Sequence sq in bagAttributes)
+                foreach (var bagAttribute in bagAttributes)
                 {
+                    Asn1Sequence sq = Asn1Sequence.GetInstance(bagAttribute);
                     DerObjectIdentifier aOid = DerObjectIdentifier.GetInstance(sq[0]);
                     Asn1Set attrSet = Asn1Set.GetInstance(sq[1]);
-                    Asn1Encodable attr = null;
 
-                    if (attrSet.Count > 0)
+                    if (attrSet.Count < 1)
+                        continue;
+
+                    // TODO We should be adding all attributes in the set
+                    Asn1Encodable attr = attrSet[0];
+
+                    // TODO We might want to "merge" attribute sets with
+                    // the same OID - currently, differing values give an error
+                    if (attributes.TryGetValue(aOid, out var attributeValue))
                     {
-                        // TODO We should be adding all attributes in the set
-                        attr = attrSet[0];
+                        // OK, but the value has to be the same
+                        if (!attributeValue.Equals(attr))
+                            throw new IOException("attempt to add existing attribute with different value");
+                    }
+                    else
+                    {
+                        attributes[aOid] = attr;
+                    }
 
-                        // TODO We might want to "merge" attribute sets with
-                        // the same OID - currently, differing values give an error
-                        if (attributes.TryGetValue(aOid, out var attributeValue))
-                        {
-                            // OK, but the value has to be the same
-                            if (!attributeValue.Equals(attr))
-                                throw new IOException("attempt to add existing attribute with different value");
-                        }
-                        else
-                        {
-                            attributes[aOid] = attr;
-                        }
-
-                        if (PkcsObjectIdentifiers.Pkcs9AtFriendlyName.Equals(aOid))
-                        {
-                            alias = ((DerBmpString)attr).GetString();
-                            // TODO Do these in a separate loop, just collect aliases here
-                            Map(m_keys, m_keysOrder, alias, keyEntry);
-                        }
-                        else if (PkcsObjectIdentifiers.Pkcs9AtLocalKeyID.Equals(aOid))
-                        {
-                            localId = (Asn1OctetString)attr;
-                        }
+                    if (PkcsObjectIdentifiers.Pkcs9AtFriendlyName.Equals(aOid))
+                    {
+                        alias = DerBmpString.GetInstance(attr).GetString();
+                        // TODO Do these in a separate loop, just collect aliases here
+                        Map(m_keys, m_keysOrder, alias, keyEntry);
+                    }
+                    else if (PkcsObjectIdentifiers.Pkcs9AtLocalKeyID.Equals(aOid))
+                    {
+                        localID = Asn1OctetString.GetInstance(attr);
                     }
                 }
             }
 
-            if (localId != null)
+            if (localID != null)
             {
-                string name = Hex.ToHexString(localId.GetOctets());
+                string name = Hex.ToHexString(localID.GetOctets());
 
                 if (alias == null)
                 {
@@ -154,7 +165,7 @@ namespace Org.BouncyCastle.Pkcs
                 else
                 {
                     // TODO There may have been more than one alias
-                    m_localIds[alias] = name;
+                    m_localIDs[alias] = name;
                 }
             }
             else
@@ -164,77 +175,74 @@ namespace Org.BouncyCastle.Pkcs
         }
 
         protected virtual void LoadPkcs8ShroudedKeyBag(EncryptedPrivateKeyInfo encPrivKeyInfo, Asn1Set bagAttributes,
-            char[] password, bool wrongPkcs12Zero)
+            char[] password, bool wrongPkcs12Zero, ref AsymmetricKeyEntry unmarkedKeyEntry)
         {
-            if (password != null)
-            {
-                PrivateKeyInfo privInfo = PrivateKeyInfoFactory.CreatePrivateKeyInfo(
-                    password, wrongPkcs12Zero, encPrivKeyInfo);
+            var privateKeyInfo = PrivateKeyInfoFactory.CreatePrivateKeyInfo(password, wrongPkcs12Zero, encPrivKeyInfo);
 
-                LoadKeyBag(privInfo, bagAttributes);
-            }
+            LoadKeyBag(privateKeyInfo, bagAttributes, ref unmarkedKeyEntry);
         }
 
+        /// <summary>
+        /// Loads a PKCS#12 file from a stream, populating this store with keys and certificates.
+        /// </summary>
+        /// <param name="input">The stream containing the PKCS#12 PFX structure.</param>
+        /// <param name="password">
+        /// The password used to verify the MAC and decrypt shrouded key bags, or <c>null</c> if none is required.
+        /// </param>
+        /// <exception cref="ArgumentNullException">
+        /// <paramref name="input"/> is <c>null</c>, or a password is required but <paramref name="password"/> is
+        /// <c>null</c>.
+        /// </exception>
+        /// <exception cref="IOException">
+        /// The MAC verification failed, a password was supplied when none is required (unless
+        /// <see cref="IgnoreUselessPasswordProperty"/> is set), or bag attributes conflict.
+        /// </exception>
         public void Load(Stream input, char[] password)
         {
             if (input == null)
-                throw new ArgumentNullException("input");
+                throw new ArgumentNullException(nameof(input));
 
-            Pfx bag = Pfx.GetInstance(Asn1Object.FromStream(input));
-            ContentInfo info = bag.AuthSafe;
+            Pfx pfx = Pfx.GetInstance(Asn1Object.FromStream(input))
+                ?? throw new IOException("malformed PKCS#12 data: no PFX structure found");
+
+            ContentInfo info = pfx.AuthSafe;
             bool wrongPkcs12Zero = false;
 
-            if (bag.MacData != null) // check the mac code
+            bool passwordNeeded = false;
+
+            var macData = pfx.MacData;
+            if (macData != null) // check the mac code
             {
+                passwordNeeded = true;
+
                 if (password == null)
-                    throw new ArgumentNullException("password", "no password supplied when one expected");
+                    throw new ArgumentNullException(nameof(password), "no password supplied when one expected");
 
-                MacData mData = bag.MacData;
-                DigestInfo dInfo = mData.Mac;
-                AlgorithmIdentifier algId = dInfo.AlgorithmID;
-                byte[] salt = mData.GetSalt();
-                int itCount = mData.IterationCount.IntValue;
+                byte[] data = Pkcs12Utilities.GetContentOctets(info);
 
-                byte[] data = Asn1OctetString.GetInstance(info.Content).GetOctets();
-
-                byte[] mac = CalculatePbeMac(algId.Algorithm, salt, itCount, password, false, data);
-                byte[] dig = dInfo.GetDigest();
-
-                if (!Arrays.FixedTimeEquals(mac, dig))
+                if (!VerifyPbeMac(macData, password, wrongPkcs12Zero: false, data))
                 {
-                    if (password.Length > 0)
+                    // Try with incorrect zero length password conversion
+                    if (password.Length == 0 && VerifyPbeMac(macData, password, wrongPkcs12Zero: true, data))
+                    {
+                        wrongPkcs12Zero = true;
+                    }
+                    else
+                    {
                         throw new IOException("PKCS12 key store MAC invalid - wrong password or corrupted file.");
-
-                    // Try with incorrect zero length password
-                    mac = CalculatePbeMac(algId.Algorithm, salt, itCount, password, true, data);
-
-                    if (!Arrays.FixedTimeEquals(mac, dig))
-                        throw new IOException("PKCS12 key store MAC invalid - wrong password or corrupted file.");
-
-                    wrongPkcs12Zero = true;
-                }
-            }
-            else if (password != null)
-            {
-                string ignoreProperty = Platform.GetEnvironmentVariable(IgnoreUselessPasswordProperty);
-                bool ignore = ignoreProperty != null && Platform.EqualsIgnoreCase("true", ignoreProperty);
-
-                if (!ignore)
-                {
-                    throw new IOException("password supplied for keystore that does not require one");
+                    }
                 }
             }
 
             Clear(m_keys, m_keysOrder);
-            m_localIds.Clear();
-            unmarkedKeyEntry = null;
+            m_localIDs.Clear();
+            AsymmetricKeyEntry unmarkedKeyEntry = null;
 
             var certBags = new List<SafeBag>();
 
             if (PkcsObjectIdentifiers.Data.Equals(info.ContentType))
             {
-                Asn1OctetString content = Asn1OctetString.GetInstance(info.Content);
-                AuthenticatedSafe authSafe = AuthenticatedSafe.GetInstance(content.GetOctets());
+                AuthenticatedSafe authSafe = AuthenticatedSafe.GetInstance(Pkcs12Utilities.GetContentOctets(info));
                 ContentInfo[] cis = authSafe.GetContentInfo();
 
                 foreach (ContentInfo ci in cis)
@@ -244,47 +252,50 @@ namespace Org.BouncyCastle.Pkcs
                     byte[] octets = null;
                     if (PkcsObjectIdentifiers.Data.Equals(oid))
                     {
-                        octets = Asn1OctetString.GetInstance(ci.Content).GetOctets();
+                        octets = Pkcs12Utilities.GetContentOctets(ci);
                     }
                     else if (PkcsObjectIdentifiers.EncryptedData.Equals(oid))
                     {
-                        if (password != null)
-                        {
-                            EncryptedData d = EncryptedData.GetInstance(ci.Content);
-                            octets = CryptPbeData(false, d.EncryptionAlgorithm,
-                                password, wrongPkcs12Zero, d.Content.GetOctets());
-                        }
+                        passwordNeeded = true;
+
+                        EncryptedData d = EncryptedData.GetInstance(Pkcs12Utilities.GetContent(ci));
+                        octets = CryptPbeData(forEncryption: false, d.EncryptionAlgorithm, password, wrongPkcs12Zero,
+                            data: Pkcs12Utilities.GetEncryptedContent(d).GetOctets());
                     }
                     else
                     {
                         // TODO Other data types
                     }
 
-                    if (octets != null)
+                    if (octets == null)
+                        continue;
+
+                    Asn1Sequence seq = Asn1Sequence.GetInstance(octets);
+
+                    foreach (var element in seq)
                     {
-                        Asn1Sequence seq = Asn1Sequence.GetInstance(octets);
+                        var safeBag = SafeBag.GetInstance(element);
+                        var safeBagID = safeBag.BagID;
 
-                        foreach (Asn1Sequence subSeq in seq)
+                        if (PkcsObjectIdentifiers.CertBag.Equals(safeBagID))
                         {
-                            SafeBag b = SafeBag.GetInstance(subSeq);
+                            certBags.Add(safeBag);
+                        }
+                        else if (PkcsObjectIdentifiers.KeyBag.Equals(safeBagID))
+                        {
+                            LoadKeyBag(PrivateKeyInfo.GetInstance(safeBag.BagValueEncodable), safeBag.BagAttributes,
+                                ref unmarkedKeyEntry);
+                        }
+                        else if (PkcsObjectIdentifiers.Pkcs8ShroudedKeyBag.Equals(safeBagID))
+                        {
+                            passwordNeeded = true;
 
-                            if (PkcsObjectIdentifiers.CertBag.Equals(b.BagID))
-                            {
-                                certBags.Add(b);
-                            }
-                            else if (PkcsObjectIdentifiers.Pkcs8ShroudedKeyBag.Equals(b.BagID))
-                            {
-                                LoadPkcs8ShroudedKeyBag(EncryptedPrivateKeyInfo.GetInstance(b.BagValue),
-                                    b.BagAttributes, password, wrongPkcs12Zero);
-                            }
-                            else if (PkcsObjectIdentifiers.KeyBag.Equals(b.BagID))
-                            {
-                                LoadKeyBag(PrivateKeyInfo.GetInstance(b.BagValue), b.BagAttributes);
-                            }
-                            else
-                            {
-                                // TODO Other bag types
-                            }
+                            LoadPkcs8ShroudedKeyBag(EncryptedPrivateKeyInfo.GetInstance(safeBag.BagValueEncodable),
+                                safeBag.BagAttributes, password, wrongPkcs12Zero, ref unmarkedKeyEntry);
+                        }
+                        else
+                        {
+                            // TODO Other bag types
                         }
                     }
                 }
@@ -296,60 +307,63 @@ namespace Org.BouncyCastle.Pkcs
 
             foreach (SafeBag b in certBags)
             {
-                CertBag certBag = CertBag.GetInstance(b.BagValue);
-                byte[] octets = ((Asn1OctetString)certBag.CertValue).GetOctets();
-                X509Certificate cert = new X509CertificateParser().ReadCertificate(octets);
+                CertBag certBag = CertBag.GetInstance(b.BagValueEncodable);
+
+                if (!PkcsObjectIdentifiers.X509Certificate.Equals(certBag.CertID))
+                    throw new Exception("Unsupported certificate type: " + certBag.CertID);
+
+                var certValue = Asn1OctetString.GetInstance(certBag.CertValueEncodable);
+                X509Certificate cert = new X509Certificate(certValue.GetOctets());
 
                 //
                 // set the attributes
                 //
                 var attributes = new Dictionary<DerObjectIdentifier, Asn1Encodable>();
-                Asn1OctetString localId = null;
+                Asn1OctetString localID = null;
                 string alias = null;
 
                 if (b.BagAttributes != null)
                 {
-                    foreach (Asn1Sequence sq in b.BagAttributes)
+                    foreach (var bagAttribute in b.BagAttributes)
                     {
+                        Asn1Sequence sq = Asn1Sequence.GetInstance(bagAttribute);
                         DerObjectIdentifier aOid = DerObjectIdentifier.GetInstance(sq[0]);
                         Asn1Set attrSet = Asn1Set.GetInstance(sq[1]);
 
-                        if (attrSet.Count > 0)
+                        if (attrSet.Count < 1)
+                            continue;
+
+                        // TODO We should be adding all attributes in the set
+                        Asn1Encodable attr = attrSet[0];
+
+                        // TODO We might want to "merge" attribute sets with
+                        // the same OID - currently, differing values give an error
+                        if (attributes.TryGetValue(aOid, out var attributeValue))
                         {
-                            // TODO We should be adding all attributes in the set
-                            Asn1Encodable attr = attrSet[0];
-
-                            // TODO We might want to "merge" attribute sets with
-                            // the same OID - currently, differing values give an error
-                            if (attributes.TryGetValue(aOid, out var attributeValue))
+                            // we've found more than one - one might be incorrect
+                            if (PkcsObjectIdentifiers.Pkcs9AtLocalKeyID.Equals(aOid))
                             {
-                                // we've found more than one - one might be incorrect
-                                if (PkcsObjectIdentifiers.Pkcs9AtLocalKeyID.Equals(aOid))
-                                {
-                                    string id = Hex.ToHexString(Asn1OctetString.GetInstance(attr).GetOctets());
-                                    if (!m_keys.ContainsKey(id) && !m_localIds.ContainsKey(id))
-                                        continue; // ignore this one - it's not valid
-                                }
-
-                                // OK, but the value has to be the same
-                                if (!attributeValue.Equals(attr))
-                                {
-                                    throw new IOException("attempt to add existing attribute with different value");
-                                }
-                            }
-                            else
-                            {
-                                attributes[aOid] = attr;
+                                string id = Hex.ToHexString(Asn1OctetString.GetInstance(attr).GetOctets());
+                                if (!m_keys.ContainsKey(id) && !m_localIDs.ContainsKey(id))
+                                    continue; // ignore this one - it's not valid
                             }
 
-                            if (PkcsObjectIdentifiers.Pkcs9AtFriendlyName.Equals(aOid))
-                            {
-                                alias = ((DerBmpString)attr).GetString();
-                            }
-                            else if (PkcsObjectIdentifiers.Pkcs9AtLocalKeyID.Equals(aOid))
-                            {
-                                localId = (Asn1OctetString)attr;
-                            }
+                            // OK, but the value has to be the same
+                            if (!attributeValue.Equals(attr))
+                                throw new IOException("attempt to add existing attribute with different value");
+                        }
+                        else
+                        {
+                            attributes[aOid] = attr;
+                        }
+
+                        if (PkcsObjectIdentifiers.Pkcs9AtFriendlyName.Equals(aOid))
+                        {
+                            alias = DerBmpString.GetInstance(attr).GetString();
+                        }
+                        else if (PkcsObjectIdentifiers.Pkcs9AtLocalKeyID.Equals(aOid))
+                        {
+                            localID = Asn1OctetString.GetInstance(attr);
                         }
                     }
                 }
@@ -366,17 +380,14 @@ namespace Org.BouncyCastle.Pkcs
 
                         m_keyCerts[name] = certEntry;
                         Map(m_keys, m_keysOrder, name, unmarkedKeyEntry);
-                    }
-                    else
-                    {
-                        Map(m_keys, m_keysOrder, "unmarked", unmarkedKeyEntry);
+                        unmarkedKeyEntry = null;
                     }
                 }
                 else
                 {
-                    if (localId != null)
+                    if (localID != null)
                     {
-                        string name = Hex.ToHexString(localId.GetOctets());
+                        string name = Hex.ToHexString(localID.GetOctets());
 
                         m_keyCerts[name] = certEntry;
                     }
@@ -388,8 +399,24 @@ namespace Org.BouncyCastle.Pkcs
                     }
                 }
             }
+
+            if (unmarkedKeyEntry != null)
+            {
+                Map(m_keys, m_keysOrder, "unmarked", unmarkedKeyEntry);
+            }
+
+            if (!passwordNeeded && password != null)
+            {
+                if (!Properties.GetBoolean(Properties.Pkcs12IgnoreUselessPassword, false))
+                    throw new IOException("password supplied for keystore that does not require one");
+            }
         }
 
+        /// <summary>
+        /// Returns the private-key entry for the given alias, or <c>null</c> if not present.
+        /// </summary>
+        /// <param name="alias">The entry alias (friendly name or local key id hex string).</param>
+        /// <exception cref="ArgumentNullException"><paramref name="alias"/> is <c>null</c>.</exception>
         public AsymmetricKeyEntry GetKey(string alias)
         {
             if (alias == null)
@@ -398,6 +425,11 @@ namespace Org.BouncyCastle.Pkcs
             return CollectionUtilities.GetValueOrNull(m_keys, alias);
         }
 
+        /// <summary>
+        /// Returns <c>true</c> if the alias refers to a certificate-only entry (no private key).
+        /// </summary>
+        /// <param name="alias">The entry alias.</param>
+        /// <exception cref="ArgumentNullException"><paramref name="alias"/> is <c>null</c>.</exception>
         public bool IsCertificateEntry(string alias)
         {
             if (alias == null)
@@ -406,6 +438,11 @@ namespace Org.BouncyCastle.Pkcs
             return m_certs.ContainsKey(alias) && !m_keys.ContainsKey(alias);
         }
 
+        /// <summary>
+        /// Returns <c>true</c> if the alias refers to a private-key entry.
+        /// </summary>
+        /// <param name="alias">The entry alias.</param>
+        /// <exception cref="ArgumentNullException"><paramref name="alias"/> is <c>null</c>.</exception>
         public bool IsKeyEntry(string alias)
         {
             if (alias == null)
@@ -414,6 +451,7 @@ namespace Org.BouncyCastle.Pkcs
             return m_keys.ContainsKey(alias);
         }
 
+        /// <summary>Gets all aliases in this store (union of certificate and key aliases).</summary>
         public IEnumerable<string> Aliases
         {
             get
@@ -424,6 +462,11 @@ namespace Org.BouncyCastle.Pkcs
             }
         }
 
+        /// <summary>
+        /// Returns <c>true</c> if an entry exists under the given alias.
+        /// </summary>
+        /// <param name="alias">The entry alias.</param>
+        /// <exception cref="ArgumentNullException"><paramref name="alias"/> is <c>null</c>.</exception>
         public bool ContainsAlias(string alias)
         {
             if (alias == null)
@@ -432,9 +475,13 @@ namespace Org.BouncyCastle.Pkcs
             return m_certs.ContainsKey(alias) || m_keys.ContainsKey(alias);
         }
 
-        /**
-         * simply return the cert entry for the private key
-         */
+        /// <summary>
+        /// Returns the certificate entry for the alias — either a certificate-only entry or the end-entity
+        /// certificate associated with a private-key alias.
+        /// </summary>
+        /// <param name="alias">The entry alias.</param>
+        /// <returns>The certificate entry, or <c>null</c> if not found.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="alias"/> is <c>null</c>.</exception>
         public X509CertificateEntry GetCertificate(string alias)
         {
             if (alias == null)
@@ -443,15 +490,21 @@ namespace Org.BouncyCastle.Pkcs
             if (m_certs.TryGetValue(alias, out var cert))
                 return cert;
 
-            var keyCertKey = alias;
-            if (m_localIds.TryGetValue(alias, out var localId))
+            var keyCertsKey = alias;
+            if (m_localIDs.TryGetValue(alias, out var localID))
             {
-                keyCertKey = localId;
+                keyCertsKey = localID;
             }
 
-            return CollectionUtilities.GetValueOrNull(m_keyCerts, keyCertKey);
+            return CollectionUtilities.GetValueOrNull(m_keyCerts, keyCertsKey);
         }
 
+        /// <summary>
+        /// Finds the alias of the first entry whose certificate equals <paramref name="cert"/>.
+        /// </summary>
+        /// <param name="cert">The certificate to search for.</param>
+        /// <returns>The alias, or <c>null</c> if not found.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="cert"/> is <c>null</c>.</exception>
         public string GetCertificateAlias(X509Certificate cert)
         {
             if (cert == null)
@@ -465,6 +518,7 @@ namespace Org.BouncyCastle.Pkcs
 
             foreach (var entry in m_keyCerts)
             {
+                // TODO Needs to account for m_localIDs mappings
                 if (entry.Value.Certificate.Equals(cert))
                     return entry.Key;
             }
@@ -472,6 +526,13 @@ namespace Org.BouncyCastle.Pkcs
             return null;
         }
 
+        /// <summary>
+        /// Builds the certificate chain for a private-key alias by following Authority Key Identifier
+        /// or issuer/subject matching.
+        /// </summary>
+        /// <param name="alias">The private-key alias.</param>
+        /// <returns>The chain from end entity to root, or <c>null</c> if the alias is not a key entry.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="alias"/> is <c>null</c>.</exception>
         public X509CertificateEntry[] GetCertificateChain(string alias)
         {
             if (alias == null)
@@ -484,6 +545,7 @@ namespace Org.BouncyCastle.Pkcs
             if (c == null)
                 return null;
 
+            // TODO Ideally an insertion-order Set instead
             var cs = new List<X509CertificateEntry>();
 
             while (c != null)
@@ -491,12 +553,10 @@ namespace Org.BouncyCastle.Pkcs
                 X509Certificate x509c = c.Certificate;
                 X509CertificateEntry nextC = null;
 
-                Asn1OctetString akiValue = x509c.GetExtensionValue(X509Extensions.AuthorityKeyIdentifier);
-                if (akiValue != null)
+                AuthorityKeyIdentifier aki = X509ExtensionUtilities.GetAuthorityKeyIdentifier(x509c);
+                if (aki != null)
                 {
-                    AuthorityKeyIdentifier aki = AuthorityKeyIdentifier.GetInstance(akiValue.GetOctets());
-
-                    byte[] keyID = aki.GetKeyIdentifier();
+                    var keyID = aki.KeyIdentifier;
                     if (keyID != null)
                     {
                         nextC = CollectionUtilities.GetValueOrNull(m_chainCerts, new CertID(keyID));
@@ -535,20 +595,38 @@ namespace Org.BouncyCastle.Pkcs
                     }
                 }
 
-                cs.Add(c);
-                if (nextC != c) // self signed - end of the chain
+                if (cs.Contains(c))
                 {
-                    c = nextC;
+                    c = null;          // we've got a certificate chain loop time to stop
                 }
                 else
                 {
-                    c = null;
+                    cs.Add(c);
+                    if (nextC != c) // self signed - end of the chain
+                    {
+                        c = nextC;
+                    }
+                    else
+                    {
+                        c = null;
+                    }
                 }
             }
 
             return cs.ToArray();
         }
 
+        /// <summary>
+        /// Adds or replaces a certificate-only entry under the given alias.
+        /// </summary>
+        /// <param name="alias">The entry alias.</param>
+        /// <param name="certEntry">The certificate entry to store.</param>
+        /// <exception cref="ArgumentNullException">
+        /// <paramref name="alias"/> or <paramref name="certEntry"/> is <c>null</c>.
+        /// </exception>
+        /// <exception cref="ArgumentException">
+        /// A private-key entry already exists under <paramref name="alias"/>.
+        /// </exception>
         public void SetCertificateEntry(string alias, X509CertificateEntry certEntry)
         {
             if (alias == null)
@@ -562,14 +640,81 @@ namespace Org.BouncyCastle.Pkcs
             Map(m_chainCerts, m_chainCertsOrder, new CertID(certEntry), certEntry);
         }
 
+        /// <summary>
+        /// Renames an entry by updating its PKCS#9 friendly name and re-keying internal maps.
+        /// </summary>
+        /// <param name="alias">The current alias.</param>
+        /// <param name="newFriendlyName">The new friendly name.</param>
+        /// <exception cref="ArgumentNullException">
+        /// <paramref name="alias"/> or <paramref name="newFriendlyName"/> is <c>null</c>.
+        /// </exception>
+        public void SetFriendlyName(string alias, string newFriendlyName)
+        {
+            if (alias == null)
+                throw new ArgumentNullException(nameof(alias));
+            if (newFriendlyName == null)
+                throw new ArgumentNullException(nameof(newFriendlyName));
+
+            if (alias.Equals(newFriendlyName) || overwriteFriendlyName)
+                return;
+
+            if (CollectionUtilities.Remove(m_certs, alias, out var certEntry))
+            {
+                DeleteCertsEntry(newFriendlyName);
+
+                certEntry.SetFriendlyName(newFriendlyName);
+                m_certs.Add(newFriendlyName, certEntry);
+
+                ReplaceOrdering(m_certs.Comparer, m_certsOrder, alias, newFriendlyName);
+            }
+
+            if (CollectionUtilities.Remove(m_keys, alias, out var keyEntry))
+            {
+                DeleteKeysEntry(newFriendlyName);
+
+                keyEntry.SetFriendlyName(newFriendlyName);
+                m_keys.Add(newFriendlyName, keyEntry);
+
+                ReplaceOrdering(m_keys.Comparer, m_keysOrder, alias, newFriendlyName);
+
+                // TODO Do we need to check these if m_certs had the alias already?
+
+                if (CollectionUtilities.Remove(m_localIDs, alias, out var localID))
+                {
+                    m_localIDs.Add(newFriendlyName, localID);
+                }
+                else if (CollectionUtilities.Remove(m_keyCerts, alias, out var keyCertEntry))
+                {
+                    keyCertEntry.SetFriendlyName(newFriendlyName);
+                    m_keyCerts.Add(newFriendlyName, keyCertEntry);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Adds or replaces a private-key entry and optional certificate chain under the given alias.
+        /// </summary>
+        /// <param name="alias">The entry alias.</param>
+        /// <param name="keyEntry">The private-key entry.</param>
+        /// <param name="chain">
+        /// The certificate chain for the key (required when <paramref name="keyEntry"/> holds a private key).
+        /// </param>
+        /// <exception cref="ArgumentNullException">
+        /// <paramref name="alias"/> or <paramref name="keyEntry"/> is <c>null</c>.
+        /// </exception>
+        /// <exception cref="ArgumentException">
+        /// A private key was supplied without a certificate chain.
+        /// </exception>
         public void SetKeyEntry(string alias, AsymmetricKeyEntry keyEntry, X509CertificateEntry[] chain)
         {
             if (alias == null)
                 throw new ArgumentNullException(nameof(alias));
             if (keyEntry == null)
                 throw new ArgumentNullException(nameof(keyEntry));
-            if (keyEntry.Key.IsPrivate && Arrays.IsNullOrEmpty(chain))
-                throw new ArgumentException("No certificate chain for private key");
+
+            bool chainProvided = !Arrays.IsNullOrEmpty(chain);
+            if (keyEntry.Key.IsPrivate && !chainProvided)
+                throw new ArgumentException("No certificate chain for private key", nameof(chain));
 
             if (m_keys.ContainsKey(alias))
             {
@@ -578,7 +723,7 @@ namespace Org.BouncyCastle.Pkcs
 
             Map(m_keys, m_keysOrder, alias, keyEntry);
 
-            if (chain.Length > 0)
+            if (chainProvided)
             {
                 Map(m_certs, m_certsOrder, alias, chain[0]);
 
@@ -589,28 +734,48 @@ namespace Org.BouncyCastle.Pkcs
             }
         }
 
+        /// <summary>Removes the entry (certificate and/or key) for the given alias.</summary>
+        /// <param name="alias">The entry alias.</param>
+        /// <exception cref="ArgumentNullException"><paramref name="alias"/> is <c>null</c>.</exception>
         public void DeleteEntry(string alias)
         {
             if (alias == null)
                 throw new ArgumentNullException(nameof(alias));
 
+            DeleteCertsEntry(alias);
+            DeleteKeysEntry(alias);
+        }
+
+        private void DeleteCertsEntry(string alias)
+        {
             if (Remove(m_certs, m_certsOrder, alias, out var certEntry))
             {
                 Remove(m_chainCerts, m_chainCertsOrder, new CertID(certEntry));
             }
+        }
 
+        private void DeleteKeysEntry(string alias)
+        {
             if (Remove(m_keys, m_keysOrder, alias))
             {
-                if (CollectionUtilities.Remove(m_localIds, alias, out var id))
+                var keyCertsKey = alias;
+                if (CollectionUtilities.Remove(m_localIDs, alias, out var localID))
                 {
-                    if (CollectionUtilities.Remove(m_keyCerts, id, out var keyCertEntry))
-                    {
-                        Remove(m_chainCerts, m_chainCertsOrder, new CertID(keyCertEntry));
-                    }
+                    keyCertsKey = localID;
+                }
+
+                if (CollectionUtilities.Remove(m_keyCerts, keyCertsKey, out var keyCertEntry))
+                {
+                    Remove(m_chainCerts, m_chainCertsOrder, new CertID(keyCertEntry));
                 }
             }
         }
 
+        /// <summary>
+        /// Returns <c>true</c> if the alias refers to an entry assignable to <paramref name="entryType"/>.
+        /// </summary>
+        /// <param name="alias">The entry alias.</param>
+        /// <param name="entryType"><see cref="X509CertificateEntry"/> or <see cref="AsymmetricKeyEntry"/>.</param>
         public bool IsEntryOfType(string alias, Type entryType)
         {
             if (entryType == typeof(X509CertificateEntry))
@@ -622,6 +787,7 @@ namespace Org.BouncyCastle.Pkcs
             return false;
         }
 
+        /// <summary>Gets the number of distinct aliases in this store.</summary>
         public int Count
         {
             get
@@ -640,6 +806,17 @@ namespace Org.BouncyCastle.Pkcs
             }
         }
 
+        /// <summary>
+        /// Writes this store as a PKCS#12 PFX structure to a stream.
+        /// </summary>
+        /// <param name="stream">The output stream.</param>
+        /// <param name="password">
+        /// The password used to encrypt shrouded key bags and the integrity MAC, or <c>null</c> for unencrypted keys.
+        /// </param>
+        /// <param name="random">Randomness source for salts and IVs.</param>
+        /// <exception cref="ArgumentNullException">
+        /// <paramref name="stream"/> or <paramref name="random"/> is <c>null</c>.
+        /// </exception>
         public void Save(Stream stream, char[] password, SecureRandom random)
         {
             if (stream == null)
@@ -658,13 +835,12 @@ namespace Org.BouncyCastle.Pkcs
                 var name = m_keysOrder[(int)i];
                 var privKey = m_keys[name];
 
-                byte[] kSalt = new byte[SaltSize];
-                random.NextBytes(kSalt);
+                byte[] kSalt = SecureRandom.GetNextBytes(random, SaltSize);
 
                 DerObjectIdentifier bagOid;
                 Asn1Encodable bagData;
 
-                if (password == null)
+                if (password == null || keyAlgorithm == null)
                 {
                     bagOid = PkcsObjectIdentifiers.KeyBag;
                     bagData = PrivateKeyInfoFactory.CreatePrivateKeyInfo(privKey.Key);
@@ -689,40 +865,27 @@ namespace Org.BouncyCastle.Pkcs
                 foreach (var oid in privKey.BagAttributeKeys)
                 {
                     // NB: Ignore any existing FriendlyName
-                    if (!PkcsObjectIdentifiers.Pkcs9AtFriendlyName.Equals(oid))
-                    {
-                        kName.Add(new DerSequence(oid, new DerSet(privKey[oid])));
-                    }
+                    if (PkcsObjectIdentifiers.Pkcs9AtFriendlyName.Equals(oid))
+                        continue;
+
+                    kName.Add(new DerSequence(oid, new DerSet(privKey[oid])));
                 }
 
                 //
                 // make sure we are using the local alias on store
                 //
                 // NB: We always set the FriendlyName based on 'name'
-                //if (privKey[PkcsObjectIdentifiers.Pkcs9AtFriendlyName] == null)
-                {
-                    kName.Add(
-                        new DerSequence(
-                            PkcsObjectIdentifiers.Pkcs9AtFriendlyName,
-                            new DerSet(new DerBmpString(name))));
-                }
+                kName.Add(CreateEntryFriendlyName(name, privKey));
 
                 //
                 // make sure we have a local key-id
                 //
                 if (privKey[PkcsObjectIdentifiers.Pkcs9AtLocalKeyID] == null)
                 {
-                    X509CertificateEntry ct = GetCertificate(name);
-                    AsymmetricKeyParameter pubKey = ct.Certificate.GetPublicKey();
-                    SubjectKeyIdentifier subjectKeyID = CreateSubjectKeyID(pubKey);
-
-                    kName.Add(
-                        new DerSequence(
-                            PkcsObjectIdentifiers.Pkcs9AtLocalKeyID,
-                            new DerSet(subjectKeyID)));
+                    AddLocalKeyID(kName, GetCertificate(name));
                 }
 
-                keyBags.Add(new SafeBag(bagOid, bagData.ToAsn1Object(), DerSet.FromVector(kName)));
+                keyBags.Add(new SafeBag(bagOid, bagData, DerSet.FromVector(kName)));
             }
 
             byte[] keyBagsEncoding = new DerSequence(keyBags).GetDerEncoded();
@@ -731,13 +894,8 @@ namespace Org.BouncyCastle.Pkcs
             //
             // certificate processing
             //
-            byte[] cSalt = new byte[SaltSize];
-
-            random.NextBytes(cSalt);
 
             Asn1EncodableVector certBags = new Asn1EncodableVector(m_keys.Count);
-            Pkcs12PbeParams     cParams = new Pkcs12PbeParams(cSalt, MinIterations);
-            AlgorithmIdentifier cAlgId = new AlgorithmIdentifier(certAlgorithm, cParams.ToAsn1Object());
             var doneCerts = new HashSet<X509Certificate>();
 
             for (uint i = reverseCertificates ? (uint)m_keysOrder.Count-1 : 0;
@@ -746,48 +904,34 @@ namespace Org.BouncyCastle.Pkcs
             {
                 string name = m_keysOrder[(int)i];
                 X509CertificateEntry certEntry = GetCertificate(name);
-                CertBag cBag = new CertBag(
-                    PkcsObjectIdentifiers.X509Certificate,
-                    new DerOctetString(certEntry.Certificate.GetEncoded()));
+                CertBag certBag = CreateCertBag(certEntry.Certificate);
 
-                Asn1EncodableVector fName = new Asn1EncodableVector();
+                Asn1EncodableVector bagAttributes = new Asn1EncodableVector();
 
                 foreach (var oid in certEntry.BagAttributeKeys)
                 {
                     // NB: Ignore any existing FriendlyName
-                    if (!PkcsObjectIdentifiers.Pkcs9AtFriendlyName.Equals(oid))
-                    {
-                        fName.Add(new DerSequence(oid, new DerSet(certEntry[oid])));
-                    }
+                    if (PkcsObjectIdentifiers.Pkcs9AtFriendlyName.Equals(oid))
+                        continue;
+
+                    bagAttributes.Add(new DerSequence(oid, new DerSet(certEntry[oid])));
                 }
 
                 //
                 // make sure we are using the local alias on store
                 //
                 // NB: We always set the FriendlyName based on 'name'
-                //if (certEntry[PkcsObjectIdentifiers.Pkcs9AtFriendlyName] == null)
-                {
-                    fName.Add(
-                        new DerSequence(
-                            PkcsObjectIdentifiers.Pkcs9AtFriendlyName,
-                            new DerSet(new DerBmpString(name))));
-                }
+                bagAttributes.Add(CreateEntryFriendlyName(name, certEntry));
 
                 //
                 // make sure we have a local key-id
                 //
                 if (certEntry[PkcsObjectIdentifiers.Pkcs9AtLocalKeyID] == null)
                 {
-                    AsymmetricKeyParameter pubKey = certEntry.Certificate.GetPublicKey();
-                    SubjectKeyIdentifier subjectKeyID = CreateSubjectKeyID(pubKey);
-
-                    fName.Add(
-                        new DerSequence(
-                            PkcsObjectIdentifiers.Pkcs9AtLocalKeyID,
-                            new DerSet(subjectKeyID)));
+                    AddLocalKeyID(bagAttributes, certEntry);
                 }
 
-                certBags.Add(new SafeBag(PkcsObjectIdentifiers.CertBag, cBag.ToAsn1Object(), DerSet.FromVector(fName)));
+                certBags.Add(new SafeBag(PkcsObjectIdentifiers.CertBag, certBag, DerSet.FromVector(bagAttributes)));
 
                 doneCerts.Add(certEntry.Certificate);
             }
@@ -797,18 +941,16 @@ namespace Org.BouncyCastle.Pkcs
                  j = reverseCertificates ? j-1 : j+1)
             {
                 var alias = m_certsOrder[(int)j];
-                var cert = m_certs[alias];
+                var certEntry = m_certs[alias];
 
                 if (m_keys.ContainsKey(alias))
                     continue;
 
-                CertBag cBag = new CertBag(
-                    PkcsObjectIdentifiers.X509Certificate,
-                    new DerOctetString(cert.Certificate.GetEncoded()));
+                CertBag certBag = CreateCertBag(certEntry.Certificate);
 
-                Asn1EncodableVector fName = new Asn1EncodableVector();
+                Asn1EncodableVector bagAttributes = new Asn1EncodableVector();
 
-                foreach (var oid in cert.BagAttributeKeys)
+                foreach (var oid in certEntry.BagAttributeKeys)
                 {
                     // a certificate not immediately linked to a key doesn't require
                     // a localKeyID and will confuse some PKCS12 implementations.
@@ -818,56 +960,43 @@ namespace Org.BouncyCastle.Pkcs
                         continue;
 
                     // NB: Ignore any existing FriendlyName
-                    if (!PkcsObjectIdentifiers.Pkcs9AtFriendlyName.Equals(oid))
-                    {
-                        fName.Add(new DerSequence(oid, new DerSet(cert[oid])));
-                    }
+                    if (PkcsObjectIdentifiers.Pkcs9AtFriendlyName.Equals(oid))
+                        continue;
+
+                    if (MiscObjectIdentifiers.id_oracle_pkcs12_trusted_key_usage.Equals(oid))
+                        continue;
+
+                    bagAttributes.Add(new DerSequence(oid, new DerSet(certEntry[oid])));
                 }
 
                 //
                 // make sure we are using the local alias on store
                 //
                 // NB: We always set the FriendlyName based on 'certId'
-                //if (cert[PkcsObjectIdentifiers.Pkcs9AtFriendlyName] == null)
-                {
-                    fName.Add(
-                        new DerSequence(
-                            PkcsObjectIdentifiers.Pkcs9AtFriendlyName,
-                            new DerSet(new DerBmpString(alias))));
-                }
+                bagAttributes.Add(CreateEntryFriendlyName(alias, certEntry));
 
                 // the Oracle PKCS12 parser looks for a trusted key usage for named certificates as well
-                if (cert[MiscObjectIdentifiers.id_oracle_pkcs12_trusted_key_usage] == null)
+                if (enableOracleTrustedKeyUsage)
                 {
-                    Asn1OctetString ext = cert.Certificate.GetExtensionValue(X509Extensions.ExtendedKeyUsage);
-          
-                    if (ext != null)
+                    Asn1Object eku = certEntry.Certificate.GetExtensionParsedValue(X509Extensions.ExtendedKeyUsage);
+
+                    DerSet attrValue;
+                    if (eku != null)
                     {
-                        ExtendedKeyUsage usage = ExtendedKeyUsage.GetInstance(ext.GetOctets());
-                        IList<DerObjectIdentifier> usages = usage.GetAllUsages();
-                        Asn1EncodableVector v = new Asn1EncodableVector(usages.Count);
-                        for (int i = 0; i != usages.Count; i++)
-                        {
-                            v.Add(usages[i]);
-                        }
-                       
-                        fName.Add(
-                            new DerSequence(
-                                MiscObjectIdentifiers.id_oracle_pkcs12_trusted_key_usage,
-                                DerSet.FromVector(v)));
+                        attrValue = new DerSet(ExtendedKeyUsage.GetInstance(eku).GetAllUsagesArray());
                     }
                     else
                     {
-                        fName.Add(
-                            new DerSequence(
-                                MiscObjectIdentifiers.id_oracle_pkcs12_trusted_key_usage,
-                                new DerSet(KeyPurposeID.AnyExtendedKeyUsage)));
+                        attrValue = new DerSet(KeyPurposeID.AnyExtendedKeyUsage);
                     }
+
+                    bagAttributes.Add(
+                        new DerSequence(MiscObjectIdentifiers.id_oracle_pkcs12_trusted_key_usage, attrValue));
                 }
 
-                certBags.Add(new SafeBag(PkcsObjectIdentifiers.CertBag, cBag.ToAsn1Object(), DerSet.FromVector(fName)));
+                certBags.Add(new SafeBag(PkcsObjectIdentifiers.CertBag, certBag, DerSet.FromVector(bagAttributes)));
 
-                doneCerts.Add(cert.Certificate);
+                doneCerts.Add(certEntry.Certificate);
             }
 
             for (uint i = reverseCertificates ? (uint)m_chainCertsOrder.Count-1 : 0;
@@ -881,9 +1010,7 @@ namespace Org.BouncyCastle.Pkcs
                 if (doneCerts.Contains(cert))
                     continue;
 
-                CertBag cBag = new CertBag(
-                    PkcsObjectIdentifiers.X509Certificate,
-                    new DerOctetString(cert.GetEncoded()));
+                CertBag certBag = CreateCertBag(cert);
 
                 Asn1EncodableVector fName = new Asn1EncodableVector();
 
@@ -899,7 +1026,7 @@ namespace Org.BouncyCastle.Pkcs
                     fName.Add(new DerSequence(oid, new DerSet(certEntry[oid])));
                 }
 
-                certBags.Add(new SafeBag(PkcsObjectIdentifiers.CertBag, cBag.ToAsn1Object(), DerSet.FromVector(fName)));
+                certBags.Add(new SafeBag(PkcsObjectIdentifiers.CertBag, certBag, DerSet.FromVector(fName)));
             }
 
             byte[] certBagsEncoding = new DerSequence(certBags).GetDerEncoded();
@@ -911,9 +1038,31 @@ namespace Org.BouncyCastle.Pkcs
             }
             else
             {
-                byte[] certBytes = CryptPbeData(true, cAlgId, password, false, certBagsEncoding);
-                EncryptedData cInfo = new EncryptedData(PkcsObjectIdentifiers.Data, cAlgId, new BerOctetString(certBytes));
-                certsInfo = new ContentInfo(PkcsObjectIdentifiers.EncryptedData, cInfo.ToAsn1Object());
+                // TODO Configurable salt length?
+                byte[] cSalt = SecureRandom.GetNextBytes(random, SaltSize);
+                // TODO Configurable number of iterations?
+                int cIterations = MinIterations;
+
+                AlgorithmIdentifier encAlgID;
+
+                if (certPrfAlgorithm != null)
+                {
+                    var encParams = PbeUtilities.GenerateAlgorithmParameters(certAlgorithm, certPrfAlgorithm, cSalt,
+                        cIterations, random);
+
+                    encAlgID = new AlgorithmIdentifier(PkcsObjectIdentifiers.IdPbeS2, encParams);
+                }
+                else
+                {
+                    var encParams = new Pkcs12PbeParams(cSalt, cIterations);
+
+                    encAlgID = new AlgorithmIdentifier(certAlgorithm, encParams);
+                }
+
+                byte[] certBytes = CryptPbeData(true, encAlgID, password, false, certBagsEncoding);
+
+                certsInfo = new ContentInfo(PkcsObjectIdentifiers.EncryptedData,
+                    new EncryptedData(PkcsObjectIdentifiers.Data, encAlgID, new BerOctetString(certBytes)));
             }
 
             ContentInfo[] info = new ContentInfo[]{ keysInfo, certsInfo };
@@ -929,17 +1078,20 @@ namespace Org.BouncyCastle.Pkcs
             MacData macData = null;
             if (password != null)
             {
-                byte[] mSalt = new byte[20];
-                random.NextBytes(mSalt);
+                // TODO Support other HMAC digest algorithms (SHA-224, SHA-256, SHA384, SHA-512, SHA-512/224,
+                // or SHA-512/256) and PBMAC1 (RFC 9579).
+                var macAlgID = DefaultDigestAlgorithmFinder.Instance.Find(OiwObjectIdentifiers.IdSha1);
+                // TODO Configurable salt length?
+                byte[] salt = SecureRandom.GetNextBytes(random, 20);
+                // TODO Configurable number of iterations
+                int itCount = MinIterations;
 
-                byte[] mac = CalculatePbeMac(OiwObjectIdentifiers.IdSha1,
-                    mSalt, MinIterations, password, false, data);
+                byte[] macResult = CalculatePbeMac(macAlgID, salt, itCount, password,
+                    wrongPkcs12Zero: false, data);
 
-                AlgorithmIdentifier algId = new AlgorithmIdentifier(
-                    OiwObjectIdentifiers.IdSha1, DerNull.Instance);
-                DigestInfo dInfo = new DigestInfo(algId, mac);
+                var digInfo = new DigestInfo(macAlgID, DerOctetString.WithContents(macResult));
 
-                macData = new MacData(dInfo, mSalt, MinIterations);
+                macData = new MacData(digInfo, DerOctetString.WithContents(salt), DerInteger.ValueOf(itCount));
             }
 
             //
@@ -950,52 +1102,79 @@ namespace Org.BouncyCastle.Pkcs
             pfx.EncodeTo(stream, useDerEncoding ? Asn1Encodable.Der : Asn1Encodable.Ber);
         }
 
-        internal static byte[] CalculatePbeMac(
-            DerObjectIdentifier oid,
-            byte[]              salt,
-            int                 itCount,
-            char[]              password,
-            bool                wrongPkcs12Zero,
-            byte[]              data)
+        private DerSequence CreateEntryFriendlyName(string alias, Pkcs12Entry entry)
         {
-            Asn1Encodable asn1Params = PbeUtilities.GenerateAlgorithmParameters(
-                oid, salt, itCount);
-            ICipherParameters cipherParams = PbeUtilities.GenerateCipherParameters(
-                oid, password, wrongPkcs12Zero, asn1Params);
+            DerSet friendlyName = DerSet.Empty;
 
-            IMac mac = (IMac) PbeUtilities.CreateEngine(oid);
-            mac.Init(cipherParams);
+            if (overwriteFriendlyName)
+            {
+                friendlyName = new DerSet(new DerBmpString(alias));
+            }
+            else if (entry.TryGetAttribute(PkcsObjectIdentifiers.Pkcs9AtFriendlyName, out var attribute))
+            {
+                friendlyName = new DerSet(attribute);
+            }
+
+            return new DerSequence(PkcsObjectIdentifiers.Pkcs9AtFriendlyName, friendlyName);
+        }
+
+        internal static byte[] CalculatePbeMac(AlgorithmIdentifier macAlgID, byte[] salt, int iterations,
+            char[] password, bool wrongPkcs12Zero, byte[] data)
+        {
+            var macAlgOid = macAlgID.Algorithm;
+
+            // TODO Convert to HMAC algorithm here (restrict valid digest OIDs) instead of PbeUtilities doing it
+            // TODO Support PBMAC1
+            var pbeParameters = PbeUtilities.GenerateAlgorithmParameters(macAlgOid, salt, iterations);
+            var cipherParameters = PbeUtilities.GenerateCipherParameters(macAlgOid, password, wrongPkcs12Zero,
+                pbeParameters);
+
+            IMac mac = (IMac)PbeUtilities.CreateEngine(macAlgOid);
+            mac.Init(cipherParameters);
             return MacUtilities.DoFinal(mac, data);
         }
 
-        private static byte[] CryptPbeData(
-            bool                forEncryption,
-            AlgorithmIdentifier algId,
-            char[]              password,
-            bool                wrongPkcs12Zero,
-            byte[]              data)
+        internal static bool VerifyPbeMac(MacData macData, char[] password, bool wrongPkcs12Zero, byte[] data)
         {
-            IBufferedCipher cipher = PbeUtilities.CreateEngine(algId) as IBufferedCipher;
+            DigestInfo mac = macData.Mac;
+            byte[] macResult = CalculatePbeMac(mac.DigestAlgorithm, macData.MacSalt.GetOctets(),
+                Pkcs12Utilities.ValidateIterations(macData.Iterations), password, wrongPkcs12Zero, data);
+            return Arrays.FixedTimeEquals(macResult, mac.Digest.GetOctets());
+        }
 
-            if (cipher == null)
-                throw new Exception("Unknown encryption algorithm: " + algId.Algorithm);
+        private static void AddLocalKeyID(Asn1EncodableVector v, X509CertificateEntry certEntry) =>
+            AddLocalKeyID(v, certEntry.Certificate);
 
-            if (PkcsObjectIdentifiers.IdPbeS2.Equals(algId.Algorithm))
+        private static void AddLocalKeyID(Asn1EncodableVector v, X509Certificate c) =>
+            v.Add(new DerSequence(PkcsObjectIdentifiers.Pkcs9AtLocalKeyID, new DerSet(CreateLocalKeyID(c))));
+
+        private static CertBag CreateCertBag(X509Certificate c) =>
+            new CertBag(PkcsObjectIdentifiers.X509Certificate, new DerOctetString(c.GetEncoded()));
+
+        private static Asn1OctetString CreateLocalKeyID(X509Certificate certificate) =>
+            X509ExtensionUtilities.CalculateKeyIdentifier(certificate);
+
+        private static byte[] CryptPbeData(bool forEncryption, AlgorithmIdentifier algID, char[] password,
+            bool wrongPkcs12Zero, byte[] data)
+        {
+            if (!(PbeUtilities.CreateEngine(algID) is IBufferedCipher cipher))
+                throw new Exception("Unknown encryption algorithm: " + algID.Algorithm);
+
+            Asn1Encodable pbeParameters;
+            if (PkcsObjectIdentifiers.IdPbeS2.Equals(algID.Algorithm))
             {
-                PbeS2Parameters pbeParameters = PbeS2Parameters.GetInstance(algId.Parameters);
-                ICipherParameters cipherParams = PbeUtilities.GenerateCipherParameters(
-                    algId.Algorithm, password, pbeParameters);
-                cipher.Init(forEncryption, cipherParams);
-                return cipher.DoFinal(data);
+                wrongPkcs12Zero = false;
+                pbeParameters = PbeS2Parameters.GetInstance(algID.Parameters);
             }
             else
             {
-                Pkcs12PbeParams pbeParameters = Pkcs12PbeParams.GetInstance(algId.Parameters);
-                ICipherParameters cipherParams = PbeUtilities.GenerateCipherParameters(
-                    algId.Algorithm, password, wrongPkcs12Zero, pbeParameters);
-                cipher.Init(forEncryption, cipherParams);
-                return cipher.DoFinal(data);
+                pbeParameters = Pkcs12PbeParams.GetInstance(algID.Parameters);
             }
+
+            ICipherParameters cipherParameters = PbeUtilities.GenerateCipherParameters(algID.Algorithm, password,
+                wrongPkcs12Zero, pbeParameters);
+            cipher.Init(forEncryption, cipherParameters);
+            return cipher.DoFinal(data);
         }
 
         private static void Clear<K, V>(Dictionary<K, V> d, List<K> o)
@@ -1041,6 +1220,15 @@ namespace Org.BouncyCastle.Pkcs
             if (index >= 0)
             {
                 o.RemoveAt(index);
+            }
+        }
+
+        private static void ReplaceOrdering<K>(IEqualityComparer<K> c, List<K> o, K oldKey, K newKey)
+        {
+            int index = o.FindIndex(e => c.Equals(oldKey, e));
+            if (index >= 0)
+            {
+                o[index] = newKey;
             }
         }
     }

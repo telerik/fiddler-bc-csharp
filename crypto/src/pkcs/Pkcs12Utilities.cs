@@ -4,74 +4,115 @@ using System.IO;
 using Org.BouncyCastle.Asn1;
 using Org.BouncyCastle.Asn1.Pkcs;
 using Org.BouncyCastle.Asn1.X509;
+using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Pkcs
 {
-	/**
-	 * Utility class for reencoding PKCS#12 files to definite length.
-	 */
-	public class Pkcs12Utilities
-	{
-		/**
-		 * Just re-encode the outer layer of the PKCS#12 file to definite length encoding.
-		 *
-		 * @param berPKCS12File - original PKCS#12 file
-		 * @return a byte array representing the DER encoding of the PFX structure
-		 * @throws IOException
-		 */
-		public static byte[] ConvertToDefiniteLength(
-			byte[] berPkcs12File)
-		{
+    /// <summary>Utility class for re-encoding PKCS#12 files to definite length.</summary>
+    public class Pkcs12Utilities
+    {
+        /// <summary>Just re-encode the outer layer of the PKCS#12 file to definite length encoding.</summary>
+        /// <param name="berPkcs12File">original PKCS#12 file.</param>
+        /// <returns>a byte array representing the DL encoding of the PFX structure.</returns>
+        /// <exception cref="IOException"/>
+        public static byte[] ConvertToDefiniteLength(byte[] berPkcs12File) => DLEncode(Pfx.GetInstance(berPkcs12File));
+
+        /// <summary>Re-encode the PKCS#12 structure to definite length encoding at the inner layer as well.</summary>
+        /// <remarks>The MAC (if present) is recomputed accordingly.</remarks>
+        /// <param name="berPkcs12File">original PKCS#12 file.</param>
+        /// <param name="passwd">The store password, if any.</param>
+        /// <returns>a byte array representing the DL encoding of the PFX structure.</returns>
+        /// <exception cref="IOException"/>
+        public static byte[] ConvertToDefiniteLength(byte[] berPkcs12File, char[] passwd)
+        {
             Pfx pfx = Pfx.GetInstance(berPkcs12File);
 
-			return pfx.GetEncoded(Asn1Encodable.Der);
-		}
+            ContentInfo info = pfx.AuthSafe;
 
-		/**
-		* Re-encode the PKCS#12 structure to definite length encoding at the inner layer
-		* as well, recomputing the MAC accordingly.
-		*
-		* @param berPKCS12File - original PKCS12 file.
-		* @param provider - provider to use for MAC calculation.
-		* @return a byte array representing the DER encoding of the PFX structure.
-		* @throws IOException on parsing, encoding errors.
-		*/
-		public static byte[] ConvertToDefiniteLength(
-			byte[]	berPkcs12File,
-			char[]	passwd)
-		{
-            Pfx pfx = Pfx.GetInstance(berPkcs12File);
+            Asn1Object obj = Asn1Object.FromByteArray(GetContentOctets(info));
 
-			ContentInfo info = pfx.AuthSafe;
+            var contentOctets = DLEncode(obj);
 
-			Asn1OctetString content = Asn1OctetString.GetInstance(info.Content);
-			Asn1Object obj = Asn1Object.FromByteArray(content.GetOctets());
+            info = new ContentInfo(info.ContentType, DerOctetString.WithContents(contentOctets));
 
-			info = new ContentInfo(info.ContentType, new DerOctetString(obj.GetEncoded(Asn1Encodable.Der)));
+            /*
+             * TODO This code should be more like Pkcs12Store Load then Save?
+             * e.g. verify integrity on Load (retry with wrongPkcs12Zero)
+             */
+            MacData macData = pfx.MacData;
+            if (macData != null)
+            {
+                if (passwd == null)
+                    throw new ArgumentNullException(nameof(passwd), "no password supplied when one expected");
 
-			MacData mData = pfx.MacData;
+                try
+                {
+                    var macAlgID = macData.Mac.DigestAlgorithm;
+                    int iterations = ValidateIterations(macData.Iterations);
 
-			try
-			{
-				int itCount = mData.IterationCount.IntValue;
-				byte[] data = Asn1OctetString.GetInstance(info.Content).GetOctets();
-				byte[] res = Pkcs12Store.CalculatePbeMac(
-                    mData.Mac.AlgorithmID.Algorithm, mData.GetSalt(), itCount, passwd, false, data);
+                    byte[] macResult = Pkcs12Store.CalculatePbeMac(macAlgID, macData.MacSalt.GetOctets(), iterations,
+                        passwd, wrongPkcs12Zero: false, data: contentOctets);
 
-				AlgorithmIdentifier algId = new AlgorithmIdentifier(
-                    mData.Mac.AlgorithmID.Algorithm, DerNull.Instance);
-				DigestInfo dInfo = new DigestInfo(algId, res);
+                    var digInfo = new DigestInfo(macAlgID, DerOctetString.WithContents(macResult));
 
-				mData = new MacData(dInfo, mData.GetSalt(), itCount);
-			}
-			catch (Exception e)
-			{
-				throw new IOException("error constructing MAC: " + e.ToString());
-			}
+                    macData = new MacData(digInfo, macData.MacSalt, macData.Iterations);
+                }
+                catch (Exception e)
+                {
+                    throw new IOException("error constructing MAC: " + e.ToString());
+                }
+            }
+            else if (passwd != null)
+            {
+                // TODO Throw exception here (after checking IgnoreUselessPasswordProperty)? See Pkcs12Store.Load.
+            }
 
-			pfx = new Pfx(info, mData);
+            pfx = new Pfx(info, macData);
 
-			return pfx.GetEncoded(Asn1Encodable.Der);
-		}
-	}
+            return DLEncode(pfx);
+        }
+
+        internal static Asn1Encodable GetContent(ContentInfo contentInfo) => contentInfo.Content
+            ?? throw new Asn1ParsingException("ContentInfo content missing");
+
+        internal static byte[] GetContentOctets(ContentInfo contentInfo) =>
+            Asn1OctetString.GetInstance(GetContent(contentInfo)).GetOctets();
+
+        internal static Asn1OctetString GetEncryptedContent(EncryptedData encryptedData) => encryptedData.Content
+            ?? throw new Asn1ParsingException("EncryptedContentInfo content missing");
+
+        internal static int ValidateIterations(DerInteger iterations)
+        {
+            if (iterations == null)
+                throw new ArgumentNullException(nameof(iterations));
+            if (!iterations.TryGetIntValueExact(out int intValueExact))
+                throw new InvalidOperationException("iteration counts >= 2^31 are not suppported");
+
+            return ValidateIterations(intValueExact);
+        }
+
+        //internal static int ValidateIterations(BigInteger iterations)
+        //{
+        //    if (iterations == null)
+        //        throw new ArgumentNullException(nameof(iterations));
+        //    if (iterations.BitLength > 31)
+        //        throw new InvalidOperationException("iteration counts >= 2^31 are not suppported");
+
+        //    return ValidateIterations(iterations.IntValueExact);
+        //}
+
+        internal static int ValidateIterations(int iterations)
+        {
+            if (iterations < 0)
+                throw new InvalidOperationException("negative iteration count found");
+
+            int maxIterations = Properties.GetInt32(Properties.Pkcs12MaxIterationCount, 5_000_000);
+            if (iterations > maxIterations)
+                throw new InvalidOperationException($"iteration count {iterations} greater than {maxIterations}");
+
+            return iterations;
+        }
+
+        private static byte[] DLEncode(Asn1Encodable asn1Encodable) => asn1Encodable.GetEncoded(Asn1Encodable.DL);
+    }
 }

@@ -12,8 +12,8 @@ namespace Org.BouncyCastle.Asn1.Esf
     /// </code>
     /// </remarks>
     public class OcspListID
-		: Asn1Encodable
-	{
+        : Asn1Encodable
+    {
         public static OcspListID GetInstance(object obj)
         {
             if (obj == null)
@@ -23,41 +23,50 @@ namespace Org.BouncyCastle.Asn1.Esf
             return new OcspListID(Asn1Sequence.GetInstance(obj));
         }
 
-        public static OcspListID GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
-        {
-            return new OcspListID(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
-        }
+        public static OcspListID GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new OcspListID(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
+
+        public static OcspListID GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new OcspListID(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
         private readonly Asn1Sequence m_ocspResponses;
 
         private OcspListID(Asn1Sequence seq)
-		{
-			int count = seq.Count;
-			if (count != 1)
-				throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
+        {
+            int count = seq.Count, pos = 0;
+            if (count != 1)
+                throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
 
-			m_ocspResponses = Asn1Sequence.GetInstance(seq[0]);
+            m_ocspResponses = Asn1Utilities.Read(seq, ref pos, Asn1Sequence.GetInstance);
             m_ocspResponses.MapElements(OcspResponsesID.GetInstance); // Validate
+
+            if (pos != count)
+                throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
         }
 
         public OcspListID(params OcspResponsesID[] ocspResponses)
-		{
-			if (ocspResponses == null)
-				throw new ArgumentNullException(nameof(ocspResponses));
+        {
+            m_ocspResponses = DerSequence.FromElements(ocspResponses);
+        }
 
-			m_ocspResponses = DerSequence.FromElements(ocspResponses);
-		}
-
-		public OcspListID(IEnumerable<OcspResponsesID> ocspResponses)
-		{
-			if (ocspResponses == null)
+        public OcspListID(IEnumerable<OcspResponsesID> ocspResponses)
+        {
+            if (ocspResponses == null)
                 throw new ArgumentNullException(nameof(ocspResponses));
 
             m_ocspResponses = DerSequence.FromVector(Asn1EncodableVector.FromEnumerable(ocspResponses));
-		}
+        }
 
-		public OcspResponsesID[] GetOcspResponses() => m_ocspResponses.MapElements(OcspResponsesID.GetInstance);
+        public OcspListID(IReadOnlyCollection<OcspResponsesID> ocspResponses)
+        {
+            if (ocspResponses == null)
+                throw new ArgumentNullException(nameof(ocspResponses));
 
-		public override Asn1Object ToAsn1Object() => new DerSequence(m_ocspResponses);
-	}
+            m_ocspResponses = DerSequence.FromCollection(ocspResponses);
+        }
+
+        public OcspResponsesID[] GetOcspResponses() => m_ocspResponses.MapElements(OcspResponsesID.GetInstance);
+
+        public override Asn1Object ToAsn1Object() => DerSequence.FromElement(m_ocspResponses);
+    }
 }

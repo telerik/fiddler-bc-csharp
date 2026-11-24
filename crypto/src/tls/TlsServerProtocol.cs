@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
@@ -103,9 +103,9 @@ namespace Org.BouncyCastle.Tls
         {
             base.CleanupHandshake();
 
-            this.m_offeredCipherSuites = null;
-            this.m_keyExchange = null;
-            this.m_certificateRequest = null;
+            m_offeredCipherSuites = null;
+            m_keyExchange = null;
+            m_certificateRequest = null;
         }
 
         protected virtual bool ExpectCertificateVerifyMessage()
@@ -168,8 +168,8 @@ namespace Org.BouncyCastle.Tls
                 clientHelloExtensions, clientHelloMessage, m_handshakeHash, afterHelloRetryRequest);
 
             var clientShares = TlsExtensionsUtilities.GetKeyShareClientHello(clientHelloExtensions);
-            KeyShareEntry clientShare = null;
 
+            KeyShareEntry clientShare;
             if (afterHelloRetryRequest)
             {
                 if (m_retryGroup < 0)
@@ -207,9 +207,8 @@ namespace Org.BouncyCastle.Tls
 
                 this.m_retryCookie = null;
 
-                clientShare = TlsUtilities.SelectKeyShare(clientShares, m_retryGroup);
-                if (null == clientShare)
-                    throw new TlsFatalAlert(AlertDescription.illegal_parameter);
+                clientShare = TlsUtilities.GetRetryKeyShare(clientShares, m_retryGroup)
+                    ?? throw new TlsFatalAlert(AlertDescription.illegal_parameter);
             }
             else
             {
@@ -280,36 +279,25 @@ namespace Org.BouncyCastle.Tls
 
                 int[] clientSupportedGroups = securityParameters.ClientSupportedGroups;
                 int[] serverSupportedGroups = securityParameters.ServerSupportedGroups;
+                bool useServerOrder = TlsUtilities.PreferLocalSupportedGroups(m_tlsServer);
 
-                clientShare = TlsUtilities.SelectKeyShare(crypto, serverVersion, clientShares, clientSupportedGroups,
-                    serverSupportedGroups);
+                int selectedGroup = TlsUtilities.SelectKeyShareGroup(crypto, serverVersion, clientSupportedGroups,
+                    serverSupportedGroups, useServerOrder);
+
+                if (selectedGroup < 0)
+                    throw new TlsFatalAlert(AlertDescription.handshake_failure);
+
+                securityParameters.m_negotiatedGroup = selectedGroup;
+
+                clientShare = TlsUtilities.FindEarlyKeyShare(clientShares, selectedGroup);
 
                 if (null == clientShare)
                 {
-                    this.m_retryGroup = TlsUtilities.SelectKeyShareGroup(crypto, serverVersion, clientSupportedGroups,
-                        serverSupportedGroups);
-                    if (m_retryGroup < 0)
-                        throw new TlsFatalAlert(AlertDescription.handshake_failure);
+                    this.m_retryGroup = selectedGroup;
 
                     this.m_retryCookie = m_tlsServerContext.NonceGenerator.GenerateNonce(16);
 
                     return Generate13HelloRetryRequest(clientHello);
-                }
-
-                if (clientShare.NamedGroup != serverSupportedGroups[0])
-                {
-                    /*
-                     * TODO[tls13] RFC 8446 4.2.7. As of TLS 1.3, servers are permitted to send the
-                     * "supported_groups" extension to the client. Clients MUST NOT act upon any
-                     * information found in "supported_groups" prior to successful completion of the
-                     * handshake but MAY use the information learned from a successfully completed
-                     * handshake to change what groups they use in their "key_share" extension in
-                     * subsequent connections. If the server has a group it prefers to the ones in the
-                     * "key_share" extension but is still willing to accept the ClientHello, it SHOULD
-                     * send "supported_groups" to update the client's view of its preferences; this
-                     * extension SHOULD contain all groups the server supports, regardless of whether
-                     * they are currently supported by the client.
-                     */
                 }
             }
 
@@ -319,6 +307,25 @@ namespace Org.BouncyCastle.Tls
                 m_tlsServer.GetServerExtensions());
 
             m_tlsServer.GetServerExtensionsForConnection(serverEncryptedExtensions);
+
+            /*
+             * RFC 8446 4.2.7. As of TLS 1.3, servers are permitted to send the "supported_groups" extension to
+             * the client. [..] If the server has a group it prefers to the ones in the "key_share" extension
+             * but is still willing to accept the ClientHello, it SHOULD send "supported_groups" to update the
+             * client's view of its preferences; this extension SHOULD contain all groups the server supports,
+             * regardless of whether they are currently supported by the client.
+             */
+            if (!afterHelloRetryRequest)
+            {
+                int[] serverSupportedGroups = securityParameters.ServerSupportedGroups;
+
+                if (!TlsUtilities.IsNullOrEmpty(serverSupportedGroups) &&
+                    serverSupportedGroups[0] != securityParameters.NegotiatedGroup &&
+                    !serverEncryptedExtensions.ContainsKey(ExtensionType.supported_groups))
+                {
+                    TlsExtensionsUtilities.AddSupportedGroupsExtension(serverEncryptedExtensions, serverSupportedGroups);
+                }
+            }
 
             ProtocolVersion serverLegacyVersion = ProtocolVersion.TLSv12;
             TlsExtensionsUtilities.AddSupportedVersionsExtensionServer(serverHelloExtensions, serverVersion);
@@ -379,27 +386,20 @@ namespace Org.BouncyCastle.Tls
 
             TlsSecret sharedSecret;
             {
-                int namedGroup = clientShare.NamedGroup;
+                int negotiatedGroup = securityParameters.NegotiatedGroup;
 
-                TlsAgreement agreement;
-                if (NamedGroup.RefersToAnECDHCurve(namedGroup))
-                {
-                    agreement = crypto.CreateECDomain(new TlsECConfig(namedGroup)).CreateECDH();
-                }
-                else if (NamedGroup.RefersToASpecificFiniteField(namedGroup))
-                {
-                    agreement = crypto.CreateDHDomain(new TlsDHConfig(namedGroup, true)).CreateDH();
-                }
-                else
-                {
-                    throw new TlsFatalAlert(AlertDescription.internal_error);
-                }
+                if (clientShare.NamedGroup != negotiatedGroup)
+                    throw new TlsFatalAlert(AlertDescription.illegal_parameter);
 
-                byte[] key_exchange = agreement.GenerateEphemeral();
-                KeyShareEntry serverShare = new KeyShareEntry(namedGroup, key_exchange);
-                TlsExtensionsUtilities.AddKeyShareServerHello(serverHelloExtensions, serverShare);
+                TlsAgreement agreement = TlsUtilities.CreateKeyShare(crypto, negotiatedGroup, isServer: true)
+                    ?? throw new TlsFatalAlert(AlertDescription.internal_error);
 
                 agreement.ReceivePeerValue(clientShare.KeyExchange);
+
+                byte[] key_exchange = agreement.GenerateEphemeral();
+                KeyShareEntry serverShare = new KeyShareEntry(negotiatedGroup, key_exchange);
+                TlsExtensionsUtilities.AddKeyShareServerHello(serverHelloExtensions, serverShare);
+
                 sharedSecret = agreement.CalculateSecret();
             }
 
@@ -1012,7 +1012,7 @@ namespace Org.BouncyCastle.Tls
                         this.m_connectionState = CS_SERVER_SUPPLEMENTAL_DATA;
                     }
 
-                    this.m_keyExchange = TlsUtilities.InitKeyExchangeServer(m_tlsServerContext, m_tlsServer);
+                    m_keyExchange = TlsUtilities.InitKeyExchangeServer(m_tlsServerContext, m_tlsServer);
 
                     TlsCredentials serverCredentials = null;
 
@@ -1441,6 +1441,8 @@ namespace Org.BouncyCastle.Tls
                 EstablishMasterSecret(m_tlsServerContext, m_keyExchange);
             }
 
+            m_keyExchange = null;
+
             m_recordStream.SetPendingCipher(TlsUtilities.InitCipher(m_tlsServerContext));
 
             if (!ExpectCertificateVerifyMessage())
@@ -1499,9 +1501,8 @@ namespace Org.BouncyCastle.Tls
                     }
                 }
 
-                TlsCredentialedSigner serverCredentials = TlsUtilities.Establish13ServerCredentials(m_tlsServer);
-                if (null == serverCredentials)
-                    throw new TlsFatalAlert(AlertDescription.internal_error);
+                TlsCredentialedSigner serverCredentials = TlsUtilities.Establish13ServerCredentials(m_tlsServer)
+                    ?? throw new TlsFatalAlert(AlertDescription.internal_error);
 
                 // Certificate
                 {

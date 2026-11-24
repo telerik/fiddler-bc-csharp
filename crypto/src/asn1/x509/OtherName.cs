@@ -33,13 +33,29 @@ namespace Org.BouncyCastle.Asn1.X509
             return new OtherName(Asn1Sequence.GetInstance(obj));
         }
 
-        public static OtherName GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
-        {
-            return GetInstance(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
-        }
+        public static OtherName GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new OtherName(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
 
-        private readonly DerObjectIdentifier typeID;
-        private readonly Asn1Encodable value;
+        public static OtherName GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new OtherName(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
+
+        private readonly DerObjectIdentifier m_typeID;
+        private readonly Asn1Encodable m_value;
+
+        private OtherName(Asn1Sequence seq)
+        {
+            int count = seq.Count, pos = 0;
+            if (count != 2)
+                throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
+
+            m_typeID = Asn1Utilities.Read(seq, ref pos, DerObjectIdentifier.GetInstance);
+            // TODO[asn1] Asn1Utilities helper method for this type of situation
+            m_value = Asn1Utilities.ReadContextTagged(seq, ref pos, 0, true,
+                (taggedObject, declaredExplicit) => taggedObject.GetExplicitBaseObject());
+
+            if (pos != count)
+                throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
+        }
 
         /**
          * Base constructor.
@@ -48,23 +64,15 @@ namespace Org.BouncyCastle.Asn1.X509
          */
         public OtherName(DerObjectIdentifier typeID, Asn1Encodable value)
         {
-            this.typeID = typeID;
-            this.value  = value;
+            m_typeID = typeID ?? throw new ArgumentNullException(nameof(typeID));
+            m_value = value ?? throw new ArgumentNullException(nameof(value));
         }
 
-        private OtherName(Asn1Sequence seq)
-        {
-            this.typeID = DerObjectIdentifier.GetInstance(seq[0]);
-            this.value = Asn1Utilities.GetExplicitContextBaseObject(Asn1TaggedObject.GetInstance(seq[1]), tagNo: 0);
-        }
+        public virtual DerObjectIdentifier TypeID => m_typeID;
 
-        public virtual DerObjectIdentifier TypeID => typeID;
+        public Asn1Encodable Value => m_value;
 
-        public Asn1Encodable Value => value;
-
-        public override Asn1Object ToAsn1Object()
-        {
-            return new DerSequence(typeID, new DerTaggedObject(true, 0, value));
-        }
+        public override Asn1Object ToAsn1Object() =>
+            new DerSequence(m_typeID, new DerTaggedObject(true, 0, m_value));
     }
 }

@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Text;
 
 using Org.BouncyCastle.Asn1;
 using Org.BouncyCastle.Asn1.Pkcs;
@@ -21,6 +20,8 @@ namespace Org.BouncyCastle.Security
     {
         private static readonly int Magic = unchecked((int)0xFEEDFEED);
 
+        /// <remarks>keytool >= v20 removed the NULL parameters from the AlgorithmIdentifier.</remarks>
+        // TODO[api] Follow keytool v20 and remove the NULL parameters as of next major version
         private static readonly AlgorithmIdentifier JksObfuscationAlg = new AlgorithmIdentifier(
             new DerObjectIdentifier("1.3.6.1.4.1.42.2.17.1.1"), DerNull.Instance);
 
@@ -62,10 +63,11 @@ namespace Org.BouncyCastle.Security
             if (!m_keyEntries.TryGetValue(alias, out JksKeyEntry keyEntry))
                 return null;
 
-            if (!JksObfuscationAlg.Equals(keyEntry.keyData.EncryptionAlgorithm))
+            var epki = keyEntry.keyInfo;
+            if (!X509Utilities.AreEquivalentAlgorithms(JksObfuscationAlg, epki.EncryptionAlgorithm))
                 throw new IOException("unknown encryption algorithm");
 
-            byte[] encryptedData = keyEntry.keyData.GetEncryptedData();
+            byte[] encryptedData = epki.GetEncryptedData();
 
             // key length is encryptedData - salt - checksum
             int pkcs8Len = encryptedData.Length - 40;
@@ -73,13 +75,8 @@ namespace Org.BouncyCastle.Security
             IDigest digest = DigestUtilities.GetDigest("SHA-1");
 
             // key decryption
-            byte[] keyStream = CalculateKeyStream(digest, password, encryptedData, pkcs8Len);
-            byte[] pkcs8Key = new byte[pkcs8Len];
-            for (int i = 0; i < pkcs8Len; ++i)
-            {
-                pkcs8Key[i] = (byte)(encryptedData[20 + i] ^ keyStream[i]);
-            }
-            Array.Clear(keyStream, 0, keyStream.Length);
+            byte[] pkcs8Key = CalculateKeyStream(digest, password, encryptedData, pkcs8Len);
+            Bytes.XorTo(pkcs8Len, encryptedData, 20, pkcs8Key, 0);
 
             // integrity check
             byte[] checksum = GetKeyChecksum(digest, password, pkcs8Key);
@@ -87,7 +84,14 @@ namespace Org.BouncyCastle.Security
             if (!Arrays.FixedTimeEquals(20, encryptedData, pkcs8Len + 20, checksum, 0))
                 throw new IOException("cannot recover key");
 
-            return PrivateKeyFactory.CreateKey(pkcs8Key);
+            try
+            {
+                return PrivateKeyFactory.CreateKey(pkcs8Key);
+            }
+            finally
+            {
+                Array.Clear(pkcs8Key, 0, pkcs8Key.Length);
+            }
 #endif
         }
 
@@ -101,10 +105,11 @@ namespace Org.BouncyCastle.Security
             if (!m_keyEntries.TryGetValue(alias, out JksKeyEntry keyEntry))
                 return null;
 
-            if (!JksObfuscationAlg.Equals(keyEntry.keyData.EncryptionAlgorithm))
+            var epki = keyEntry.keyInfo;
+            if (!X509Utilities.AreEquivalentAlgorithms(JksObfuscationAlg, epki.EncryptionAlgorithm))
                 throw new IOException("unknown encryption algorithm");
 
-            byte[] encryptedData = keyEntry.keyData.GetEncryptedData();
+            byte[] encryptedData = epki.GetEncryptedData();
 
             // key length is encryptedData - salt - checksum
             int pkcs8Len = encryptedData.Length - 40;
@@ -112,13 +117,8 @@ namespace Org.BouncyCastle.Security
             IDigest digest = DigestUtilities.GetDigest("SHA-1");
 
             // key decryption
-            byte[] keyStream = CalculateKeyStream(digest, password, encryptedData, pkcs8Len);
-            byte[] pkcs8Key = new byte[pkcs8Len];
-            for (int i = 0; i < pkcs8Len; ++i)
-            {
-                pkcs8Key[i] = (byte)(encryptedData[20 + i] ^ keyStream[i]);
-            }
-            Array.Clear(keyStream, 0, keyStream.Length);
+            byte[] pkcs8Key = CalculateKeyStream(digest, password, encryptedData, pkcs8Len);
+            Bytes.XorTo(pkcs8Len, encryptedData, 20, pkcs8Key, 0);
 
             // integrity check
             byte[] checksum = GetKeyChecksum(digest, password, pkcs8Key);
@@ -126,7 +126,14 @@ namespace Org.BouncyCastle.Security
             if (!Arrays.FixedTimeEquals(20, encryptedData, pkcs8Len + 20, checksum, 0))
                 throw new IOException("cannot recover key");
 
-            return PrivateKeyFactory.CreateKey(pkcs8Key);
+            try
+            {
+                return PrivateKeyFactory.CreateKey(pkcs8Key);
+            }
+            finally
+            {
+                Array.Clear(pkcs8Key, 0, pkcs8Key.Length);
+            }
         }
 #endif
 
@@ -248,20 +255,20 @@ namespace Org.BouncyCastle.Security
 
             IDigest digest = DigestUtilities.GetDigest("SHA-1");
 
+            // integrity protection
             byte[] checksum = GetKeyChecksum(digest, password, pkcs8Key);
             Array.Copy(checksum, 0, protectedKey, 20 + pkcs8Key.Length, 20);
 
+            // key encryption
             byte[] keyStream = CalculateKeyStream(digest, password, protectedKey, pkcs8Key.Length);
-            for (int i = 0; i != keyStream.Length; i++)
-            {
-                protectedKey[20 + i] = (byte)(pkcs8Key[i] ^ keyStream[i]);
-            }
+            Bytes.Xor(pkcs8Key.Length, pkcs8Key, 0, keyStream, 0, protectedKey, 20);
             Array.Clear(keyStream, 0, keyStream.Length);
 
             try
             {
-                var epki = new EncryptedPrivateKeyInfo(JksObfuscationAlg, protectedKey);
-                m_keyEntries.Add(alias, new JksKeyEntry(DateTime.UtcNow, epki.GetEncoded(), CloneChain(chain)));
+                var encryptedData = DerOctetString.WithContents(protectedKey);
+                var epki = new EncryptedPrivateKeyInfo(JksObfuscationAlg, encryptedData);
+                m_keyEntries.Add(alias, new JksKeyEntry(DateTime.UtcNow, epki, CloneChain(chain)));
             }
             catch (Exception e)
             {
@@ -288,20 +295,20 @@ namespace Org.BouncyCastle.Security
 
             IDigest digest = DigestUtilities.GetDigest("SHA-1");
 
+            // integrity protection
             byte[] checksum = GetKeyChecksum(digest, password, pkcs8Key);
             Array.Copy(checksum, 0, protectedKey, 20 + pkcs8Key.Length, 20);
 
+            // key encryption
             byte[] keyStream = CalculateKeyStream(digest, password, protectedKey, pkcs8Key.Length);
-            for (int i = 0; i != keyStream.Length; i++)
-            {
-                protectedKey[20 + i] = (byte)(pkcs8Key[i] ^ keyStream[i]);
-            }
+            Bytes.Xor(pkcs8Key.Length, pkcs8Key, 0, keyStream, 0, protectedKey, 20);
             Array.Clear(keyStream, 0, keyStream.Length);
 
             try
             {
-                var epki = new EncryptedPrivateKeyInfo(JksObfuscationAlg, protectedKey);
-                m_keyEntries.Add(alias, new JksKeyEntry(DateTime.UtcNow, epki.GetEncoded(), CloneChain(chain)));
+                var encryptedData = DerOctetString.WithContents(protectedKey);
+                var epki = new EncryptedPrivateKeyInfo(JksObfuscationAlg, encryptedData);
+                m_keyEntries.Add(alias, new JksKeyEntry(DateTime.UtcNow, epki, CloneChain(chain)));
             }
             catch (Exception e)
             {
@@ -413,8 +420,18 @@ namespace Org.BouncyCastle.Security
 
         private void SaveStream(Stream stream, IDigest checksumDigest)
         {
-            BinaryWriter bw = new BinaryWriter(new DigestStream(stream, null, checksumDigest));
+            var ds = new DigestStream(stream, null, checksumDigest);
+            using (var bw = new BinaryWriter(ds, Strings.UTF8, leaveOpen: true))
+            {
+                SaveStreamContents(bw);
+            }
 
+            byte[] checksum = DigestUtilities.DoFinal(checksumDigest);
+            stream.Write(checksum, 0, checksum.Length);
+        }
+
+        private void SaveStreamContents(BinaryWriter bw)
+        {
             BinaryWriters.WriteInt32BigEndian(bw, Magic);
             BinaryWriters.WriteInt32BigEndian(bw, 2);
 
@@ -428,7 +445,7 @@ namespace Org.BouncyCastle.Security
                 BinaryWriters.WriteInt32BigEndian(bw, 1);
                 WriteUtf(bw, alias);
                 WriteDateTime(bw, keyEntry.date);
-                WriteBufferWithInt32Length(bw, keyEntry.keyData.GetEncoded());
+                WriteBufferWithInt32Length(bw, keyEntry.keyInfo.GetEncoded());
 
                 X509Certificate[] chain = keyEntry.chain;
                 int chainLength = chain == null ? 0 : chain.Length;
@@ -449,10 +466,6 @@ namespace Org.BouncyCastle.Security
                 WriteDateTime(bw, certEntry.date);
                 WriteTypedCertificate(bw, certEntry.cert);
             }
-
-            byte[] checksum = DigestUtilities.DoFinal(checksumDigest);
-            bw.Write(checksum);
-            bw.Flush();
         }
 
         /// <remarks>WARNING: If <paramref name="password"/> is <c>null</c>, no integrity check is performed.</remarks>
@@ -665,7 +678,7 @@ namespace Org.BouncyCastle.Security
             // first java betas in the mid 90's, why who knows? But see
             // https://cryptosense.com/mighty-aphrodite-dark-secrets-of-the-java-keystore/
             //
-            byte[] prefix = Encoding.UTF8.GetBytes("Mighty Aphrodite");
+            byte[] prefix = Strings.ToUtf8ByteArray("Mighty Aphrodite");
             digest.BlockUpdate(prefix);
             return digest;
         }
@@ -680,7 +693,7 @@ namespace Org.BouncyCastle.Security
             // first java betas in the mid 90's, why who knows? But see
             // https://cryptosense.com/mighty-aphrodite-dark-secrets-of-the-java-keystore/
             //
-            byte[] prefix = Encoding.UTF8.GetBytes("Mighty Aphrodite");
+            byte[] prefix = Strings.ToUtf8ByteArray("Mighty Aphrodite");
             digest.BlockUpdate(prefix, 0, prefix.Length);
             return digest;
         }
@@ -726,26 +739,81 @@ namespace Org.BouncyCastle.Security
 
         private static string ReadUtf(BinaryReader br)
         {
-            byte[] utfBytes = ReadBufferWithInt16Length(br);
+            byte[] mUtfBytes = ReadBufferWithInt16Length(br);
 
-            /*
-             * FIXME JKS actually uses a "modified UTF-8" format. For the moment we will just support single-byte
-             * encodings that aren't null bytes.
-             */
-            for (int i = 0; i < utfBytes.Length; ++i)
+            int i = 0;
+            MemoryStream utfBytes = new MemoryStream(mUtfBytes.Length);
+
+            while (i < mUtfBytes.Length)
             {
-                byte utfByte = utfBytes[i];
-                if (utfByte == 0 || (utfByte & 0x80) != 0)
-                    throw new NotSupportedException("Currently missing support for modified UTF-8 encoding in JKS");
+                // Modified UTF-8 differs from regular UTF-8 in the following
+                // ways:
+                //
+                // 1. NULL bytes never occur in the stream and are always
+                //    two-byte encoded.
+                // 2. There are no four-byte values and are instead always
+                //    encoded using surrogate pairs.
+                //
+                // See also: https://docs.oracle.com/en/java/javase/16/docs/api/java.base/java/io/DataInput.html#modified-utf-8
+                byte mUtfByte = mUtfBytes[i];
+                if (mUtfByte == 0)
+                    throw new NotSupportedException("Unexpected NULL byte in modified UTF-8 encoding in JKS");
+
+                if ((mUtfByte & 0x80) == 0)
+                {
+                    // No transformation is applied to non-NULL ASCII bytes.
+                    utfBytes.WriteByte(mUtfByte);
+                    i += 1;
+                }
+                else if ((mUtfByte & 0xE0) == 0xC0)
+                {
+                    // Validate we have another byte.
+                    if ((i + 1) >= mUtfBytes.Length)
+                        throw new NotSupportedException("Two-byte sentinel found at end of input stream");
+
+                    byte mUtfByteSecond = mUtfBytes[i+1];
+                    if ((mUtfByteSecond & 0xC0) != 0x80)
+                        throw new NotSupportedException("Second byte in two-byte modified UTF-8 encoding malformed");
+
+                    // We might have encoded the NULL byte as two bytes.
+                    if (mUtfByte == 0xC0 && mUtfByteSecond == 0x80)
+                    {
+                        utfBytes.WriteByte(0x00);
+                    } else {
+                        utfBytes.WriteByte(mUtfByte);
+                        utfBytes.WriteByte(mUtfByteSecond);
+                    }
+
+                    i += 2;
+                }
+                else if ((mUtfByte & 0xF0) == 0xE0)
+                {
+                    // Validate we have enough bytes.
+                    if ((i + 2) >= mUtfBytes.Length)
+                        throw new NotSupportedException("Three-byte sentinel found at end of input stream");
+
+                    byte mUtfByteSecond = mUtfBytes[i+1];
+                    if ((mUtfByteSecond & 0xC0) != 0x80)
+                        throw new NotSupportedException("Second byte in two-byte modified UTF-8 encoding malformed");
+
+                    byte mUtfByteThird = mUtfBytes[i+2];
+                    if ((mUtfByteThird & 0xC0) != 0x80)
+                        throw new NotSupportedException("Third byte in two-byte modified UTF-8 encoding malformed");
+
+                    utfBytes.WriteByte(mUtfByte);
+                    utfBytes.WriteByte(mUtfByteSecond);
+                    utfBytes.WriteByte(mUtfByteThird);
+
+                    i += 3;
+                }
+                else
+                {
+                    // Reachable when we have a non-standard four-byte sentinel mask.
+                    throw new NotSupportedException("Malformed modified UTF-8 encoding at index " + i);
+                }
             }
 
-            return Encoding.UTF8.GetString(utfBytes);
-        }
-
-        private static void WriteBufferWithInt16Length(BinaryWriter bw, byte[] buffer)
-        {
-            BinaryWriters.WriteInt16BigEndian(bw, Convert.ToInt16(buffer.Length));
-            bw.Write(buffer);
+            return Strings.FromByteArray(utfBytes.ToArray());
         }
 
         private static void WriteBufferWithInt32Length(BinaryWriter bw, byte[] buffer)
@@ -763,25 +831,74 @@ namespace Org.BouncyCastle.Security
         private static void WriteTypedCertificate(BinaryWriter bw, X509Certificate cert)
         {
             WriteUtf(bw, "X.509");
-            WriteBufferWithInt32Length(bw, cert.GetEncoded());
+            WriteBufferWithInt32Length(bw, cert.GetEncodedInternal());
         }
 
         private static void WriteUtf(BinaryWriter bw, string s)
         {
-            byte[] utfBytes = Encoding.UTF8.GetBytes(s);
+            byte[] utfBytes = Strings.ToUtf8ByteArray(s);
 
-            /*
-             * FIXME JKS actually uses a "modified UTF-8" format. For the moment we will just support single-byte
-             * encodings that aren't null bytes.
-             */
-            for (int i = 0; i < utfBytes.Length; ++i)
+            int i = 0;
+            MemoryStream mUtfBytes = new MemoryStream();
+            while (i < utfBytes.Length)
             {
                 byte utfByte = utfBytes[i];
-                if (utfByte == 0 || (utfByte & 0x80) != 0)
-                    throw new NotSupportedException("Currently missing support for modified UTF-8 encoding in JKS");
+                if (utfByte == 0)
+                {
+                    // The NULL byte is encoded in two byte format.
+                    mUtfBytes.WriteByte(0xC0);
+                    mUtfBytes.WriteByte(0x80);
+                    i += 1;
+                }
+                else if ((utfByte & 0x80) == 0)
+                {
+                    // One byte UTF-8 bytes are written directly.
+                    mUtfBytes.WriteByte(utfByte);
+                    i += 1;
+                }
+                else if ((utfByte & 0xE0) == 0xC0)
+                {
+                    // Two byte UTF-8 values are preserved as-is.
+                    if ((i + 1) >= utfBytes.Length)
+                        throw new NotSupportedException("Malformed UTF-8: trailing two-byte character at end of string");
+
+                    if ((utfBytes[i+1] & 0xC0) != 0x80)
+                        throw new NotSupportedException("Malformed UTF-8: second byte has invalid prefix");
+
+                    mUtfBytes.WriteByte(utfByte);
+                    mUtfBytes.WriteByte(utfBytes[i+1]);
+                    i += 2;
+                }
+                else if ((utfByte & 0xF0) == 0xE0)
+                {
+                    // Three byte UTF-8 values are preserved as-is.
+                    if ((i + 2) >= utfBytes.Length)
+                        throw new NotSupportedException("Malformed UTF-8: trailing three-byte character at end of string");
+
+                    if ((utfBytes[i+1] & 0xC0) != 0x80)
+                        throw new NotSupportedException("Malformed UTF-8: second byte has invalid prefix");
+
+                    if ((utfBytes[i+2] & 0xC0) != 0x80)
+                        throw new NotSupportedException("Malformed UTF-8: third byte has invalid prefix");
+
+                    mUtfBytes.WriteByte(utfByte);
+                    mUtfBytes.WriteByte(utfBytes[i+1]);
+                    mUtfBytes.WriteByte(utfBytes[i+2]);
+                    i += 3;
+
+                }
+                else
+                {
+                    // Reachable when we have a non-standard four-byte sentinel mask.
+                    throw new NotSupportedException("Malformed modified UTF-8 encoding at index " + i);
+                }
             }
 
-            WriteBufferWithInt16Length(bw, utfBytes);
+            byte[] buffer = mUtfBytes.GetBuffer();
+            short length = Convert.ToInt16(mUtfBytes.Length);
+
+            BinaryWriters.WriteInt16BigEndian(bw, length);
+            bw.Write(buffer, 0, length);
         }
 
         /**
@@ -802,13 +919,18 @@ namespace Org.BouncyCastle.Security
         private sealed class JksKeyEntry
         {
             internal readonly DateTime date;
-            internal readonly EncryptedPrivateKeyInfo keyData;
+            internal readonly EncryptedPrivateKeyInfo keyInfo;
             internal readonly X509Certificate[] chain;
 
-            internal JksKeyEntry(DateTime date, byte[] keyData, X509Certificate[] chain)
+            internal JksKeyEntry(DateTime date, byte[] keyInfoEncoding, X509Certificate[] chain)
+                : this(date, EncryptedPrivateKeyInfo.GetInstance(keyInfoEncoding), chain)
+            {
+            }
+
+            internal JksKeyEntry(DateTime date, EncryptedPrivateKeyInfo keyInfo, X509Certificate[] chain)
             {
                 this.date = date;
-                this.keyData = EncryptedPrivateKeyInfo.GetInstance(Asn1Sequence.GetInstance(keyData));
+                this.keyInfo = keyInfo;
                 this.chain = chain;
             }
         }

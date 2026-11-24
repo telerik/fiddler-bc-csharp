@@ -4,12 +4,54 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 #endif
 
+using Org.BouncyCastle.Math.Raw;
+
 namespace Org.BouncyCastle.Utilities
 {
     public static class Bytes
     {
         public const int NumBits = 8;
         public const int NumBytes = 1;
+
+        public static void CMov(int len, int cond, byte[] x, byte[] z)
+        {
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+            CMov(len, cond, x.AsSpan(), z.AsSpan());
+#else
+            uint m0 = Nat.CZero((uint)cond), m1 = ~m0;
+            for (int i = 0; i < len; ++i)
+            {
+                uint x_i = x[i], z_i = z[i];
+                z[i] = (byte)((z_i & m0) | (x_i & m1));
+            }
+#endif
+        }
+
+        public static void CMov(int len, int cond, byte[] x, int xOff, byte[] z, int zOff)
+        {
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+            CMov(len, cond, x.AsSpan(xOff), z.AsSpan(zOff));
+#else
+            uint m0 = Nat.CZero((uint)cond), m1 = ~m0;
+            for (int i = 0; i < len; ++i)
+            {
+                uint x_i = x[xOff + i], z_i = z[zOff + i];
+                z[zOff + i] = (byte)((z_i & m0) | (x_i & m1));
+            }
+#endif
+        }
+
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+        public static void CMov(int len, int cond, ReadOnlySpan<byte> x, Span<byte> z)
+        {
+            uint m0 = Nat.CZero((uint)cond), m1 = ~m0;
+            for (int i = 0; i < len; ++i)
+            {
+                uint x_i = x[i], z_i = z[i];
+                z[i] = (byte)((z_i & m0) | (x_i & m1));
+            }
+        }
+#endif
 
         public static void Xor(int len, byte[] x, byte[] y, byte[] z)
         {
@@ -57,7 +99,11 @@ namespace Org.BouncyCastle.Utilities
                     ulong x64 = MemoryMarshal.Read<ulong>(x[i..]);
                     ulong y64 = MemoryMarshal.Read<ulong>(y[i..]);
                     ulong z64 = x64 ^ y64;
+#if NET8_0_OR_GREATER
+                    MemoryMarshal.Write(z[i..], in z64);
+#else
                     MemoryMarshal.Write(z[i..], ref z64);
+#endif
                     i += 8;
                 }
             }
@@ -117,7 +163,11 @@ namespace Org.BouncyCastle.Utilities
                     ulong x64 = MemoryMarshal.Read<ulong>(x[i..]);
                     ulong z64 = MemoryMarshal.Read<ulong>(z[i..]);
                     z64 ^= x64;
+#if NET8_0_OR_GREATER
+                    MemoryMarshal.Write(z[i..], in z64);
+#else
                     MemoryMarshal.Write(z[i..], ref z64);
+#endif
                     i += 8;
                 }
             }

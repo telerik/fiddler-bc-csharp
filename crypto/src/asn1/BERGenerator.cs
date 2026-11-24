@@ -31,9 +31,9 @@ namespace Org.BouncyCastle.Asn1
         }
 
         public override void AddObject(Asn1Encodable obj)
-		{
+        {
             obj.EncodeTo(OutStream);
-		}
+        }
 
         public override void AddObject(Asn1Object obj)
         {
@@ -51,41 +51,45 @@ namespace Org.BouncyCastle.Asn1
             OutStream.WriteByte(0x80);
         }
 
+        private void WriteHdr(int flags, int tagNo)
+        {
+            Asn1OutputStream.WriteIdentifier(OutStream, flags, tagNo);
+            OutStream.WriteByte(0x80);
+        }
+
         protected void WriteBerHeader(int tag)
         {
-            if (_tagged)
-            {
-                int tagNum = _tagNo | Asn1Tags.ContextSpecific;
-
-                if (_isExplicit)
-                {
-                    WriteHdr(tagNum | Asn1Tags.Constructed);
-                    WriteHdr(tag);
-                }
-                else
-                {
-                    if ((tag & Asn1Tags.Constructed) != 0)
-                    {
-                        WriteHdr(tagNum | Asn1Tags.Constructed);
-                    }
-                    else
-                    {
-                        WriteHdr(tagNum);
-                    }
-                }
-            }
-            else
+            if (!_tagged)
             {
                 WriteHdr(tag);
             }
+            else if (_isExplicit)
+            {
+                /*
+                 * X.690-0207 8.14.2. If implicit tagging [..] was not used [..], the encoding shall be constructed
+                 * and the contents octets shall be the complete base encoding.
+                 */
+                WriteHdr(Asn1Tags.ContextSpecific | Asn1Tags.Constructed, _tagNo);
+                WriteHdr(tag);
+            }
+            else
+            {
+                /*
+                 * X.690-0207 8.14.3. If implicit tagging was used [..], then: a) the encoding shall be constructed
+                 * if the base encoding is constructed, and shall be primitive otherwise; and b) the contents octets
+                 * shall be [..] the contents octets of the base encoding.
+                 */
+                WriteHdr(InheritConstructedFlag(Asn1Tags.ContextSpecific, tag), _tagNo);
+            }
         }
 
-		protected void WriteBerBody(Stream contentStream)
+        // TODO[api] Remove unnecessary method
+        protected void WriteBerBody(Stream contentStream)
         {
-			Streams.PipeAll(contentStream, OutStream);
+            Streams.PipeAll(contentStream, OutStream);
         }
 
-		protected void WriteBerEnd()
+        protected void WriteBerEnd()
         {
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
             Span<byte> data = stackalloc byte[4]{ 0x00, 0x00, 0x00, 0x00 };

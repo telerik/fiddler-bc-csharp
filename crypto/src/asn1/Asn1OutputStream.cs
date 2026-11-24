@@ -17,15 +17,10 @@ namespace Org.BouncyCastle.Asn1
         internal const int EncodingDL = 2;
         internal const int EncodingDer = 3;
 
-        public static Asn1OutputStream Create(Stream output)
-        {
-            return new Asn1OutputStream(output, false);
-        }
+        public static Asn1OutputStream Create(Stream output) => new Asn1OutputStream(output, leaveOpen: false);
 
-        public static Asn1OutputStream Create(Stream output, string encoding)
-        {
-            return Create(output, encoding, false);
-        }
+        public static Asn1OutputStream Create(Stream output, string encoding) =>
+            Create(output, encoding, leaveOpen: false);
 
         public static Asn1OutputStream Create(Stream output, string encoding, bool leaveOpen)
         {
@@ -35,6 +30,9 @@ namespace Org.BouncyCastle.Asn1
                 return new DLOutputStream(output, leaveOpen);
             return new Asn1OutputStream(output, leaveOpen);
         }
+
+        internal static Asn1OutputStream Create(byte[] buffer, int index, int count, string encoding, bool leaveOpen) =>
+            Create(new MemoryStream(buffer, index, count, writable: true), encoding, leaveOpen);
 
         internal static int GetEncodingType(string encoding)
         {
@@ -99,79 +97,16 @@ namespace Org.BouncyCastle.Asn1
             }
         }
 
-        internal virtual int Encoding
-        {
-            get { return EncodingBer; }
-        }
+        internal virtual int Encoding => EncodingBer;
 
         private void FlushInternal()
         {
             // Placeholder to support future internal buffering
         }
 
-        internal void WriteDL(int dl)
-        {
-            if (dl < 128)
-            {
-                Debug.Assert(dl >= 0);
-                WriteByte((byte)dl);
-                return;
-            }
+        internal void WriteDL(int dl) => WriteDL(s, dl);
 
-#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
-            Span<byte> encoding = stackalloc byte[5];
-            BinaryPrimitives.WriteUInt32BigEndian(encoding[1..], (uint)dl);
-            int leadingZeroBytes = BitOperations.LeadingZeroCount((uint)dl) / 8;
-            encoding[leadingZeroBytes] = (byte)(0x84 - leadingZeroBytes);
-            Write(encoding[leadingZeroBytes..]);
-#else
-            byte[] stack = new byte[5];
-            int pos = stack.Length;
-
-            do
-            {
-                stack[--pos] = (byte)dl;
-                dl >>= 8;
-            }
-            while (dl > 0);
-
-            int count = stack.Length - pos;
-            stack[--pos] = (byte)(0x80 | count);
-
-            Write(stack, pos, count + 1);
-#endif
-        }
-
-        internal void WriteIdentifier(int flags, int tagNo)
-        {
-            if (tagNo < 31)
-            {
-                WriteByte((byte)(flags | tagNo));
-                return;
-            }
-
-#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
-            Span<byte> stack = stackalloc byte[6];
-#else
-            byte[] stack = new byte[6];
-#endif
-            int pos = stack.Length;
-
-            stack[--pos] = (byte)(tagNo & 0x7F);
-            while (tagNo > 127)
-            {
-                tagNo >>= 7;
-                stack[--pos] = (byte)(tagNo & 0x7F | 0x80);
-            }
-
-            stack[--pos] = (byte)(flags | 0x1F);
-
-#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
-            Write(stack[pos..]);
-#else
-            Write(stack, pos, stack.Length - pos);
-#endif
-        }
+        internal void WriteIdentifier(int flags, int tagNo) => WriteIdentifier(s, flags, tagNo);
 
         internal static IAsn1Encoding[] GetContentsEncodings(int encoding, Asn1Encodable[] elements)
         {
@@ -218,20 +153,14 @@ namespace Org.BouncyCastle.Asn1
             return length;
         }
 
-        internal static int GetLengthOfEncodingDL(int tagNo, int contentsLength)
-        {
-            return GetLengthOfIdentifier(tagNo) + GetLengthOfDL(contentsLength) + contentsLength;
-        }
+        internal static int GetLengthOfEncodingDL(int tagNo, int contentsLength) =>
+            GetLengthOfIdentifier(tagNo) + GetLengthOfDL(contentsLength) + contentsLength;
 
-        internal static int GetLengthOfEncodingIL(int tagNo, IAsn1Encoding contentsEncoding)
-        {
-            return GetLengthOfIdentifier(tagNo) + 3 + contentsEncoding.GetLength();
-        }
+        internal static int GetLengthOfEncodingIL(int tagNo, IAsn1Encoding contentsEncoding) =>
+            GetLengthOfIdentifier(tagNo) + 3 + contentsEncoding.GetLength();
 
-        internal static int GetLengthOfEncodingIL(int tagNo, IAsn1Encoding[] contentsEncodings)
-        {
-            return GetLengthOfIdentifier(tagNo) + 3 + GetLengthOfContents(contentsEncodings);
-        }
+        internal static int GetLengthOfEncodingIL(int tagNo, IAsn1Encoding[] contentsEncodings) =>
+            GetLengthOfIdentifier(tagNo) + 3 + GetLengthOfContents(contentsEncodings);
 
         internal static int GetLengthOfIdentifier(int tagNo)
         {
@@ -244,6 +173,70 @@ namespace Org.BouncyCastle.Asn1
                 ++length;
             }
             return length;
+        }
+
+        internal static void WriteDL(Stream output, int dl)
+        {
+            if (dl < 128)
+            {
+                Debug.Assert(dl >= 0);
+                output.WriteByte((byte)dl);
+                return;
+            }
+
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+            Span<byte> encoding = stackalloc byte[5];
+            BinaryPrimitives.WriteUInt32BigEndian(encoding[1..], (uint)dl);
+            int leadingZeroBytes = BitOperations.LeadingZeroCount((uint)dl) / 8;
+            encoding[leadingZeroBytes] = (byte)(0x84 - leadingZeroBytes);
+            output.Write(encoding[leadingZeroBytes..]);
+#else
+            byte[] stack = new byte[5];
+            int pos = stack.Length;
+
+            do
+            {
+                stack[--pos] = (byte)dl;
+                dl >>= 8;
+            }
+            while (dl > 0);
+
+            int count = stack.Length - pos;
+            stack[--pos] = (byte)(0x80 | count);
+
+            output.Write(stack, pos, count + 1);
+#endif
+        }
+
+        internal static void WriteIdentifier(Stream output, int flags, int tagNo)
+        {
+            if (tagNo < 31)
+            {
+                output.WriteByte((byte)(flags | tagNo));
+                return;
+            }
+
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+            Span<byte> stack = stackalloc byte[6];
+#else
+            byte[] stack = new byte[6];
+#endif
+            int pos = stack.Length;
+
+            stack[--pos] = (byte)(tagNo & 0x7F);
+            while (tagNo > 127)
+            {
+                tagNo >>= 7;
+                stack[--pos] = (byte)(tagNo & 0x7F | 0x80);
+            }
+
+            stack[--pos] = (byte)(flags | 0x1F);
+
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+            output.Write(stack[pos..]);
+#else
+            output.Write(stack, pos, stack.Length - pos);
+#endif
         }
     }
 }

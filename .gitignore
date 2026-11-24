@@ -12,6 +12,7 @@ Backup/
 bin/
 dist/
 doc/
+!/doc/
 obj/
 packages/
 _Resharper.*/
@@ -22,8 +23,11 @@ _Resharper*/
 .vs/
 BC_codesign.p12
 BC_password.txt
+CLAUDE.local.md
 
 *.nuget.props
 *.nuget.targets
 *.project.lock.json
 project.lock.json
+
+.claude/settings.local.json

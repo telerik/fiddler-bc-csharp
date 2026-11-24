@@ -11,9 +11,12 @@ namespace Org.BouncyCastle.Tls.Tests
     internal class MockPskTls13Server
         : AbstractTlsServer
     {
-        internal MockPskTls13Server()
+        private readonly bool m_badKey;
+
+        internal MockPskTls13Server(bool badKey = false)
             : base(new BcTlsCrypto())
         {
+            m_badKey = badKey;
         }
 
         public override TlsCredentials GetCredentials()
@@ -45,7 +48,7 @@ namespace Org.BouncyCastle.Tls.Tests
         {
             ProtocolVersion serverVersion = base.GetServerVersion();
 
-            Console.WriteLine("TLS 1.3 PSK server negotiated " + serverVersion);
+            Console.WriteLine("TLS 1.3 PSK server negotiated version " + serverVersion);
 
             return serverVersion;
         }
@@ -61,7 +64,7 @@ namespace Org.BouncyCastle.Tls.Tests
             {
                 if (matchIdentity.Equals(identities[i]))
                 {
-                    TlsSecret key = Crypto.CreateSecret(Strings.ToUtf8ByteArray("TLS_TEST_PSK"));
+                    TlsSecret key = Crypto.CreateSecret(TlsTestUtilities.GetPskPasswordUtf8(m_badKey));
                     int prfAlgorithm = PrfAlgorithm.tls13_hkdf_sha256;
 
                     return new BasicTlsPskExternal(identity, key, prfAlgorithm);
@@ -97,10 +100,18 @@ namespace Org.BouncyCastle.Tls.Tests
         {
             base.NotifyHandshakeComplete();
 
-            ProtocolName protocolName = m_context.SecurityParameters.ApplicationProtocol;
+            var securityParameters = m_context.SecurityParameters;
+
+            ProtocolName protocolName = securityParameters.ApplicationProtocol;
             if (protocolName != null)
             {
                 Console.WriteLine("Server ALPN: " + protocolName.GetUtf8Decoding());
+            }
+
+            int negotiatedGroup = securityParameters.NegotiatedGroup;
+            if (negotiatedGroup >= 0)
+            {
+                Console.WriteLine("Server negotiated group: " + NamedGroup.GetText(negotiatedGroup));
             }
         }
 

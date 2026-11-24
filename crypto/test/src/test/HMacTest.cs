@@ -7,7 +7,6 @@ using Org.BouncyCastle.Asn1.Iana;
 using Org.BouncyCastle.Asn1.Nist;
 using Org.BouncyCastle.Asn1.Pkcs;
 using Org.BouncyCastle.Asn1.Rosstandart;
-using Org.BouncyCastle.Asn1.UA;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Security;
@@ -150,7 +149,9 @@ namespace Org.BouncyCastle.Tests
             DoTestHMac("HMac-SHA384", output384);
             DoTestHMac("HMac-SHA512", output512);
             DoTestHMac("HMac-SHA512/224", output512_224);
+            DoTestHMac("HMac-SHA512-224", output512_224);
             DoTestHMac("HMac-SHA512/256", output512_256);
+            DoTestHMac("HMac-SHA512-256", output512_256);
             DoTestHMac("HMac-RIPEMD128", outputRipeMD128);
             DoTestHMac("HMac-RIPEMD160", outputRipeMD160);
             DoTestHMac("HMac-TIGER", outputTiger);
@@ -179,6 +180,8 @@ namespace Org.BouncyCastle.Tests
             DoTestHMac("HMac/SHA256", output256);
             DoTestHMac("HMac/SHA384", output384);
             DoTestHMac("HMac/SHA512", output512);
+            DoTestHMac("HMac/SHA512-224", output512_224);
+            DoTestHMac("HMac/SHA512-256", output512_256);
             DoTestHMac("HMac/RIPEMD128", outputRipeMD128);
             DoTestHMac("HMac/RIPEMD160", outputRipeMD160);
             DoTestHMac("HMac/TIGER", outputTiger);
@@ -199,6 +202,8 @@ namespace Org.BouncyCastle.Tests
             DoTestHMac(PkcsObjectIdentifiers.IdHmacWithSha256.Id, output256);
             DoTestHMac(PkcsObjectIdentifiers.IdHmacWithSha384.Id, output384);
             DoTestHMac(PkcsObjectIdentifiers.IdHmacWithSha512.Id, output512);
+            DoTestHMac(PkcsObjectIdentifiers.IdHmacWithSha512_224.Id, output512_224);
+            DoTestHMac(PkcsObjectIdentifiers.IdHmacWithSha512_256.Id, output512_256);
             DoTestHMac(IanaObjectIdentifiers.HmacSha1.Id, output1);
             DoTestHMac(IanaObjectIdentifiers.HmacMD5.Id, outputMD5);
             DoTestHMac(IanaObjectIdentifiers.HmacRipeMD160.Id, outputRipeMD160);

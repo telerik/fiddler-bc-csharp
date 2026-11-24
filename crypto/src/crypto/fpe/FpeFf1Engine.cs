@@ -2,6 +2,7 @@ using System;
 
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Crypto.Utilities;
+using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Crypto.Fpe
 {
@@ -16,8 +17,11 @@ namespace Org.BouncyCastle.Crypto.Fpe
         public FpeFf1Engine(IBlockCipher baseCipher)
             : base(baseCipher)
         {
-            if (IsOverrideSet(SP80038G.FPE_DISABLED) ||
-                IsOverrideSet(SP80038G.FF1_DISABLED))
+            if (baseCipher.GetBlockSize() != 16)
+                throw new ArgumentException("base cipher needs to be 128 bits", nameof(baseCipher));
+
+            if (IsOverrideSet(Properties.FpeDisable) ||
+                IsOverrideSet(Properties.FpeDisableFf1))
             {
                 throw new InvalidOperationException("FF1 encryption disabled");
             }
@@ -40,7 +44,7 @@ namespace Org.BouncyCastle.Crypto.Fpe
                 if ((length & 1) != 0)
                     throw new ArgumentException("input must be an even number of bytes for a wide radix");
 
-                ushort[] u16In = Pack.BE_To_UInt16(inBuf, inOff, length);
+                ushort[] u16In = Pack.BE_To_UInt16(inBuf, inOff, length / 2);
                 ushort[] u16Out = SP80038G.EncryptFF1w(baseCipher, fpeParameters.Radix, fpeParameters.GetTweak(),
                     u16In, 0, u16In.Length);
                 enc = Pack.UInt16_To_BE(u16Out, 0, u16Out.Length);
@@ -64,7 +68,7 @@ namespace Org.BouncyCastle.Crypto.Fpe
                 if ((length & 1) != 0)
                     throw new ArgumentException("input must be an even number of bytes for a wide radix");
 
-                ushort[] u16In = Pack.BE_To_UInt16(inBuf, inOff, length);
+                ushort[] u16In = Pack.BE_To_UInt16(inBuf, inOff, length / 2);
                 ushort[] u16Out = SP80038G.DecryptFF1w(baseCipher, fpeParameters.Radix, fpeParameters.GetTweak(),
                     u16In, 0, u16In.Length);
                 dec = Pack.UInt16_To_BE(u16Out, 0, u16Out.Length);

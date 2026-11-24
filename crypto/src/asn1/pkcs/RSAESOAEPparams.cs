@@ -2,150 +2,151 @@ using System;
 
 using Org.BouncyCastle.Asn1.Oiw;
 using Org.BouncyCastle.Asn1.X509;
-using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Asn1.Pkcs
 {
-	public class RsaesOaepParameters
-		: Asn1Encodable
-	{
-		private AlgorithmIdentifier hashAlgorithm;
-		private AlgorithmIdentifier maskGenAlgorithm;
-		private AlgorithmIdentifier pSourceAlgorithm;
+    public class RsaesOaepParameters
+        : Asn1Encodable
+    {
+        public static readonly AlgorithmIdentifier DefaultHashAlgorithm = new AlgorithmIdentifier(OiwObjectIdentifiers.IdSha1, DerNull.Instance);
+        public static readonly AlgorithmIdentifier DefaultMaskGenAlgorithm = new AlgorithmIdentifier(PkcsObjectIdentifiers.IdMgf1, DefaultHashAlgorithm);
+        [Obsolete("Use 'DefaultMaskGenAlgorithm' instead")]
+        public static readonly AlgorithmIdentifier DefaultMaskGenFunction = DefaultMaskGenAlgorithm;
+        public static readonly AlgorithmIdentifier DefaultPSourceAlgorithm = new AlgorithmIdentifier(PkcsObjectIdentifiers.IdPSpecified, DerOctetString.Empty);
 
-		public readonly static AlgorithmIdentifier DefaultHashAlgorithm = new AlgorithmIdentifier(OiwObjectIdentifiers.IdSha1, DerNull.Instance);
-		public readonly static AlgorithmIdentifier DefaultMaskGenFunction = new AlgorithmIdentifier(PkcsObjectIdentifiers.IdMgf1, DefaultHashAlgorithm);
-		public readonly static AlgorithmIdentifier DefaultPSourceAlgorithm = new AlgorithmIdentifier(PkcsObjectIdentifiers.IdPSpecified, new DerOctetString(new byte[0]));
+        public static RsaesOaepParameters GetInstance(object obj)
+        {
+            if (obj == null)
+                return null;
+            if (obj is RsaesOaepParameters rsaesOaepParameters)
+                return rsaesOaepParameters;
+#pragma warning disable CS0618 // Type or member is obsolete
+            return new RsaesOaepParameters(Asn1Sequence.GetInstance(obj));
+#pragma warning restore CS0618 // Type or member is obsolete
+        }
 
-		public static RsaesOaepParameters GetInstance(
-			object obj)
-		{
-			if (obj is RsaesOaepParameters)
-			{
-				return (RsaesOaepParameters)obj;
-			}
-			else if (obj is Asn1Sequence)
-			{
-				return new RsaesOaepParameters((Asn1Sequence)obj);
-			}
+        public static RsaesOaepParameters GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
+        {
+#pragma warning disable CS0618 // Type or member is obsolete
+            return new RsaesOaepParameters(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
+#pragma warning restore CS0618 // Type or member is obsolete
+        }
 
-			throw new ArgumentException("Unknown object in factory: " + Platform.GetTypeName(obj), "obj");
-		}
+        public static RsaesOaepParameters GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit)
+        {
+#pragma warning disable CS0618 // Type or member is obsolete
+            return new RsaesOaepParameters(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
+#pragma warning restore CS0618 // Type or member is obsolete
+        }
 
-		/**
-		 * The default version
-		 */
-		public RsaesOaepParameters()
-		    : this(DefaultHashAlgorithm, DefaultMaskGenFunction, DefaultPSourceAlgorithm)
-		{ 
-		}
+        private readonly AlgorithmIdentifier m_hashAlgorithm;
+        private readonly AlgorithmIdentifier m_maskGenAlgorithm;
+        private readonly AlgorithmIdentifier m_pSourceAlgorithm;
 
-		public RsaesOaepParameters(
-			AlgorithmIdentifier hashAlgorithm,
-			AlgorithmIdentifier maskGenAlgorithm)
-		    : this(hashAlgorithm, maskGenAlgorithm, DefaultPSourceAlgorithm)
-		{
-		}
+        [Obsolete("Use 'GetInstance' instead")]
+        public RsaesOaepParameters(Asn1Sequence seq)
+        {
+            if (seq == null)
+                throw new ArgumentNullException(nameof(seq));
 
-		public RsaesOaepParameters(
-			AlgorithmIdentifier hashAlgorithm,
-			AlgorithmIdentifier maskGenAlgorithm,
-			AlgorithmIdentifier pSourceAlgorithm)
-		{
-			this.hashAlgorithm = hashAlgorithm;
-			this.maskGenAlgorithm = maskGenAlgorithm;
-			this.pSourceAlgorithm = pSourceAlgorithm;
-		}
+            int count = seq.Count, pos = 0;
+            if (count < 0 || count > 3)
+                throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
 
-		public RsaesOaepParameters(
-			Asn1Sequence seq)
-		{
-			hashAlgorithm = DefaultHashAlgorithm;
-			maskGenAlgorithm = DefaultMaskGenFunction;
-			pSourceAlgorithm = DefaultPSourceAlgorithm;
+            m_hashAlgorithm = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 0, true, AlgorithmIdentifier.GetTagged)
+                ?? DefaultHashAlgorithm;
 
-			for (int i = 0; i != seq.Count; i++)
-			{
-				Asn1TaggedObject o = (Asn1TaggedObject)seq[i];
+            m_maskGenAlgorithm = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 1, true, AlgorithmIdentifier.GetTagged)
+                ?? DefaultMaskGenAlgorithm;
 
-				switch (o.TagNo)
-				{
-					case 0:
-						hashAlgorithm = AlgorithmIdentifier.GetInstance(o, true);
-						break;
-					case 1:
-						maskGenAlgorithm = AlgorithmIdentifier.GetInstance(o, true);
-						break;
-					case 2:
-						pSourceAlgorithm = AlgorithmIdentifier.GetInstance(o, true);
-						break;
-					default:
-						throw new ArgumentException("unknown tag");
-				}
-			}
-		}
+            m_pSourceAlgorithm = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 2, true, AlgorithmIdentifier.GetTagged)
+                ?? DefaultPSourceAlgorithm;
 
-		public AlgorithmIdentifier HashAlgorithm
-		{
-			get { return hashAlgorithm; }
-		}
+            if (pos != count)
+                throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
+        }
 
-		public AlgorithmIdentifier MaskGenAlgorithm
-		{
-			get { return maskGenAlgorithm; }
-		}
+        /**
+         * The default version
+         */
+        public RsaesOaepParameters()
+            : this(DefaultHashAlgorithm, DefaultMaskGenAlgorithm, DefaultPSourceAlgorithm)
+        {
+        }
 
-		public AlgorithmIdentifier PSourceAlgorithm
-		{
-			get { return pSourceAlgorithm; }
-		}
+        public RsaesOaepParameters(AlgorithmIdentifier hashAlgorithm, AlgorithmIdentifier maskGenAlgorithm)
+            : this(hashAlgorithm, maskGenAlgorithm, DefaultPSourceAlgorithm)
+        {
+        }
 
-		/**
-		 * <pre>
-		 *  RSAES-OAEP-params ::= SEQUENCE {
-		 *     hashAlgorithm      [0] OAEP-PSSDigestAlgorithms     DEFAULT sha1,
-		 *     maskGenAlgorithm   [1] PKCS1MGFAlgorithms  DEFAULT mgf1SHA1,
-		 *     pSourceAlgorithm   [2] PKCS1PSourceAlgorithms  DEFAULT pSpecifiedEmpty
-		 *   }
-		 *
-		 *   OAEP-PSSDigestAlgorithms    ALGORITHM-IDENTIFIER ::= {
-		 *     { OID id-sha1 PARAMETERS NULL   }|
-		 *     { OID id-sha256 PARAMETERS NULL }|
-		 *     { OID id-sha384 PARAMETERS NULL }|
-		 *     { OID id-sha512 PARAMETERS NULL },
-		 *     ...  -- Allows for future expansion --
-		 *   }
-		 *   PKCS1MGFAlgorithms    ALGORITHM-IDENTIFIER ::= {
-		 *     { OID id-mgf1 PARAMETERS OAEP-PSSDigestAlgorithms },
-		 *    ...  -- Allows for future expansion --
-		 *   }
-		 *   PKCS1PSourceAlgorithms    ALGORITHM-IDENTIFIER ::= {
-		 *     { OID id-pSpecified PARAMETERS OCTET STRING },
-		 *     ...  -- Allows for future expansion --
-		 *  }
-		 * </pre>
-		 * @return the asn1 primitive representing the parameters.
-		 */
-		public override Asn1Object ToAsn1Object()
-		{
-			Asn1EncodableVector v = new Asn1EncodableVector(3);
+        public RsaesOaepParameters(AlgorithmIdentifier hashAlgorithm, AlgorithmIdentifier maskGenAlgorithm,
+            AlgorithmIdentifier pSourceAlgorithm)
+        {
+            m_hashAlgorithm = hashAlgorithm;
+            m_maskGenAlgorithm = maskGenAlgorithm;
+            m_pSourceAlgorithm = pSourceAlgorithm;
+        }
 
-			if (!hashAlgorithm.Equals(DefaultHashAlgorithm))
-			{
-				v.Add(new DerTaggedObject(true, 0, hashAlgorithm));
-			}
+        public AlgorithmIdentifier HashAlgorithm => m_hashAlgorithm;
 
-			if (!maskGenAlgorithm.Equals(DefaultMaskGenFunction))
-			{
-				v.Add(new DerTaggedObject(true, 1, maskGenAlgorithm));
-			}
+        public AlgorithmIdentifier MaskGenAlgorithm => m_maskGenAlgorithm;
 
-			if (!pSourceAlgorithm.Equals(DefaultPSourceAlgorithm))
-			{
-				v.Add(new DerTaggedObject(true, 2, pSourceAlgorithm));
-			}
+        public AlgorithmIdentifier PSourceAlgorithm => m_pSourceAlgorithm;
 
-			return new DerSequence(v);
-		}
-	}
+        public RsaesOaepParameters WithDefaultPSource()
+        {
+            if (DefaultPSourceAlgorithm == m_pSourceAlgorithm)
+                return this;
+
+            return new RsaesOaepParameters(m_hashAlgorithm, m_maskGenAlgorithm, DefaultPSourceAlgorithm);
+        }
+
+        /**
+         * <pre>
+         *  RSAES-OAEP-params ::= SEQUENCE {
+         *     hashAlgorithm      [0] OAEP-PSSDigestAlgorithms     DEFAULT sha1,
+         *     maskGenAlgorithm   [1] PKCS1MGFAlgorithms  DEFAULT mgf1SHA1,
+         *     pSourceAlgorithm   [2] PKCS1PSourceAlgorithms  DEFAULT pSpecifiedEmpty
+         *   }
+         *
+         *   OAEP-PSSDigestAlgorithms    ALGORITHM-IDENTIFIER ::= {
+         *     { OID id-sha1 PARAMETERS NULL   }|
+         *     { OID id-sha256 PARAMETERS NULL }|
+         *     { OID id-sha384 PARAMETERS NULL }|
+         *     { OID id-sha512 PARAMETERS NULL },
+         *     ...  -- Allows for future expansion --
+         *   }
+         *   PKCS1MGFAlgorithms    ALGORITHM-IDENTIFIER ::= {
+         *     { OID id-mgf1 PARAMETERS OAEP-PSSDigestAlgorithms },
+         *    ...  -- Allows for future expansion --
+         *   }
+         *   PKCS1PSourceAlgorithms    ALGORITHM-IDENTIFIER ::= {
+         *     { OID id-pSpecified PARAMETERS OCTET STRING },
+         *     ...  -- Allows for future expansion --
+         *  }
+         * </pre>
+         * @return the asn1 primitive representing the parameters.
+         */
+        public override Asn1Object ToAsn1Object()
+        {
+            Asn1EncodableVector v = new Asn1EncodableVector(3);
+
+            if (!DefaultHashAlgorithm.Equals(m_hashAlgorithm))
+            {
+                v.Add(new DerTaggedObject(true, 0, m_hashAlgorithm));
+            }
+
+            if (!DefaultMaskGenAlgorithm.Equals(m_maskGenAlgorithm))
+            {
+                v.Add(new DerTaggedObject(true, 1, m_maskGenAlgorithm));
+            }
+
+            if (!DefaultPSourceAlgorithm.Equals(m_pSourceAlgorithm))
+            {
+                v.Add(new DerTaggedObject(true, 2, m_pSourceAlgorithm));
+            }
+
+            return DerSequence.FromVector(v);
+        }
+    }
 }

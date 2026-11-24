@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 using Org.BouncyCastle.Crypto;
@@ -118,6 +118,12 @@ namespace Org.BouncyCastle.Tls.Crypto.Impl.BC
                 return CreateChaCha20Poly1305(cryptoParams);
             case EncryptionAlgorithm.NULL:
                 return CreateNullCipher(cryptoParams, macAlgorithm);
+            case EncryptionAlgorithm.NULL_HMAC_SHA256:
+                // NOTE: Ignores macAlgorithm
+                return Create13NullCipher(cryptoParams, MacAlgorithm.hmac_sha256);
+            case EncryptionAlgorithm.NULL_HMAC_SHA384:
+                // NOTE: Ignores macAlgorithm
+                return Create13NullCipher(cryptoParams, MacAlgorithm.hmac_sha384);
             case EncryptionAlgorithm.SM4_CCM:
                 // NOTE: Ignores macAlgorithm
                 return CreateCipher_SM4_Ccm(cryptoParams);
@@ -155,6 +161,11 @@ namespace Org.BouncyCastle.Tls.Crypto.Impl.BC
             default:
                 return new BcTlsECDomain(this, ecConfig);
             }
+        }
+
+        public override TlsKemDomain CreateKemDomain(TlsKemConfig kemConfig)
+        {
+            return new BcTlsMLKemDomain(this, kemConfig);
         }
 
         public override TlsNonceGenerator CreateNonceGenerator(byte[] additionalSeedMaterial)
@@ -256,14 +267,12 @@ namespace Org.BouncyCastle.Tls.Crypto.Impl.BC
             case CryptoSignatureAlgorithm.rsa_pss_pss_sha256:
             case CryptoSignatureAlgorithm.rsa_pss_pss_sha384:
             case CryptoSignatureAlgorithm.rsa_pss_pss_sha512:
+            case CryptoSignatureAlgorithm.sm2: // RFC 8998
                 return true;
 
             // TODO[RFC 9189]
             case CryptoSignatureAlgorithm.gostr34102012_256:
             case CryptoSignatureAlgorithm.gostr34102012_512:
-
-            // TODO[RFC 8998]
-            case CryptoSignatureAlgorithm.sm2:
 
             default:
                 return false;
@@ -309,6 +318,12 @@ namespace Org.BouncyCastle.Tls.Crypto.Impl.BC
             case EncryptionAlgorithm.SM4_GCM:
                 return true;
 
+            case EncryptionAlgorithm.NULL_HMAC_SHA256:
+                return HasMacAlgorithm(MacAlgorithm.hmac_sha256);
+
+            case EncryptionAlgorithm.NULL_HMAC_SHA384:
+                return HasMacAlgorithm(MacAlgorithm.hmac_sha384);
+
             case EncryptionAlgorithm.cls_28147_CNT_IMIT:
             case EncryptionAlgorithm.DES_CBC:
             case EncryptionAlgorithm.DES40_CBC:
@@ -338,6 +353,11 @@ namespace Org.BouncyCastle.Tls.Crypto.Impl.BC
             }
         }
 
+        public override bool HasKemAgreement()
+        {
+            return true;
+        }
+
         public override bool HasMacAlgorithm(int macAlgorithm)
         {
             switch (macAlgorithm)
@@ -356,7 +376,9 @@ namespace Org.BouncyCastle.Tls.Crypto.Impl.BC
 
         public override bool HasNamedGroup(int namedGroup)
         {
-            return NamedGroup.RefersToASpecificGroup(namedGroup);
+            return NamedGroup.RefersToASpecificCurve(namedGroup)
+                || NamedGroup.RefersToASpecificFiniteField(namedGroup)
+                || NamedGroup.RefersToASpecificKem(namedGroup);
         }
 
         public override bool HasRsaEncryption()
@@ -388,9 +410,6 @@ namespace Org.BouncyCastle.Tls.Crypto.Impl.BC
             case SignatureAlgorithm.gostr34102012_256:
             case SignatureAlgorithm.gostr34102012_512:
 
-            // TODO[RFC 8998]
-            //case SignatureAlgorithm.sm2:
-
             default:
                 return false;
             }
@@ -398,6 +417,13 @@ namespace Org.BouncyCastle.Tls.Crypto.Impl.BC
 
         public override bool HasSignatureAndHashAlgorithm(SignatureAndHashAlgorithm sigAndHashAlgorithm)
         {
+            int signatureScheme = SignatureScheme.From(sigAndHashAlgorithm);
+            if (SignatureScheme.IsMLDsaScheme(signatureScheme) ||
+                SignatureScheme.IsSlhDsa(signatureScheme))
+            {
+                return HasSignatureScheme(signatureScheme);
+            }
+
             short signature = sigAndHashAlgorithm.Signature;
 
             switch (sigAndHashAlgorithm.Hash)
@@ -413,13 +439,28 @@ namespace Org.BouncyCastle.Tls.Crypto.Impl.BC
         {
             switch (signatureScheme)
             {
+            case SignatureScheme.mldsa44:
+            case SignatureScheme.mldsa65:
+            case SignatureScheme.mldsa87:
+            case SignatureScheme.slhdsa_sha2_128s:
+            case SignatureScheme.slhdsa_sha2_128f:
+            case SignatureScheme.slhdsa_sha2_192s:
+            case SignatureScheme.slhdsa_sha2_192f:
+            case SignatureScheme.slhdsa_sha2_256s:
+            case SignatureScheme.slhdsa_sha2_256f:
+            case SignatureScheme.slhdsa_shake_128s:
+            case SignatureScheme.slhdsa_shake_128f:
+            case SignatureScheme.slhdsa_shake_192s:
+            case SignatureScheme.slhdsa_shake_192f:
+            case SignatureScheme.slhdsa_shake_256s:
+            case SignatureScheme.slhdsa_shake_256f:
             case SignatureScheme.sm2sig_sm3:
-                return false;
+                return true;
             default:
             {
                 short signature = SignatureScheme.GetSignatureAlgorithm(signatureScheme);
 
-                switch(SignatureScheme.GetCryptoHashAlgorithm(signatureScheme))
+                switch (SignatureScheme.GetCryptoHashAlgorithm(signatureScheme))
                 {
                 case CryptoHashAlgorithm.md5:
                     return SignatureAlgorithm.rsa == signature && HasSignatureAlgorithm(signature);
@@ -433,6 +474,11 @@ namespace Org.BouncyCastle.Tls.Crypto.Impl.BC
         public override bool HasSrpAuthentication()
         {
             return true;
+        }
+
+        public override TlsSecret CreateHybridSecret(TlsSecret s1, TlsSecret s2)
+        {
+            return AdoptLocalSecret(Arrays.Concatenate(s1.Extract(), s2.Extract()));
         }
 
         public override TlsSecret CreateSecret(byte[] data)
@@ -619,6 +665,9 @@ namespace Org.BouncyCastle.Tls.Crypto.Impl.BC
 
             return new TlsAeadCipher(cryptoParams, encrypt, decrypt, 16, 16, TlsAeadCipher.AEAD_GCM);
         }
+
+        protected virtual Tls13NullCipher Create13NullCipher(TlsCryptoParameters cryptoParams, int macAlgorithm) =>
+            new Tls13NullCipher(cryptoParams, CreateHmac(macAlgorithm), CreateHmac(macAlgorithm));
 
         protected virtual TlsNullCipher CreateNullCipher(TlsCryptoParameters cryptoParams, int macAlgorithm)
         {

@@ -22,6 +22,16 @@ using Org.BouncyCastle.Utilities.Collections;
 
 namespace Org.BouncyCastle.Security
 {
+    /// <summary>
+    /// Factory for symmetric key generators (<see cref="CipherKeyGenerator"/>) and asymmetric key pair
+    /// generators (<see cref="IAsymmetricCipherKeyPairGenerator"/>), resolved by algorithm name or ASN.1 OID.
+    /// </summary>
+    /// <remarks>
+    /// Names are matched case-insensitively. Symmetric generators are pre-configured with the algorithm's
+    /// default key size; asymmetric generators are returned uninitialised — the caller must invoke
+    /// <see cref="IAsymmetricCipherKeyPairGenerator.Init"/> with appropriate
+    /// <see cref="KeyGenerationParameters"/> before generating a key pair.
+    /// </remarks>
     public static class GeneratorUtilities
     {
         private static readonly IDictionary<string, string> KgAlgorithms =
@@ -30,6 +40,23 @@ namespace Org.BouncyCastle.Security
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private static readonly IDictionary<string, int> DefaultKeySizes =
             new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Canonical algorithm names whose <see cref="DefaultKeySizes"/> entry is a single fixed key length, as opposed
+        /// to a nominal default for a variable-length cipher (RC2, RC4, CAST5, ...).
+        /// </summary>
+        /// <remarks>
+        /// Only these may be used to bound a constant-time PKCS#1 v1.5 unwrap: a wrong length would corrupt a
+        /// legitimate variable-length CEK. This is a deliberately conservative whitelist - anything absent is treated
+        /// as "size not fixed" (see <see cref="TryGetFixedKeySize(string, out int)"/>), which fails safe rather than
+        /// risking a wrong bound.
+        /// </remarks>
+        private static readonly HashSet<string> FixedKeySizeAlgorithms =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "AES128", "AES192", "AES256", "ARIA128", "ARIA192", "ARIA256", "CAMELLIA128", "CAMELLIA192",
+                "CAMELLIA256", "DES", "DESEDE3", "IDEA", "SEED",
+            };
 
         static GeneratorUtilities()
         {
@@ -128,6 +155,8 @@ namespace Org.BouncyCastle.Security
                 "CHACHA20",
                 "CHACHA20-POLY1305",
                 PkcsObjectIdentifiers.IdAlgAeadChaCha20Poly1305);
+            AddKgAlgorithm("XCHACHA20",
+                "XCHACHA20-POLY1305");
             AddKgAlgorithm("DES",
                 OiwObjectIdentifiers.DesCbc,
                 OiwObjectIdentifiers.DesCfb,
@@ -195,8 +224,12 @@ namespace Org.BouncyCastle.Security
                 PkcsObjectIdentifiers.IdHmacWithSha384);
             AddHMacKeyGenerator("SHA512",
                 PkcsObjectIdentifiers.IdHmacWithSha512);
-            AddHMacKeyGenerator("SHA512/224");
-            AddHMacKeyGenerator("SHA512/256");
+            AddHMacKeyGenerator("SHA512/224",
+                PkcsObjectIdentifiers.IdHmacWithSha512_224);
+            AddHMacKeyGenerator("SHA512-224");
+            AddHMacKeyGenerator("SHA512/256",
+                PkcsObjectIdentifiers.IdHmacWithSha512_256);
+            AddHMacKeyGenerator("SHA512-256");
             AddHMacKeyGenerator("KECCAK224");
             AddHMacKeyGenerator("KECCAK256");
             AddHMacKeyGenerator("KECCAK288");
@@ -263,9 +296,12 @@ namespace Org.BouncyCastle.Security
             AddKpgAlgorithm("GOST3410",
                 "GOST-3410",
                 "GOST-3410-94");
+            AddKpgAlgorithm("ML-DSA");
+            AddKpgAlgorithm("ML-KEM");
             AddKpgAlgorithm("RSA",
                 PkcsObjectIdentifiers.RsaEncryption);
             AddKpgAlgorithm("RSASSA-PSS");
+            AddKpgAlgorithm("SLH-DSA");
             AddKpgAlgorithm("X25519",
                 EdECObjectIdentifiers.id_X25519);
             AddKpgAlgorithm("X448",
@@ -279,10 +315,12 @@ namespace Org.BouncyCastle.Security
             AddDefaultKeySizeEntries(160, "HMACRIPEMD160", "HMACSHA1");
             AddDefaultKeySizeEntries(192, "AES", "AES192", "ARIA192", "CAMELLIA192", "DESEDE3", "HMACTIGER",
                 "RIJNDAEL", "SERPENT", "TNEPRES");
-            AddDefaultKeySizeEntries(224, "HMACSHA3-224", "HMACKECCAK224", "HMACSHA224", "HMACSHA512/224");
+            AddDefaultKeySizeEntries(224, "HMACSHA3-224", "HMACKECCAK224", "HMACSHA224", "HMACSHA512/224",
+                "HMACSHA512-224");
             AddDefaultKeySizeEntries(256, "AES256", "ARIA", "ARIA256", "CAMELLIA", "CAMELLIA256", "CAST6",
                 "CHACHA7539", "GOST28147", "HC256", "HMACGOST3411-2012-256", "HMACSHA3-256", "HMACKECCAK256",
-                "HMACSHA256", "HMACSHA512/256", "RC5-64", "RC6", "THREEFISH-256", "TWOFISH");
+                "HMACSHA256", "HMACSHA512/256", "HMACSHA512-256", "RC5-64", "RC6", "THREEFISH-256", "TWOFISH",
+                "XCHACHA20");
             AddDefaultKeySizeEntries(288, "HMACKECCAK288");
             AddDefaultKeySizeEntries(384, "HMACSHA3-384", "HMACKECCAK384", "HMACSHA384");
             AddDefaultKeySizeEntries(512, "HMACGOST3411-2012-512", "HMACSHA3-512", "HMACKECCAK512", "HMACSHA512",
@@ -344,11 +382,18 @@ namespace Org.BouncyCastle.Security
             return CollectionUtilities.GetValueOrNull(KpgAlgorithms, algorithm);
         }
 
+        /// <summary>Resolve a <see cref="CipherKeyGenerator"/> for the given symmetric algorithm OID.</summary>
         public static CipherKeyGenerator GetKeyGenerator(DerObjectIdentifier oid)
         {
             return GetKeyGenerator(oid.Id);
         }
 
+        /// <summary>
+        /// Resolve a <see cref="CipherKeyGenerator"/> for the named symmetric algorithm (e.g. <c>"AES"</c>,
+        /// <c>"DESede"</c>, <c>"ChaCha20"</c>), pre-configured with the algorithm's default key size.
+        /// </summary>
+        /// <exception cref="SecurityUtilityException">If the algorithm is not recognised or has no default
+        /// key size.</exception>
         public static CipherKeyGenerator GetKeyGenerator(string algorithm)
         {
             string canonicalName = GetCanonicalKeyGeneratorAlgorithm(algorithm);
@@ -370,11 +415,17 @@ namespace Org.BouncyCastle.Security
             return new CipherKeyGenerator(defaultKeySize);
         }
 
+        /// <summary>Resolve an <see cref="IAsymmetricCipherKeyPairGenerator"/> for the given algorithm OID.</summary>
         public static IAsymmetricCipherKeyPairGenerator GetKeyPairGenerator(DerObjectIdentifier oid)
         {
             return GetKeyPairGenerator(oid.Id);
         }
 
+        /// <summary>
+        /// Resolve an <see cref="IAsymmetricCipherKeyPairGenerator"/> for the named asymmetric algorithm
+        /// (e.g. <c>"RSA"</c>, <c>"ECDSA"</c>, <c>"Ed25519"</c>, <c>"DH"</c>).
+        /// </summary>
+        /// <exception cref="SecurityUtilityException">If the algorithm is not recognised.</exception>
         public static IAsymmetricCipherKeyPairGenerator GetKeyPairGenerator(string algorithm)
         {
             string canonicalName = GetCanonicalKeyPairGeneratorAlgorithm(algorithm);
@@ -404,8 +455,17 @@ namespace Org.BouncyCastle.Security
             if (canonicalName == "GOST3410")
                 return new Gost3410KeyPairGenerator();
 
+            if (canonicalName == "ML-DSA")
+                return new MLDsaKeyPairGenerator();
+
+            if (canonicalName == "ML-KEM")
+                return new MLKemKeyPairGenerator();
+
             if (canonicalName == "RSA" || canonicalName == "RSASSA-PSS")
                 return new RsaKeyPairGenerator();
+
+            if (canonicalName == "SLH-DSA")
+                return new SlhDsaKeyPairGenerator();
 
             if (canonicalName == "X25519")
                 return new X25519KeyPairGenerator();
@@ -435,6 +495,27 @@ namespace Org.BouncyCastle.Security
                     + " (" + canonicalName + ") not supported.");
 
             return defaultKeySize;
+        }
+
+        internal static bool TryGetFixedKeySize(DerObjectIdentifier oid, out int keySize) =>
+            TryGetFixedKeySize(oid.Id, out keySize);
+
+        /// <summary>
+        /// Return the key size in bits for the given algorithm, but only when that algorithm has a single fixed key
+        /// length (a variable-length cipher returns <c>false</c> even though it has a nominal default size).
+        /// </summary>
+        internal static bool TryGetFixedKeySize(string algorithm, out int keySize)
+        {
+            string canonicalName = GetCanonicalKeyGeneratorAlgorithm(algorithm);
+            if (canonicalName != null &&
+                FixedKeySizeAlgorithms.Contains(canonicalName) &&
+                DefaultKeySizes.TryGetValue(canonicalName, out keySize))
+            {
+                return true;
+            }
+
+            keySize = -1;
+            return false;
         }
 
         private static int FindDefaultKeySize(string canonicalName)

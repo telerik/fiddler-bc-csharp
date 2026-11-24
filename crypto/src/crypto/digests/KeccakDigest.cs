@@ -1,7 +1,14 @@
 ﻿using System;
 using System.Diagnostics;
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+#endif
 
 using Org.BouncyCastle.Crypto.Utilities;
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+using Org.BouncyCastle.Math.Raw;
+#endif
 using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Crypto.Digests
@@ -114,7 +121,11 @@ namespace Org.BouncyCastle.Crypto.Digests
                 AbsorbBits(partialByte, partialBits);
             }
 
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+            Squeeze(output.AsSpan(outOff, fixedOutputLength >> 3));
+#else
             Squeeze(output, outOff, fixedOutputLength);
+#endif
 
             Reset();
 
@@ -187,6 +198,9 @@ namespace Org.BouncyCastle.Crypto.Digests
 
         protected void Absorb(byte[] data, int off, int len)
         {
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+            Absorb(data.AsSpan(off, len));
+#else
             if ((bitsInQueue & 7) != 0)
                 throw new InvalidOperationException("attempt to absorb with odd length queue");
             if (squeezing)
@@ -208,26 +222,19 @@ namespace Org.BouncyCastle.Crypto.Digests
             {
                 Array.Copy(data, off, dataQueue, bytesInQueue, available);
                 count += available;
-#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
-                KeccakAbsorb(dataQueue);
-#else
                 KeccakAbsorb(dataQueue, 0);
-#endif
             }
 
             int remaining;
             while ((remaining = (len - count)) >= rateBytes)
             {
-#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
-                KeccakAbsorb(data.AsSpan(off + count));
-#else
                 KeccakAbsorb(data, off + count);
-#endif
                 count += rateBytes;
             }
 
             Array.Copy(data, off + count, dataQueue, 0, remaining);
             this.bitsInQueue = remaining << 3;
+#endif
         }
 
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
@@ -322,49 +329,149 @@ namespace Org.BouncyCastle.Crypto.Digests
             squeezing = true;
         }
 
+        // TODO[api] Not needed under NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
         protected void Squeeze(byte[] output, int offset, long outputLength)
         {
+            if ((outputLength & 7L) != 0L)
+                throw new InvalidOperationException("outputLength not a multiple of 8");
+
             if (!squeezing)
             {
                 PadAndSwitchToSqueezingPhase();
             }
-            if ((outputLength & 7L) != 0L)
-                throw new InvalidOperationException("outputLength not a multiple of 8");
-
-            long i = 0;
-            while (i < outputLength)
+            else if (bitsInQueue > 0)
             {
-                if (bitsInQueue == 0)
+                int availableBits = bitsInQueue;
+                int dataQueuePos = (rate - bitsInQueue) >> 3;
+
+                if (outputLength <= availableBits)
                 {
-                    KeccakExtract();
+                    SqueezePartialState(dataQueuePos, (int)outputLength >> 3, output, offset);
+                    bitsInQueue -= (int)outputLength;
+                    return;
                 }
-                int partialBlock = (int)System.Math.Min((long)bitsInQueue, outputLength - i);
-                Array.Copy(dataQueue, (rate - bitsInQueue) >> 3, output, offset + (int)(i >> 3), partialBlock >> 3);
-                bitsInQueue -= partialBlock;
-                i += partialBlock;
+
+                SqueezePartialState(dataQueuePos, availableBits >> 3, output, offset);
+                offset += availableBits >> 3;
+                outputLength -= availableBits;
+                bitsInQueue = 0;
+            }
+
+            while (outputLength >= rate)
+            {
+                KeccakPermutation(state);
+                SqueezeFullState(output, offset);
+                offset += rate >> 3;
+                outputLength -= rate;
+            }
+
+            if (outputLength > 0)
+            {
+                KeccakPermutation(state);
+                SqueezePartialState(0, (int)outputLength >> 3, output, offset);
+                bitsInQueue = rate - (int)outputLength;
             }
         }
 
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
         protected void Squeeze(Span<byte> output)
         {
+            int rateBytes = rate >> 3;
+
             if (!squeezing)
             {
                 PadAndSwitchToSqueezingPhase();
             }
-            long outputLength = (long)output.Length << 3;
-
-            long i = 0;
-            while (i < outputLength)
+            else if (bitsInQueue > 0)
             {
-                if (bitsInQueue == 0)
+                int available = bitsInQueue >> 3;
+                int dataQueuePos = rateBytes - available;
+
+                if (output.Length <= available)
                 {
-                    KeccakExtract();
+                    SqueezePartialState(dataQueuePos, output.Length, output);
+                    bitsInQueue -= output.Length << 3;
+                    return;
                 }
-                int partialBlock = (int)System.Math.Min(bitsInQueue, outputLength - i);
-                dataQueue.AsSpan((rate - bitsInQueue) >> 3, partialBlock >> 3).CopyTo(output[(int)(i >> 3)..]);
-                bitsInQueue -= partialBlock;
-                i += partialBlock;
+
+                SqueezePartialState(dataQueuePos, available, output);
+                output = output[available..];
+                bitsInQueue = 0;
+            }
+
+            while (output.Length >= rateBytes)
+            {
+                KeccakPermutation(state);
+                SqueezeFullState(output);
+                output = output[rateBytes..];
+            }
+
+            if (!output.IsEmpty)
+            {
+                KeccakPermutation(state);
+                SqueezePartialState(0, output.Length, output);
+                bitsInQueue = rate - (output.Length << 3);
+            }
+        }
+#endif
+
+        private void EnsureQueuePacked(int byteOff, int byteLen)
+        {
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+            if (BitConverter.IsLittleEndian)
+                return;
+#endif
+
+            int from = (byteOff + 7) / 8;
+            int to = (byteOff + byteLen + 7) / 8;
+            Pack.UInt64_To_LE(state, from, to - from, dataQueue, from * 8);
+        }
+
+        private void SqueezeFullState(byte[] output, int outputOff)
+        {
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+            SqueezeFullState(output.AsSpan(outputOff));
+#else
+            Pack.UInt64_To_LE(state, 0, rate >> 6, output, outputOff);
+#endif
+        }
+
+        private void SqueezePartialState(int byteOff, int byteLen, byte[] output, int outputOff)
+        {
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+            SqueezePartialState(byteOff, byteLen, output.AsSpan(outputOff));
+#else
+            EnsureQueuePacked(byteOff, byteLen);
+            Array.Copy(dataQueue, byteOff, output, outputOff, byteLen);
+#endif
+        }
+
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void SqueezeFullState(Span<byte> output)
+        {
+            var fullState = state.AsSpan(0, rate >> 6);
+            if (BitConverter.IsLittleEndian)
+            {
+                MemoryMarshal.AsBytes(fullState).CopyTo(output);
+            }
+            else
+            {
+                Pack.UInt64_To_LE(fullState, output);
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void SqueezePartialState(int byteOff, int byteLen, Span<byte> output)
+        {
+            if (BitConverter.IsLittleEndian)
+            {
+                MemoryMarshal.AsBytes(state.AsSpan()).Slice(byteOff, byteLen).CopyTo(output);
+            }
+            else
+            {
+                EnsureQueuePacked(byteOff, byteLen);
+                dataQueue.AsSpan(byteOff, byteLen).CopyTo(output);
             }
         }
 #endif
@@ -372,11 +479,18 @@ namespace Org.BouncyCastle.Crypto.Digests
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
         private void KeccakAbsorb(ReadOnlySpan<byte> data)
         {
-            int count = rate >> 6, off = 0;
-            for (int i = 0; i < count; ++i)
+            if (BitConverter.IsLittleEndian)
             {
-                state[i] ^= Pack.LE_To_UInt64(data[off..]);
-                off += 8;
+                Nat.XorTo64(rate >> 6, MemoryMarshal.Cast<byte, ulong>(data), state);
+            }
+            else
+            {
+                int count = rate >> 6, off = 0;
+                for (int i = 0; i < count; ++i)
+                {
+                    state[i] ^= Pack.LE_To_UInt64(data[off..]);
+                    off += 8;
+                }
             }
 
             KeccakPermutation(state);
@@ -394,15 +508,6 @@ namespace Org.BouncyCastle.Crypto.Digests
             KeccakPermutation(state);
         }
 #endif
-
-        private void KeccakExtract()
-        {
-            KeccakPermutation(state);
-
-            Pack.UInt64_To_LE(state, 0, rate >> 6, dataQueue, 0);
-
-            this.bitsInQueue = rate;
-        }
 
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
         internal static void KeccakPermutation(Span<ulong> A)

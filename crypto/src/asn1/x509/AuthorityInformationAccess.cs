@@ -1,6 +1,8 @@
 using System;
 using System.Text;
 
+using Org.BouncyCastle.Utilities;
+
 namespace Org.BouncyCastle.Asn1.X509
 {
     /**
@@ -19,14 +21,10 @@ namespace Org.BouncyCastle.Asn1.X509
      * id-ad-ocsp OBJECT IDENTIFIER ::= { id-ad 1 }
      * </pre>
      */
+    // TODO[api] Name should really be 'AuthorityInfoAccessSyntax'
     public class AuthorityInformationAccess
         : Asn1Encodable
     {
-        private static AccessDescription[] Copy(AccessDescription[] descriptions)
-        {
-            return (AccessDescription[])descriptions.Clone();
-        }
-
         public static AuthorityInformationAccess GetInstance(object obj)
         {
             if (obj == null)
@@ -36,58 +34,72 @@ namespace Org.BouncyCastle.Asn1.X509
             return new AuthorityInformationAccess(Asn1Sequence.GetInstance(obj));
         }
 
-        public static AuthorityInformationAccess FromExtensions(X509Extensions extensions)
+        public static AuthorityInformationAccess GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new AuthorityInformationAccess(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
+
+        public static AuthorityInformationAccess GetOptional(Asn1Encodable element)
         {
-            return GetInstance(X509Extensions.GetExtensionParsedValue(extensions, X509Extensions.AuthorityInfoAccess));
+            if (element == null)
+                throw new ArgumentNullException(nameof(element));
+
+            if (element is AuthorityInformationAccess authorityInformationAccess)
+                return authorityInformationAccess;
+
+            Asn1Sequence asn1Sequence = Asn1Sequence.GetOptional(element);
+            if (asn1Sequence != null)
+                return new AuthorityInformationAccess(asn1Sequence);
+
+            return null;
         }
 
-        private readonly AccessDescription[] descriptions;
+        public static AuthorityInformationAccess GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new AuthorityInformationAccess(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
+
+        public static AuthorityInformationAccess FromExtensions(X509Extensions extensions) =>
+            GetInstance(X509Extensions.GetExtensionParsedValue(extensions, X509Extensions.AuthorityInfoAccess));
+
+        // TODO[asn1] Tighten to DLSequence if/when safe
+        private readonly DerSequence m_elements;
 
         private AuthorityInformationAccess(Asn1Sequence seq)
         {
             if (seq.Count < 1)
-                throw new ArgumentException("sequence may not be empty");
+                throw new ArgumentException("Minimum sequence size is 1", nameof(seq));
 
-            this.descriptions = seq.MapElements(AccessDescription.GetInstance);
+            m_elements = DerSequence.Map(seq, AccessDescription.GetInstance);
         }
 
-        public AuthorityInformationAccess(
-            AccessDescription description)
+        public AuthorityInformationAccess(AccessDescription description)
         {
-            this.descriptions = new AccessDescription[]{ description };
+            m_elements = DerSequence.FromElement(description ?? throw new ArgumentNullException(nameof(description)));
         }
 
-        public AuthorityInformationAccess(
-            AccessDescription[] descriptions)
+        public AuthorityInformationAccess(AccessDescription[] descriptions)
         {
-            this.descriptions = Copy(descriptions);
+            if (Arrays.IsNullOrContainsNull(descriptions))
+                throw new ArgumentNullException(nameof(descriptions), "cannot be null, or contain null");
+            if (descriptions.Length < 1)
+                throw new ArgumentException("Minimum sequence size is 1", nameof(descriptions));
+
+            m_elements = DerSequence.FromElements(descriptions);
         }
 
-        /**
-         * create an AuthorityInformationAccess with the oid and location provided.
-         */
+        /// <summary>Create an AuthorityInformationAccess with the oid and location provided.</summary>
         public AuthorityInformationAccess(DerObjectIdentifier oid, GeneralName location)
             : this(new AccessDescription(oid, location))
         {
         }
 
-        public AccessDescription[] GetAccessDescriptions()
-        {
-            return Copy(descriptions);
-        }
+        public AccessDescription[] GetAccessDescriptions() => m_elements.MapElements(AccessDescription.GetInstance);
 
-        public override Asn1Object ToAsn1Object()
-        {
-            return new DerSequence(descriptions);
-        }
+        public override Asn1Object ToAsn1Object() => m_elements;
 
         public override string ToString()
         {
-            //return "AuthorityInformationAccess: Oid(" + this.descriptions[0].AccessMethod.Id + ")";
-
             StringBuilder buf = new StringBuilder();
             buf.AppendLine("AuthorityInformationAccess:");
-            foreach (AccessDescription description in descriptions)
+            // Elements are known to be AccessDescription by construction
+            foreach (AccessDescription description in m_elements)
             {
                 buf.Append("    ")
                    .Append(description)

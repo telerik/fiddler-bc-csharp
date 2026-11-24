@@ -1,10 +1,10 @@
 ﻿using System;
 using System.IO;
 using System.Net.Sockets;
-using System.Text;
 
 using NUnit.Framework;
 
+using Org.BouncyCastle.Utilities;
 using Org.BouncyCastle.Utilities.Date;
 
 namespace Org.BouncyCastle.Tls.Tests
@@ -26,9 +26,10 @@ namespace Org.BouncyCastle.Tls.Tests
             long time1 = DateTimeUtilities.CurrentUnixMs();
             Console.WriteLine("Elapsed: " + (time1 - time0) + "ms");
 
-            Http11Get(host, port, protocol.Stream);
-
-            protocol.Close();
+            using (var s = protocol.Stream)
+            {
+                Http11Get(host, port, s);
+            }
         }
 
         private static void Http11Get(string host, int port, Stream s)
@@ -77,7 +78,7 @@ namespace Org.BouncyCastle.Tls.Tests
 
         private static void WriteUtf8Line(Stream output, string line)
         {
-            byte[] buf = Encoding.UTF8.GetBytes(line + "\r\n");
+            byte[] buf = Strings.ToUtf8ByteArray(line + "\r\n");
             output.Write(buf, 0, buf.Length);
             Console.WriteLine(">>> " + line);
         }

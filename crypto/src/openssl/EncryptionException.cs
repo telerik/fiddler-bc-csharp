@@ -1,31 +1,33 @@
 using System;
-using System.IO;
 using System.Runtime.Serialization;
 
-namespace Org.BouncyCastle.Security
+namespace Org.BouncyCastle.OpenSsl
 {
     [Serializable]
     public class EncryptionException
-		: IOException
-	{
-		public EncryptionException()
-			: base()
-		{
-		}
+        // TODO[api] Change to IOException
+#pragma warning disable CS0618 // Type or member is obsolete
+        : Security.EncryptionException
+#pragma warning restore CS0618 // Type or member is obsolete
+    {
+        public EncryptionException()
+            : base()
+        {
+        }
 
-		public EncryptionException(string message)
-			: base(message)
-		{
-		}
+        public EncryptionException(string message)
+            : base(message)
+        {
+        }
 
-		public EncryptionException(string message, Exception innerException)
-			: base(message, innerException)
-		{
-		}
+        public EncryptionException(string message, Exception innerException)
+            : base(message, innerException)
+        {
+        }
 
-		protected EncryptionException(SerializationInfo info, StreamingContext context)
-			: base(info, context)
-		{
-		}
-	}
+        protected EncryptionException(SerializationInfo info, StreamingContext context)
+            : base(info, context)
+        {
+        }
+    }
 }

@@ -4,6 +4,7 @@ using Org.BouncyCastle.Asn1.Pkcs;
 using Org.BouncyCastle.Asn1.X509;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Parameters;
+using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Utilities;
 
 //import javax.crypto.interfaces.PBEKey;
@@ -42,7 +43,9 @@ namespace Org.BouncyCastle.Cms
 
 			this.password = (char[])password.Clone();
 			this.salt = kdfParams.GetSalt();
-			this.iterationCount = kdfParams.IterationCount.IntValue;
+			// The count is attacker-supplied and unauthenticated (CMS EnvelopedData has no integrity gate before
+			// the KEK is derived), so bound it before deriving; CPU-DoS guard shared with the PKCS#8/PBES2 path.
+			this.iterationCount = PbeUtilities.CheckPbeIterationCount(kdfParams.IterationCountObject);
 		}
 
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
@@ -63,13 +66,17 @@ namespace Org.BouncyCastle.Cms
 
 			this.password = password.ToArray();
             this.salt = kdfParams.GetSalt();
-            this.iterationCount = kdfParams.IterationCount.IntValue;
+            // The count is attacker-supplied and unauthenticated (CMS EnvelopedData has no integrity gate before
+            // the KEK is derived), so bound it before deriving; CPU-DoS guard shared with the PKCS#8/PBES2 path.
+            this.iterationCount = PbeUtilities.CheckPbeIterationCount(kdfParams.IterationCountObject);
         }
 #endif
 
         ~CmsPbeKey()
 		{
-			Array.Clear(this.password, 0, this.password.Length);
+			// ZeroMemory (not Array.Clear) so the JIT cannot elide the wipe of the secret password
+			// as a dead store; see the CLAUDE.md constant-time/zeroization guidance.
+			Arrays.ZeroMemory(this.password);
 		}
 
 		public byte[] Salt

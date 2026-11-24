@@ -1,29 +1,55 @@
 using System;
 
 using Org.BouncyCastle.Asn1.Tsp;
-using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Asn1.Cms
 {
-	public class Evidence
+    /**
+     * <a href="https://tools.ietf.org/html/rfc5544">RFC 5544</a>:
+     * Binding Documents with Time-Stamps; Evidence object.
+     * <p/>
+     * <pre>
+     * Evidence ::= CHOICE {
+     *     tstEvidence    [0] TimeStampTokenEvidence,   -- see RFC 3161
+     *     ersEvidence    [1] EvidenceRecord,           -- see RFC 4998
+     *     otherEvidence  [2] OtherEvidence
+     * }
+     * </pre>
+     */
+    public class Evidence
 		: Asn1Encodable, IAsn1Choice
 	{
-        public static Evidence GetInstance(object obj)
+        public static Evidence GetInstance(object obj) => Asn1Utilities.GetInstanceChoice(obj, GetOptional);
+
+        public static Evidence GetInstance(Asn1TaggedObject obj, bool isExplicit) =>
+            Asn1Utilities.GetInstanceChoice(obj, isExplicit, GetInstance);
+
+        public static Evidence GetOptional(Asn1Encodable element)
         {
-            if (obj == null)
-                return null;
-            if (obj is Evidence evidence)
+            if (element == null)
+                throw new ArgumentNullException(nameof(element));
+
+            if (element is Evidence evidence)
                 return evidence;
-            if (obj is Asn1TaggedObject taggedObject)
-                return new Evidence(Asn1Utilities.CheckContextTagClass(taggedObject));
 
-            throw new ArgumentException("Unknown object in GetInstance: " + Platform.GetTypeName(obj), nameof(obj));
+            Asn1TaggedObject taggedObject = Asn1TaggedObject.GetOptional(element);
+            if (taggedObject != null)
+            {
+                if (taggedObject.HasContextTag(0))
+                    return new Evidence(TimeStampTokenEvidence.GetTagged(taggedObject, false));
+
+                if (taggedObject.HasContextTag(1))
+                    return new Evidence(EvidenceRecord.GetTagged(taggedObject, false));
+
+                if (taggedObject.HasContextTag(2))
+                    return new Evidence(Asn1Sequence.GetTagged(taggedObject, false));
+            }
+
+            return null;
         }
 
-        public static Evidence GetInstance(Asn1TaggedObject obj, bool isExplicit)
-        {
-            return Asn1Utilities.GetInstanceFromChoice(obj, isExplicit, GetInstance);
-        }
+        public static Evidence GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            Asn1Utilities.GetTaggedChoice(taggedObject, declaredExplicit, GetInstance);
 
         private readonly TimeStampTokenEvidence m_tstEvidence;
         private readonly EvidenceRecord m_ersEvidence;
@@ -31,32 +57,18 @@ namespace Org.BouncyCastle.Asn1.Cms
 
         public Evidence(TimeStampTokenEvidence tstEvidence)
 		{
-			m_tstEvidence = tstEvidence;
+			m_tstEvidence = tstEvidence ?? throw new ArgumentNullException(nameof(tstEvidence));
 		}
 
         public Evidence(EvidenceRecord ersEvidence)
         {
-            m_ersEvidence = ersEvidence;
+            m_ersEvidence = ersEvidence ?? throw new ArgumentNullException(nameof(ersEvidence));
         }
 
-        private Evidence(Asn1TaggedObject tagged)
-		{
-            if (tagged.TagNo == 0)
-            {
-                m_tstEvidence = TimeStampTokenEvidence.GetInstance(tagged, false);
-            }
-            else if (tagged.TagNo == 1)
-            {
-                m_ersEvidence = EvidenceRecord.GetInstance(tagged, false);
-            }
-            else if (tagged.TagNo == 2)
-            {
-                m_otherEvidence = Asn1Sequence.GetInstance(tagged, false);
-            }
-            else
-            {
-                throw new ArgumentException("unknown tag in Evidence", nameof(tagged));
-            }
+        // TODO Add OtherEvidence class and public constructor for it here instead
+        private Evidence(Asn1Sequence otherEvidence)
+        {
+            m_otherEvidence = otherEvidence ?? throw new ArgumentNullException(nameof(otherEvidence));
         }
 
         public virtual TimeStampTokenEvidence TstEvidence => m_tstEvidence;

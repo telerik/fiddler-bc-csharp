@@ -1,62 +1,150 @@
+using System;
 using System.Collections.Generic;
 
 namespace Org.BouncyCastle.Asn1.X509
 {
-	/**
-	 * PolicyMappings V3 extension, described in RFC3280.
-	 * <pre>
-	 *    PolicyMappings ::= Sequence SIZE (1..MAX) OF Sequence {
-	 *      issuerDomainPolicy      CertPolicyId,
-	 *      subjectDomainPolicy     CertPolicyId }
-	 * </pre>
-	 *
-	 * @see <a href="http://www.faqs.org/rfc/rfc3280.txt">RFC 3280, section 4.2.1.6</a>
-	 */
-	public class PolicyMappings
-		: Asn1Encodable
-	{
-		private readonly Asn1Sequence seq;
+    /**
+     * PolicyMappings V3 extension, described in RFC3280.
+     * <pre>
+     *   PolicyMappings ::= Sequence SIZE (1..MAX) OF Sequence {
+     *     issuerDomainPolicy   CertPolicyId,
+     *     subjectDomainPolicy  CertPolicyId }
+     *
+     *   CertPolicyId ::= OBJECT IDENTIFIER
+     * </pre>
+     *
+     * @see <a href="http://www.faqs.org/rfc/rfc3280.txt">RFC 3280, section 4.2.1.6</a>
+     */
+    public class PolicyMappings
+        : Asn1Encodable
+    {
+        public class Element
+            : Asn1Encodable
+        {
+            public static Element GetInstance(object obj)
+            {
+                if (obj == null)
+                    return null;
+                if (obj is Element element)
+                    return element;
+                return new Element(Asn1Sequence.GetInstance(obj));
+            }
 
-		/**
-		 * Creates a new <code>PolicyMappings</code> instance.
-		 *
-		 * @param seq an <code>Asn1Sequence</code> constructed as specified
-		 * in RFC 3280
-		 */
-		public PolicyMappings(
-			Asn1Sequence seq)
-		{
-			this.seq = seq;
-		}
+            public static Element GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+                new Element(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
+
+            public static Element GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+                new Element(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
+
+            private readonly DerObjectIdentifier m_issuerDomainPolicy;
+            private readonly DerObjectIdentifier m_subjectDomainPolicy;
+
+            private Element(Asn1Sequence seq)
+            {
+                int count = seq.Count, pos = 0;
+                if (count != 2)
+                    throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
+
+                m_issuerDomainPolicy = Asn1Utilities.Read(seq, ref pos, DerObjectIdentifier.GetInstance);
+                m_subjectDomainPolicy = Asn1Utilities.Read(seq, ref pos, DerObjectIdentifier.GetInstance);
+
+                if (pos != count)
+                    throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
+            }
+
+            public Element(DerObjectIdentifier issuerDomainPolicy, DerObjectIdentifier subjectDomainPolicy)
+            {
+                m_issuerDomainPolicy = issuerDomainPolicy ?? throw new ArgumentNullException(nameof(issuerDomainPolicy));
+                m_subjectDomainPolicy = subjectDomainPolicy ?? throw new ArgumentNullException(nameof(subjectDomainPolicy));
+            }
+
+            public DerObjectIdentifier IssuerDomainPolicy => m_issuerDomainPolicy;
+
+            public DerObjectIdentifier SubjectDomainPolicy => m_subjectDomainPolicy;
+
+            public override Asn1Object ToAsn1Object() => new DLSequence(m_issuerDomainPolicy, m_subjectDomainPolicy);
+        }
+
+        public static PolicyMappings GetInstance(object obj)
+        {
+            if (obj == null)
+                return null;
+            if (obj is PolicyMappings policyMappings)
+                return policyMappings;
+#pragma warning disable CS0618 // Type or member is obsolete
+            return new PolicyMappings(Asn1Sequence.GetInstance(obj));
+#pragma warning restore CS0618 // Type or member is obsolete
+        }
+
+        public static PolicyMappings GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit)
+        {
+#pragma warning disable CS0618 // Type or member is obsolete
+            return new PolicyMappings(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
+#pragma warning restore CS0618 // Type or member is obsolete
+        }
+
+        // TODO[asn1] Tighten to DLSequence if/when safe
+        private readonly DerSequence m_elements;
 
         /**
-		 * Creates a new <code>PolicyMappings</code> instance.
-		 *
-		 * @param mappings a <code>HashMap</code> value that maps
-		 * <code>string</code> oids
-		 * to other <code>string</code> oids.
-		 */
-		public PolicyMappings(IDictionary<string, string> mappings)
-		{
-			Asn1EncodableVector v = new Asn1EncodableVector(mappings.Count);
+         * Creates a new <code>PolicyMappings</code> instance.
+         *
+         * @param seq an <code>Asn1Sequence</code> constructed as specified
+         * in RFC 3280
+         */
+        [Obsolete("Use 'GetInstance' instead")]
+        public PolicyMappings(Asn1Sequence seq)
+        {
+            if (seq == null)
+                throw new ArgumentNullException(nameof(seq));
+            if (seq.Count < 1)
+                throw new ArgumentException("Minimum sequence size is 1", nameof(seq));
 
-			foreach (var entry in mappings)
-			{
-				string idp = entry.Key;
-				string sdp = entry.Value;
+            // TODO[api] Asn1Sequence virtual (or extension?) method for mapping to a new sequence
+            m_elements = DerSequence.Map(seq, Element.GetInstance);
+        }
 
-				v.Add(
-					new DerSequence(
-						new DerObjectIdentifier(idp),
-						new DerObjectIdentifier(sdp)));
-			}
+        public PolicyMappings(IDictionary<string, string> mappings)
+        {
+            if (mappings == null)
+                throw new ArgumentNullException(nameof(mappings));
+            if (mappings.Count < 1)
+                throw new ArgumentException("Minimum sequence size is 1", nameof(mappings));
 
-			seq = new DerSequence(v);
-		}
+            Asn1EncodableVector v = new Asn1EncodableVector(mappings.Count);
 
-		public override Asn1Object ToAsn1Object()
-		{
-			return seq;
-		}
-	}
+            foreach (var entry in mappings)
+            {
+                var issuerDomainPolicy = new DerObjectIdentifier(entry.Key);
+                var subjectDomainPolicy = new DerObjectIdentifier(entry.Value);
+
+                v.Add(new Element(issuerDomainPolicy, subjectDomainPolicy));
+            }
+
+            m_elements = DerSequence.FromVector(v);
+        }
+
+        public PolicyMappings(IDictionary<DerObjectIdentifier, DerObjectIdentifier> mappings)
+        {
+            if (mappings == null)
+                throw new ArgumentNullException(nameof(mappings));
+            if (mappings.Count < 1)
+                throw new ArgumentException("Minimum sequence size is 1", nameof(mappings));
+
+            Asn1EncodableVector v = new Asn1EncodableVector(mappings.Count);
+
+            foreach (var entry in mappings)
+            {
+                v.Add(new Element(issuerDomainPolicy: entry.Key, subjectDomainPolicy: entry.Value));
+            }
+
+            m_elements = DerSequence.FromVector(v);
+        }
+
+        public Asn1Sequence Elements => m_elements;
+
+        public Element[] GetElements() => m_elements.MapElements(Element.GetInstance);
+
+        public override Asn1Object ToAsn1Object() => m_elements;
+    }
 }

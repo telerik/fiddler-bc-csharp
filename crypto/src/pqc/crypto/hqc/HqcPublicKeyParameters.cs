@@ -1,22 +1,35 @@
-﻿using Org.BouncyCastle.Utilities;
+using System;
+
+using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Pqc.Crypto.Hqc
 {
+    /// <summary>An HQC public (encapsulation) key, represented by its raw byte encoding.</summary>
     public sealed class HqcPublicKeyParameters
         : HqcKeyParameters
     {
-        private byte[] pk;
+        private readonly byte[] m_pk;
 
-        public HqcPublicKeyParameters(HqcParameters param, byte[] pk) : base(false, param)
+        /// <summary>Creates an HQC public key from its raw encoding.</summary>
+        /// <param name="param">The HQC parameter set this key belongs to.</param>
+        /// <param name="pk">The raw public key bytes; a defensive copy is taken.</param>
+        // TODO[api] Rename to 'parameters'
+        public HqcPublicKeyParameters(HqcParameters param, byte[] pk)
+            : base(isPrivate: false, param)
         {
-            this.pk = Arrays.Clone(pk);
+            m_pk = Arrays.CopyBuffer(pk);
         }
 
-        public byte[] PublicKey => Arrays.Clone(pk);
+        /// <summary>Returns a copy of the raw public key encoding.</summary>
+        public byte[] GetEncoded() => GetPublicKey();
 
-        public byte[] GetEncoded()
-        {
-            return PublicKey;
-        }
+        /// <summary>Returns a copy of the raw public key bytes.</summary>
+        public byte[] GetPublicKey() => Arrays.CopyBuffer(m_pk);
+
+        internal byte[] InternalPublicKey => m_pk;
+
+        /// <summary>Obsolete. Use <see cref="GetPublicKey"/> instead.</summary>
+        [Obsolete("Use 'GetPublicKey' instead")]
+        public byte[] PublicKey => GetPublicKey();
     }
 }

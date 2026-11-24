@@ -30,46 +30,55 @@ namespace Org.BouncyCastle.Math.EC.Rfc7748
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
         public static bool CalculateAgreement(ReadOnlySpan<byte> k, ReadOnlySpan<byte> u, Span<byte> r)
         {
+            r = r[..PointSize];
             ScalarMult(k, u, r);
-            return !Arrays.AreAllZeroes(r[..PointSize]);
+            return !Arrays.AreAllZeroes(r);
+        }
+#endif
+
+        public static void ClampPrivateKey(byte[] k)
+        {
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+            ClampPrivateKey(k.AsSpan(0, ScalarSize));
+#else
+            if (k == null)
+                throw new ArgumentNullException(nameof(k));
+            if (k.Length != ScalarSize)
+                throw new ArgumentException(nameof(k));
+
+            k[0             ] &= 0xFC;
+            k[ScalarSize - 1] |= 0x80;
+#endif
+        }
+
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+        public static void ClampPrivateKey(Span<byte> k)
+        {
+            if (k.Length != ScalarSize)
+                throw new ArgumentException(nameof(k));
+
+            k[0             ] &= 0xFC;
+            k[ScalarSize - 1] |= 0x80;
         }
 #endif
 
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
-        private static uint Decode32(ReadOnlySpan<byte> bs)
-        {
-            uint n = bs[0];
-            n |= (uint)bs[1] << 8;
-            n |= (uint)bs[2] << 16;
-            n |= (uint)bs[3] << 24;
-            return n;
-        }
-
         private static void DecodeScalar(ReadOnlySpan<byte> k, uint[] n)
         {
             for (int i = 0; i < 14; ++i)
             {
-                n[i] = Decode32(k[(i * 4)..]);
+                n[i] = F.Decode32(k[(i * 4)..]);
             }
 
             n[ 0] &= 0xFFFFFFFCU;
             n[13] |= 0x80000000U;
         }
 #else
-        private static uint Decode32(byte[] bs, int off)
-        {
-            uint n = bs[off];
-            n |= (uint)bs[++off] << 8;
-            n |= (uint)bs[++off] << 16;
-            n |= (uint)bs[++off] << 24;
-            return n;
-        }
-
         private static void DecodeScalar(byte[] k, int kOff, uint[] n)
         {
             for (int i = 0; i < 14; ++i)
             {
-                n[i] = Decode32(k, kOff + i * 4);
+                n[i] = F.Decode32(k, kOff + i * 4);
             }
 
             n[ 0] &= 0xFFFFFFFCU;
@@ -79,38 +88,41 @@ namespace Org.BouncyCastle.Math.EC.Rfc7748
 
         public static void GeneratePrivateKey(SecureRandom random, byte[] k)
         {
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+            GeneratePrivateKey(random, k.AsSpan(0, ScalarSize));
+#else
+            if (random == null)
+                throw new ArgumentNullException(nameof(random));
+            if (k == null)
+                throw new ArgumentNullException(nameof(k));
             if (k.Length != ScalarSize)
                 throw new ArgumentException(nameof(k));
 
             random.NextBytes(k);
 
-            k[0] &= 0xFC;
-            k[ScalarSize - 1] |= 0x80;
+            ClampPrivateKey(k);
+#endif
         }
 
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
         public static void GeneratePrivateKey(SecureRandom random, Span<byte> k)
         {
+            if (random == null)
+                throw new ArgumentNullException(nameof(random));
             if (k.Length != ScalarSize)
                 throw new ArgumentException(nameof(k));
 
             random.NextBytes(k);
 
-            k[0] &= 0xFC;
-            k[ScalarSize - 1] |= 0x80;
+            ClampPrivateKey(k);
         }
 #endif
 
-        public static void GeneratePublicKey(byte[] k, int kOff, byte[] r, int rOff)
-        {
+        public static void GeneratePublicKey(byte[] k, int kOff, byte[] r, int rOff) =>
             ScalarMultBase(k, kOff, r, rOff);
-        }
 
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
-        public static void GeneratePublicKey(ReadOnlySpan<byte> k, Span<byte> r)
-        {
-            ScalarMultBase(k, r);
-        }
+        public static void GeneratePublicKey(ReadOnlySpan<byte> k, Span<byte> r) => ScalarMultBase(k, r);
 #endif
 
         private static void PointDouble(uint[] x, uint[] z)
@@ -130,19 +142,20 @@ namespace Org.BouncyCastle.Math.EC.Rfc7748
             F.Mul(z, a, z);
         }
 
-        public static void Precompute()
-        {
-            Ed448.Precompute();
-        }
+        public static void Precompute() => Ed448.Precompute();
 
         public static void ScalarMult(byte[] k, int kOff, byte[] u, int uOff, byte[] r, int rOff)
         {
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
-            ScalarMult(k.AsSpan(kOff), u.AsSpan(uOff), r.AsSpan(rOff));
+            ScalarMult(k.AsSpan(kOff, ScalarSize), u.AsSpan(uOff, PointSize), r.AsSpan(rOff, PointSize));
 #else
+            Arrays.ValidateSegment(k, kOff, ScalarSize);
+            Arrays.ValidateSegment(u, uOff, PointSize);
+            Arrays.ValidateSegment(r, rOff, PointSize);
+
             uint[] n = new uint[14];    DecodeScalar(k, kOff, n);
 
-            uint[] x1 = F.Create();     F.Decode(u, uOff, x1);
+            uint[] x1 = F.Create();     F.Decode448(u, uOff, x1, 0);
             uint[] x2 = F.Create();     F.Copy(x1, 0, x2, 0);
             uint[] z2 = F.Create();     z2[0] = 1;
             uint[] x3 = F.Create();     x3[0] = 1;
@@ -210,9 +223,19 @@ namespace Org.BouncyCastle.Math.EC.Rfc7748
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
         public static void ScalarMult(ReadOnlySpan<byte> k, ReadOnlySpan<byte> u, Span<byte> r)
         {
+            // TODO[api] Exact length check
+            if (k.Length < ScalarSize)
+                throw new ArgumentException(nameof(k));
+            // TODO[api] Exact length check
+            if (u.Length < PointSize)
+                throw new ArgumentException(nameof(u));
+            // TODO[api] Exact length check
+            if (r.Length < PointSize)
+                throw new ArgumentException(nameof(r));
+
             uint[] n = new uint[14];    DecodeScalar(k, n);
 
-            uint[] x1 = F.Create();     F.Decode(u, x1);
+            uint[] x1 = F.Create();     F.Decode448(u, x1);
             uint[] x2 = F.Create();     F.Copy(x1, 0, x2, 0);
             uint[] z2 = F.Create();     z2[0] = 1;
             uint[] x3 = F.Create();     x3[0] = 1;
@@ -280,13 +303,16 @@ namespace Org.BouncyCastle.Math.EC.Rfc7748
         public static void ScalarMultBase(byte[] k, int kOff, byte[] r, int rOff)
         {
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
-            ScalarMultBase(k.AsSpan(kOff), r.AsSpan(rOff));
+            ScalarMultBase(k.AsSpan(kOff, ScalarSize), r.AsSpan(rOff, PointSize));
 #else
             // Equivalent (but much slower)
             //byte[] u = new byte[PointSize];
             //u[0] = 5;
 
             //ScalarMult(k, kOff, u, 0, r, rOff);
+
+            Arrays.ValidateSegment(k, kOff, ScalarSize);
+            Arrays.ValidateSegment(r, rOff, PointSize);
 
             uint[] x = F.Create();
             uint[] y = F.Create();
@@ -311,10 +337,17 @@ namespace Org.BouncyCastle.Math.EC.Rfc7748
 
             //ScalarMult(k, u, r);
 
+            // TODO[api] Exact length check
+            if (k.Length < ScalarSize)
+                throw new ArgumentException(nameof(k));
+            // TODO[api] Exact length check
+            if (r.Length < PointSize)
+                throw new ArgumentException(nameof(r));
+
             uint[] x = F.Create();
             uint[] y = F.Create();
 
-            Ed448.ScalarMultBaseXY(k, x, y);
+            Ed448.ScalarMultBaseXY(k, x.AsSpan(), y.AsSpan());
 
             F.Inv(x, x);
             F.Mul(x, y, x);

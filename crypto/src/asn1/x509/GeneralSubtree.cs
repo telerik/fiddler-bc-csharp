@@ -4,182 +4,120 @@ using Org.BouncyCastle.Math;
 
 namespace Org.BouncyCastle.Asn1.X509
 {
-	/**
-	 * Class for containing a restriction object subtrees in NameConstraints. See
-	 * RFC 3280.
-	 *
-	 * <pre>
-	 *
-	 *       GeneralSubtree ::= SEQUENCE
-	 *       {
-	 *         baseName                    GeneralName,
-	 *         minimum         [0]     BaseDistance DEFAULT 0,
-	 *         maximum         [1]     BaseDistance OPTIONAL
-	 *       }
-	 * </pre>
-	 *
-	 * @see org.bouncycastle.asn1.x509.NameConstraints
-	 *
-	 */
-	public class GeneralSubtree
-		: Asn1Encodable
-	{
-		private readonly GeneralName	baseName;
-		private readonly DerInteger		minimum;
-		private readonly DerInteger		maximum;
+    /// <summary>
+    /// Class for containing a restriction object subtrees in NameConstraints. See RFC 3280.
+    /// </summary>
+    /// <remarks>
+    /// <code>
+    /// GeneralSubtree ::= SEQUENCE
+    /// {
+    ///     base            GeneralName,
+    ///     minimum     [0] BaseDistance DEFAULT 0,
+    ///     maximum     [1] BaseDistance OPTIONAL
+    /// }
+    /// </code>
+    /// </remarks>
+    public class GeneralSubtree
+        : Asn1Encodable
+    {
+        public static GeneralSubtree GetInstance(object obj)
+        {
+            if (obj == null)
+                return null;
+            if (obj is GeneralSubtree generalSubtree)
+                return generalSubtree;
+            return new GeneralSubtree(Asn1Sequence.GetInstance(obj));
+        }
 
-		private GeneralSubtree(
-			Asn1Sequence seq)
-		{
-			baseName = GeneralName.GetInstance(seq[0]);
+        public static GeneralSubtree GetInstance(Asn1TaggedObject o, bool isExplicit) =>
+            new GeneralSubtree(Asn1Sequence.GetInstance(o, isExplicit));
 
-			switch (seq.Count)
-			{
-				case 1:
-					break;
-				case 2:
-				{
-					Asn1TaggedObject o = Asn1TaggedObject.GetInstance(seq[1]);
-					switch (o.TagNo)
-					{
-						case 0:
-							minimum = DerInteger.GetInstance(o, false);
-							break;
-						case 1:
-							maximum = DerInteger.GetInstance(o, false);
-							break;
-						default:
-							throw new ArgumentException("Bad tag number: " + o.TagNo);
-					}
-					break;
-				}
-				case 3:
-				{
-					{
-						Asn1TaggedObject oMin = Asn1TaggedObject.GetInstance(seq[1]);
-						if (oMin.TagNo != 0)
-							throw new ArgumentException("Bad tag number for 'minimum': " + oMin.TagNo);
-						minimum = DerInteger.GetInstance(oMin, false);
-					}
+        public static GeneralSubtree GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new GeneralSubtree(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
-					{
-						Asn1TaggedObject oMax = Asn1TaggedObject.GetInstance(seq[2]);
-						if (oMax.TagNo != 1)
-							throw new ArgumentException("Bad tag number for 'maximum': " + oMax.TagNo);
-						maximum = DerInteger.GetInstance(oMax, false);
-					}
+        private readonly GeneralName m_baseName;
+        private readonly DerInteger m_minimum;
+        private readonly DerInteger m_maximum;
 
-					break;
-				}
-				default:
-					throw new ArgumentException("Bad sequence size: " + seq.Count);
-			}
-		}
+        private GeneralSubtree(Asn1Sequence seq)
+        {
+            int count = seq.Count, pos = 0;
+            if (count < 1 || count > 3)
+                throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
 
-		/**
-		 * Constructor from a given details.
-		 *
-		 * According RFC 3280, the minimum and maximum fields are not used with any
-		 * name forms, thus minimum MUST be zero, and maximum MUST be absent.
-		 * <p>
-		 * If minimum is <code>null</code>, zero is assumed, if
-		 * maximum is <code>null</code>, maximum is absent.</p>
-		 *
-		 * @param baseName
-		 *            A restriction.
-		 * @param minimum
-		 *            Minimum
-		 *
-		 * @param maximum
-		 *            Maximum
-		 */
-		public GeneralSubtree(
-			GeneralName	baseName,
-			BigInteger	minimum,
-			BigInteger	maximum)
-		{
-			this.baseName = baseName;
-			if (minimum != null)
-			{
-				this.minimum = new DerInteger(minimum);
-			}
-			if (maximum != null)
-			{
-				this.maximum = new DerInteger(maximum);
-			}
-		}
+            m_baseName = Asn1Utilities.Read(seq, ref pos, GeneralName.GetInstance);
+            m_minimum = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 0, false, DerInteger.GetTagged)
+                ?? DerInteger.Zero;
+            m_maximum = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 1, false, DerInteger.GetTagged);
 
-		public GeneralSubtree(
-			GeneralName baseName)
-			: this(baseName, null, null)
-		{
-		}
+            if (pos != count)
+                throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
+        }
 
-		public static GeneralSubtree GetInstance(
-			Asn1TaggedObject	o,
-			bool				isExplicit)
-		{
-			return new GeneralSubtree(Asn1Sequence.GetInstance(o, isExplicit));
-		}
+        public GeneralSubtree(GeneralName baseName)
+            : this(baseName, (DerInteger)null, (DerInteger)null)
+        {
+        }
 
-		public static GeneralSubtree GetInstance(
-			object obj)
-		{
-			if (obj == null)
-			{
-				return null;
-			}
+        /// <summary>Constructor from the given details.</summary>
+        /// <remarks>
+        /// According to RFC 3280, the minimum and maximum fields are not used with any name forms, thus minimum MUST
+        /// be zero, and maximum MUST be absent. If minimum is <c>null</c>, zero is assumed, if maximum is <c>null</c>,
+        /// maximum is absent.
+        /// </remarks>
+        /// <param name="baseName"/>
+        /// <param name="minimum"/>
+        /// <param name="maximum"/>
+        [Obsolete("Use version taking 'DerInteger' values instead")]
+        public GeneralSubtree(GeneralName baseName, BigInteger minimum, BigInteger maximum)
+        {
+            m_baseName = baseName ?? throw new ArgumentNullException(nameof(baseName));
+            m_minimum = minimum == null ? DerInteger.Zero : new DerInteger(minimum);
+            m_maximum = maximum == null ? null : new DerInteger(maximum);
+        }
 
-			if (obj is GeneralSubtree)
-			{
-				return (GeneralSubtree) obj;
-			}
+        /// <summary>Constructor from the given details.</summary>
+        /// <remarks>
+        /// According to RFC 3280, the minimum and maximum fields are not used with any name forms, thus minimum MUST
+        /// be zero, and maximum MUST be absent. If minimum is <c>null</c>, zero is assumed, if maximum is <c>null</c>,
+        /// maximum is absent.
+        /// </remarks>
+        /// <param name="baseName"/>
+        /// <param name="minimum"/>
+        /// <param name="maximum"/>
+        public GeneralSubtree(GeneralName baseName, DerInteger minimum, DerInteger maximum)
+        {
+            m_baseName = baseName ?? throw new ArgumentNullException(nameof(baseName));
+            m_minimum = minimum ?? DerInteger.Zero;
+            m_maximum = maximum;
+        }
 
-			return new GeneralSubtree(Asn1Sequence.GetInstance(obj));
-		}
+        public GeneralName Base => m_baseName;
 
-		public GeneralName Base
-		{
-			get { return baseName; }
-		}
+        // TODO[api] Eventually use this property for the actual DerInteger
+        [Obsolete("Use 'MinimumObect.Value' instead")]
+        public BigInteger Minimum => m_minimum.Value;
 
-		public BigInteger Minimum
-		{
-			get { return minimum == null ? BigInteger.Zero : minimum.Value; }
-		}
+        public DerInteger MinimumObject => m_minimum;
 
-		public BigInteger Maximum
-		{
-			get { return maximum == null ? null : maximum.Value; }
-		}
+        // TODO[api] Eventually use this proeprty for the actual DerInteger
+        [Obsolete("Use 'MaximumObect?.Value' instead")]
+        public BigInteger Maximum => m_maximum?.Value;
 
-		/**
-		 * Produce an object suitable for an Asn1OutputStream.
-		 *
-		 * Returns:
-		 *
-		 * <pre>
-		 *       GeneralSubtree ::= SEQUENCE
-		 *       {
-		 *         baseName                    GeneralName,
-		 *         minimum         [0]     BaseDistance DEFAULT 0,
-		 *         maximum         [1]     BaseDistance OPTIONAL
-		 *       }
-		 * </pre>
-		 *
-		 * @return a DERObject
-		 */
-		public override Asn1Object ToAsn1Object()
-		{
-			Asn1EncodableVector v = new Asn1EncodableVector(baseName);
+        public DerInteger MaximumObject => m_maximum;
 
-			if (minimum != null && !minimum.HasValue(0))
-			{
-				v.Add(new DerTaggedObject(false, 0, minimum));
-			}
+        public override Asn1Object ToAsn1Object()
+        {
+            Asn1EncodableVector v = new Asn1EncodableVector(3);
+            v.Add(m_baseName);
 
-            v.AddOptionalTagged(false, 1, maximum);
-			return new DerSequence(v);
-		}
-	}
+            if (!m_minimum.HasValue(0))
+            {
+                v.Add(new DerTaggedObject(false, 0, m_minimum));
+            }
+
+            v.AddOptionalTagged(false, 1, m_maximum);
+            return new DerSequence(v);
+        }
+    }
 }

@@ -11,15 +11,21 @@ using Org.BouncyCastle.Asn1.Pkcs;
 using Org.BouncyCastle.Asn1.Rosstandart;
 using Org.BouncyCastle.Asn1.TeleTrust;
 using Org.BouncyCastle.Asn1.UA;
+using Org.BouncyCastle.Asn1.X509;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Digests;
 using Org.BouncyCastle.Utilities;
 using Org.BouncyCastle.Utilities.Collections;
+using Org.BouncyCastle.X509;
 
 namespace Org.BouncyCastle.Security
 {
+    /// <summary>
+    /// Factory for <see cref="IDigest"/> instances and convenience helpers for one-shot hash computation.
+    /// </summary>
     /// <remarks>
-    ///  Utility class for creating IDigest objects from their names/Oids
+    /// Digests can be looked up by canonical name (e.g. <c>"SHA-256"</c>, <c>"SHA3-512"</c>) or by ASN.1 OID.
+    /// Names are matched case-insensitively and a number of common aliases are recognised.
     /// </remarks>
     public static class DigestUtilities
     {
@@ -77,13 +83,17 @@ namespace Org.BouncyCastle.Security
             AlgorithmOidMap[PkcsObjectIdentifiers.IdHmacWithSha512] = "SHA-512";
 
             AlgorithmMap["SHA512/224"] = "SHA-512/224";
+            AlgorithmMap["SHA512-224"] = "SHA-512/224";
             AlgorithmMap["SHA512(224)"] = "SHA-512/224";
             AlgorithmMap["SHA-512(224)"] = "SHA-512/224";
             AlgorithmOidMap[NistObjectIdentifiers.IdSha512_224] = "SHA-512/224";
+            AlgorithmOidMap[PkcsObjectIdentifiers.IdHmacWithSha512_224] = "SHA-512/224";
             AlgorithmMap["SHA512/256"] = "SHA-512/256";
+            AlgorithmMap["SHA512-256"] = "SHA-512/256";
             AlgorithmMap["SHA512(256)"] = "SHA-512/256";
             AlgorithmMap["SHA-512(256)"] = "SHA-512/256";
             AlgorithmOidMap[NistObjectIdentifiers.IdSha512_256] = "SHA-512/256";
+            AlgorithmOidMap[PkcsObjectIdentifiers.IdHmacWithSha512_256] = "SHA-512/256";
 
             AlgorithmMap["RIPEMD-128"] = "RIPEMD128";
             AlgorithmOidMap[TeleTrusTObjectIdentifiers.RipeMD128] = "RIPEMD128";
@@ -111,8 +121,10 @@ namespace Org.BouncyCastle.Security
             AlgorithmOidMap[NistObjectIdentifiers.IdSha3_512] = "SHA3-512";
             AlgorithmOidMap[NistObjectIdentifiers.IdHMacWithSha3_512] = "SHA3-512";
             AlgorithmMap["SHAKE128"] = "SHAKE128-256";
+            AlgorithmMap["SHAKE-128"] = "SHAKE128-256";
             AlgorithmOidMap[NistObjectIdentifiers.IdShake128] = "SHAKE128-256";
             AlgorithmMap["SHAKE256"] = "SHAKE256-512";
+            AlgorithmMap["SHAKE-256"] = "SHAKE256-512";
             AlgorithmOidMap[NistObjectIdentifiers.IdShake256] = "SHAKE256-512";
 
             AlgorithmOidMap[GMObjectIdentifiers.sm3] = "SM3";
@@ -196,18 +208,49 @@ namespace Org.BouncyCastle.Security
 #endif
         }
 
-        // TODO[api] Change parameter name to 'oid'
-        public static byte[] CalculateDigest(DerObjectIdentifier id, byte[] input)
+        /// <summary>One-shot digest of <paramref name="buf"/>, using the algorithm identified by
+        /// <paramref name="algID"/>.</summary>
+        /// <exception cref="SecurityUtilityException">If <paramref name="algID"/> is not recognised.</exception>
+        public static byte[] CalculateDigest(AlgorithmIdentifier algID, byte[] buf)
         {
-            return CalculateDigest(id.Id, input);
+            IDigest digest = GetDigest(algID);
+            return DoFinal(digest, buf);
         }
 
+        /// <summary>One-shot digest of <paramref name="len"/> bytes from <paramref name="buf"/>, starting at offset
+        /// <paramref name="off"/>, using the algorithm identified by <paramref name="algID"/>.</summary>
+        /// <exception cref="SecurityUtilityException">If <paramref name="algID"/> is not recognised.</exception>
+        public static byte[] CalculateDigest(AlgorithmIdentifier algID, byte[] buf, int off, int len)
+        {
+            IDigest digest = GetDigest(algID);
+            return DoFinal(digest, buf, off, len);
+        }
+
+        /// <summary>One-shot digest of <paramref name="input"/>, using the algorithm identified by
+        /// <paramref name="id"/>.</summary>
+        /// <exception cref="SecurityUtilityException">If <paramref name="id"/> is not recognised.</exception>
+        // TODO[api] Change parameter name to 'oid'
+        public static byte[] CalculateDigest(DerObjectIdentifier id, byte[] input) =>
+            CalculateDigest(id.GetID(), input);
+
+        /// <summary>One-shot digest of <paramref name="len"/> bytes from <paramref name="buf"/>, starting at
+        /// offset <paramref name="off"/>, using the algorithm identified by <paramref name="oid"/>.</summary>
+        /// <exception cref="SecurityUtilityException">If <paramref name="oid"/> is not recognised.</exception>
+        public static byte[] CalculateDigest(DerObjectIdentifier oid, byte[] buf, int off, int len) =>
+            CalculateDigest(oid.GetID(), buf, off, len);
+
+        /// <summary>One-shot digest of <paramref name="input"/>, using the algorithm identified by
+        /// <paramref name="algorithm"/>.</summary>
+        /// <exception cref="SecurityUtilityException">If <paramref name="algorithm"/> is not recognised.</exception>
         public static byte[] CalculateDigest(string algorithm, byte[] input)
         {
             IDigest digest = GetDigest(algorithm);
             return DoFinal(digest, input);
         }
 
+        /// <summary>One-shot digest of <paramref name="len"/> bytes from <paramref name="buf"/>, starting at
+        /// offset <paramref name="off"/>, using the algorithm identified by <paramref name="algorithm"/>.</summary>
+        /// <exception cref="SecurityUtilityException">If <paramref name="algorithm"/> is not recognised.</exception>
         public static byte[] CalculateDigest(string algorithm, byte[] buf, int off, int len)
         {
             IDigest digest = GetDigest(algorithm);
@@ -215,6 +258,24 @@ namespace Org.BouncyCastle.Security
         }
 
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+        /// <summary>One-shot digest of <paramref name="buffer"/>, using the algorithm identified by
+        /// <paramref name="algID"/>.</summary>
+        /// <exception cref="SecurityUtilityException">If <paramref name="algID"/> is not recognised.</exception>
+        public static byte[] CalculateDigest(AlgorithmIdentifier algID, ReadOnlySpan<byte> buffer)
+        {
+            IDigest digest = GetDigest(algID);
+            return DoFinal(digest, buffer);
+        }
+
+        /// <summary>One-shot digest of <paramref name="buffer"/>, using the algorithm identified by
+        /// <paramref name="oid"/>.</summary>
+        /// <exception cref="SecurityUtilityException">If <paramref name="oid"/> is not recognised.</exception>
+        public static byte[] CalculateDigest(DerObjectIdentifier oid, ReadOnlySpan<byte> buffer) =>
+            CalculateDigest(oid.GetID(), buffer);
+
+        /// <summary>One-shot digest of <paramref name="buffer"/>, using the algorithm identified by
+        /// <paramref name="algorithm"/>.</summary>
+        /// <exception cref="SecurityUtilityException">If <paramref name="algorithm"/> is not recognised.</exception>
         public static byte[] CalculateDigest(string algorithm, ReadOnlySpan<byte> buffer)
         {
             IDigest digest = GetDigest(algorithm);
@@ -222,6 +283,7 @@ namespace Org.BouncyCastle.Security
         }
 #endif
 
+        /// <summary>Finalises <paramref name="digest"/> and returns the resulting hash as a fresh array.</summary>
         public static byte[] DoFinal(IDigest digest)
         {
             byte[] b = new byte[digest.GetDigestSize()];
@@ -229,12 +291,16 @@ namespace Org.BouncyCastle.Security
             return b;
         }
 
+        /// <summary>Feeds <paramref name="input"/> into <paramref name="digest"/>, then finalises and returns the
+        /// hash.</summary>
         public static byte[] DoFinal(IDigest digest, byte[] input)
         {
             digest.BlockUpdate(input, 0, input.Length);
             return DoFinal(digest);
         }
 
+        /// <summary>Feeds <paramref name="len"/> bytes from <paramref name="buf"/> at offset
+        /// <paramref name="off"/> into <paramref name="digest"/>, then finalises and returns the hash.</summary>
         public static byte[] DoFinal(IDigest digest, byte[] buf, int off, int len)
         {
             digest.BlockUpdate(buf, off, len);
@@ -242,6 +308,8 @@ namespace Org.BouncyCastle.Security
         }
 
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+        /// <summary>Feeds <paramref name="buffer"/> into <paramref name="digest"/>, then finalises and returns
+        /// the hash.</summary>
         public static byte[] DoFinal(IDigest digest, ReadOnlySpan<byte> buffer)
         {
             digest.BlockUpdate(buffer);
@@ -249,11 +317,36 @@ namespace Org.BouncyCastle.Security
         }
 #endif
 
+        /// <summary>
+        /// Returns the canonical algorithm name registered for the given ASN.1 OID, or <c>null</c> if the OID
+        /// is not mapped to a known digest.
+        /// </summary>
         public static string GetAlgorithmName(DerObjectIdentifier oid)
         {
             return CollectionUtilities.GetValueOrNull(AlgorithmOidMap, oid);
         }
 
+        /// <summary>
+        /// Resolve and instantiate an <see cref="IDigest"/> for the given ASN.1 algorithm.
+        /// </summary>
+        /// <exception cref="ArgumentNullException">If <paramref name="algID"/> is <c>null</c>.</exception>
+        /// <exception cref="SecurityUtilityException">
+        /// If <paramref name="algID"/> does not map to a known digest.
+        /// </exception>
+        public static IDigest GetDigest(AlgorithmIdentifier algID)
+        {
+            if (algID == null)
+                throw new ArgumentNullException(nameof(algID));
+            if (!X509Utilities.HasAbsentParameters(algID))
+                throw new SecurityUtilityException("Digest algorithm not recognised.");
+            return GetDigest(algID.Algorithm);
+        }
+
+        /// <summary>
+        /// Resolve and instantiate an <see cref="IDigest"/> for the given ASN.1 algorithm OID.
+        /// </summary>
+        /// <exception cref="ArgumentNullException">If <paramref name="id"/> is <c>null</c>.</exception>
+        /// <exception cref="SecurityUtilityException">If the OID does not map to a known digest.</exception>
         // TODO[api] Change parameter name to 'oid'
         public static IDigest GetDigest(DerObjectIdentifier id)
         {
@@ -270,6 +363,13 @@ namespace Org.BouncyCastle.Security
             throw new SecurityUtilityException("Digest OID not recognised.");
         }
 
+        /// <summary>
+        /// Resolve and instantiate an <see cref="IDigest"/> by name (or alias).
+        /// </summary>
+        /// <param name="algorithm">A digest name (e.g. <c>"SHA-256"</c>, <c>"SHA3-512"</c>,
+        /// <c>"BLAKE2B-512"</c>).</param>
+        /// <exception cref="ArgumentNullException">If <paramref name="algorithm"/> is <c>null</c>.</exception>
+        /// <exception cref="SecurityUtilityException">If the digest name is not recognised.</exception>
         public static IDigest GetDigest(string algorithm)
         {
             if (algorithm == null)
@@ -355,10 +455,11 @@ namespace Org.BouncyCastle.Security
         }
 
         /// <summary>
-        /// Returns an ObjectIdentifier for a given digest mechanism.
+        /// Returns the ASN.1 OID associated with the named digest mechanism, or <c>null</c> when none is
+        /// registered.
         /// </summary>
-        /// <param name="mechanism">A string representation of the digest meanism.</param>
-        /// <returns>A DerObjectIdentifier, null if the Oid is not available.</returns>
+        /// <param name="mechanism">A digest name or alias (e.g. <c>"SHA-256"</c>).</param>
+        /// <exception cref="ArgumentNullException">If <paramref name="mechanism"/> is <c>null</c>.</exception>
         public static DerObjectIdentifier GetObjectIdentifier(string mechanism)
         {
             if (mechanism == null)

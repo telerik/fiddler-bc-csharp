@@ -12,7 +12,7 @@ using Org.BouncyCastle.Utilities.Encoders;
 namespace Org.BouncyCastle.Math.EC.Tests
 {
     /**
-     * Test class for {@link org.bouncycastle.math.ec.ECPoint ECPoint}. All
+     * Test class for {@link Org.BouncyCastle.Math.ec.ECPoint ECPoint}. All
      * literature values are taken from "Guide to elliptic curve cryptography",
      * Darrel Hankerson, Alfred J. Menezes, Scott Vanstone, 2004, Springer-Verlag
      * New York, Inc.
@@ -20,11 +20,6 @@ namespace Org.BouncyCastle.Math.EC.Tests
     [TestFixture]
     public class ECPointTest
     {
-        /**
-         * Random source used to generate random points
-         */
-        private SecureRandom Random = new SecureRandom();
-
         /**
          * Nested class containing sample literature values for <code>Fp</code>.
          */
@@ -46,19 +41,21 @@ namespace Org.BouncyCastle.Math.EC.Tests
 
             internal static readonly int[] pointSource = { 1, 5, 4, 10, 234, 1024, 817, 912 };
 
-            internal static ECPoint[] p = new ECPoint[pointSource.Length / 2];
+            internal static ECPoint[] p = CreatePoints();
 
             /**
              * Creates the points on the curve with literature values.
              */
-            internal static void CreatePoints()
+            internal static ECPoint[] CreatePoints()
             {
+                ECPoint[] p = new ECPoint[pointSource.Length / 2];
                 for (int i = 0; i < pointSource.Length / 2; i++)
                 {
                     p[i] = curve.CreatePoint(
                         new BigInteger(pointSource[2 * i].ToString()),
                         new BigInteger(pointSource[2 * i + 1].ToString()));
                 }
+                return p;
             }
         }
 
@@ -89,28 +86,25 @@ namespace Org.BouncyCastle.Math.EC.Tests
             internal static readonly string[] pointSource = { "0010", "1111", "1100", "1100",
                     "0001", "0001", "1011", "0010" };
 
-            internal static readonly ECPoint[] p = new ECPoint[pointSource.Length / 2];
+            internal static readonly ECPoint[] p = CreatePoints();
 
             /**
              * Creates the points on the curve with literature values.
              */
-            internal static void CreatePoints()
+            private static ECPoint[] CreatePoints()
             {
+                ECPoint[] p = new ECPoint[pointSource.Length / 2];
                 for (int i = 0; i < pointSource.Length / 2; i++)
                 {
                     p[i] = curve.CreatePoint(
                         new BigInteger(pointSource[2 * i], 2),
                         new BigInteger(pointSource[2 * i + 1], 2));
                 }
+                return p;
             }
         }
 
-        [SetUp]
-        public void SetUp()
-        {
-            Fp.CreatePoints();
-            F2m.CreatePoints();
-        }
+        private readonly SecureRandom Random = new SecureRandom();
 
         /**
          * Tests, if inconsistent points can be created, i.e. points with exactly
@@ -612,11 +606,11 @@ namespace Org.BouncyCastle.Math.EC.Tests
                 + "B6AFF4A831852A82A7CF3C521C3C09AA"
                 + "9F94D6AF56971F1FFCE3E82389857DB0"
                 + "80C5DF10AC7ACE87666D807AFEA85FEB");
-            BigInteger a = p.Subtract(BigInteger.ValueOf(3));
+            BigInteger a = p.Subtract(BigInteger.Three);
             BigInteger b = BigInteger.Zero;
             byte[] S = null;
             BigInteger n = p.Add(BigInteger.One).ShiftRight(2);
-            BigInteger h = BigInteger.ValueOf(4);
+            BigInteger h = BigInteger.Four;
 
             ECCurve curve = ConfigureCurve(new FpCurve(p, a, b, n, h));
 

@@ -1,4 +1,3 @@
-using System;
 using System.IO;
 
 using Org.BouncyCastle.Asn1;
@@ -8,45 +7,57 @@ using Org.BouncyCastle.Utilities.IO.Compression;
 namespace Org.BouncyCastle.Cms
 {
     /**
-    * Class for reading a CMS Compressed Data stream.
-    * <pre>
-    *     CMSCompressedDataParser cp = new CMSCompressedDataParser(inputStream);
-    *
-    *     process(cp.GetContent().GetContentStream());
-    * </pre>
-    *  Note: this class does not introduce buffering - if you are processing large files you should create
-    *  the parser with:
-    *  <pre>
-    *      CMSCompressedDataParser     ep = new CMSCompressedDataParser(new BufferedInputStream(inputStream, bufSize));
-    *  </pre>
-    *  where bufSize is a suitably large buffer size.
-    */
+     * Class for reading a CMS Compressed Data stream.
+     * <pre>
+     *     CMSCompressedDataParser cp = new CMSCompressedDataParser(inputStream);
+     *
+     *     process(cp.GetContent().GetContentStream());
+     * </pre>
+     *  Note: this class does not introduce buffering - if you are processing large files you should create
+     *  the parser with:
+     *  <pre>
+     *      CMSCompressedDataParser     ep = new CMSCompressedDataParser(new BufferedStream(inputStream, bufSize));
+     *  </pre>
+     *  where bufSize is a suitably large buffer size.
+     * <p>
+     * <b>Stream handling note:</b>
+     * <ul>
+     *   <li>The constructor reads only the outer CMS ContentInfo header from the
+     *       supplied Stream. The compressed content is drained lazily by the
+     *       caller via {@link #GetContent()} and reading from the
+     *       returned {@link CmsTypedStream}.</li>
+     *   <li>The supplied Stream is <b>not closed automatically</b>. Call
+     *       {@link #Close()} on this parser (inherited from
+     *       {@link CmsContentInfoParser}) to close the underlying Stream, or close
+     *       it yourself.</li>
+     * </ul>
+     * </p>
+     */
     public class CmsCompressedDataParser
         : CmsContentInfoParser
     {
-        public CmsCompressedDataParser(
-            byte[] compressedData)
+        public CmsCompressedDataParser(byte[] compressedData)
             : this(new MemoryStream(compressedData, false))
         {
         }
 
-        public CmsCompressedDataParser(
-            Stream compressedData)
+        public CmsCompressedDataParser(Stream compressedData)
             : base(compressedData)
         {
         }
 
-		public CmsTypedStream GetContent()
+        public CmsTypedStream GetContent()
         {
             try
             {
-                CompressedDataParser comData = new CompressedDataParser((Asn1SequenceParser)this.contentInfo.GetContent(Asn1Tags.Sequence));
+                CompressedDataParser comData = new CompressedDataParser(
+                    (Asn1SequenceParser)this.contentInfo.GetContent(Asn1Tags.Sequence));
                 ContentInfoParser content = comData.GetEncapContentInfo();
 
                 Asn1OctetStringParser bytes = (Asn1OctetStringParser)content.GetContent(Asn1Tags.OctetString);
                 Stream zIn = ZLib.DecompressInput(bytes.GetOctetStream());
 
-                return new CmsTypedStream(content.ContentType.Id, zIn);
+                return new CmsTypedStream(content.ContentType, zIn);
             }
             catch (IOException e)
             {

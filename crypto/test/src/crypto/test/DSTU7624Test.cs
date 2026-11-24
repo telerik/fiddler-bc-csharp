@@ -2,16 +2,14 @@
 
 using NUnit.Framework;
 
-using Org.BouncyCastle.Crypto.Digests;
 using Org.BouncyCastle.Crypto.Engines;
+using Org.BouncyCastle.Crypto.Macs;
 using Org.BouncyCastle.Crypto.Modes;
 using Org.BouncyCastle.Crypto.Parameters;
-using Org.BouncyCastle.Math;
 using Org.BouncyCastle.Security;
+using Org.BouncyCastle.Utilities;
 using Org.BouncyCastle.Utilities.Encoders;
 using Org.BouncyCastle.Utilities.Test;
-using Org.BouncyCastle.Crypto.Macs;
-using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Crypto.Tests
 {
@@ -66,6 +64,8 @@ namespace Org.BouncyCastle.Crypto.Tests
             new StreamCipherVectorTest(27, new KCtrBlockCipher(new Dstu7624Engine(128)), new ParametersWithIV(new KeyParameter(Hex.Decode("000102030405060708090A0B0C0D0E0F")), Hex.Decode("101112131415161718191A1B1C1D1E1F")), "303132333435363738393A3B3C3D3E3F404142434445464748494A4B4C4D4E4F", "B91A7B8790BBCFCFE65D04E5538E98E216AC209DA33122FDA596E8928070BE51")
         };
 
+        public override string Name => "Dstu7624";
+
         public override ITestResult Perform()
         {
             ITestResult result = base.Perform();
@@ -82,7 +82,7 @@ namespace Org.BouncyCastle.Crypto.Tests
                 return result;
             }
 
-            CCMModeTests();
+            CcmModeTests();
 
             result = KeyWrapTests(); //Key wrapping tests
 
@@ -461,7 +461,7 @@ namespace Org.BouncyCastle.Crypto.Tests
             return new SimpleTestResult(true, Name + ": Okay");
         }
 
-        private void CCMModeTests()
+        private void CcmModeTests()
         {
             //test 1
             byte[] key = Hex.Decode("000102030405060708090a0b0c0d0e0f");
@@ -475,10 +475,10 @@ namespace Org.BouncyCastle.Crypto.Tests
             byte[] mac;
             byte[] encrypted = new byte[expectedEncrypted.Length];
 
-            byte[] decrypted = new byte[encrypted.Length];
-            byte[] expectedDecrypted = new byte[input.Length + expectedMac.Length];
-            Array.Copy(input, 0, expectedDecrypted, 0, input.Length);
-            Array.Copy(expectedMac, 0, expectedDecrypted, input.Length, expectedMac.Length);
+            // decryption no longer appends the MAC to the recovered plaintext; the output is
+            // the plaintext only and the MAC is available via getMac() (standard AEAD contract).
+            byte[] decrypted = new byte[input.Length];
+            byte[] expectedDecrypted = Arrays.Clone(input);
             int len;
 
 
@@ -538,10 +538,8 @@ namespace Org.BouncyCastle.Crypto.Tests
             mac = new byte[expectedMac.Length];
             encrypted = new byte[expectedEncrypted.Length];
 
-            decrypted = new byte[encrypted.Length];
-            expectedDecrypted = new byte[input.Length + expectedMac.Length];
-            Array.Copy(input, 0, expectedDecrypted, 0, input.Length);
-            Array.Copy(expectedMac, 0, expectedDecrypted, input.Length, expectedMac.Length);
+            decrypted = new byte[input.Length];
+            expectedDecrypted = Arrays.Clone(input);
 
 
             param = new AeadParameters(new KeyParameter(key), 128, iv);
@@ -599,10 +597,8 @@ namespace Org.BouncyCastle.Crypto.Tests
             mac = new byte[expectedMac.Length];
             encrypted = new byte[expectedEncrypted.Length];
 
-            decrypted = new byte[encrypted.Length];
-            expectedDecrypted = new byte[input.Length + expectedMac.Length];
-            Array.Copy(input, 0, expectedDecrypted, 0, input.Length);
-            Array.Copy(expectedMac, 0, expectedDecrypted, input.Length, expectedMac.Length);
+            decrypted = new byte[input.Length];
+            expectedDecrypted = Arrays.Clone(input);
 
 
             param = new AeadParameters(new KeyParameter(key), 256, iv);
@@ -660,10 +656,8 @@ namespace Org.BouncyCastle.Crypto.Tests
             mac = new byte[expectedMac.Length];
             encrypted = new byte[expectedEncrypted.Length];
 
-            decrypted = new byte[encrypted.Length];
-            expectedDecrypted = new byte[input.Length + expectedMac.Length];
-            Array.Copy(input, 0, expectedDecrypted, 0, input.Length);
-            Array.Copy(expectedMac, 0, expectedDecrypted, input.Length, expectedMac.Length);
+            decrypted = new byte[input.Length];
+            expectedDecrypted = Arrays.Clone(input);
 
 
             param = new AeadParameters(new KeyParameter(key), 512, iv);
@@ -708,19 +702,166 @@ namespace Org.BouncyCastle.Crypto.Tests
                     + Hex.ToHexString(expectedDecrypted)
                     + " got " + Hex.ToHexString(decrypted));
             }
+
+            CcmModeLongMessageKeystreamTest();
+            CcmModeNonceBindingTest();
+            KCcmNonceReuseTests();
+        }
+
+        /*
+         * Regression test for the KCCM gamma-counter carry bug: the per-block counter advance must
+         * propagate carry across the whole block, otherwise only the low byte of the counter changes
+         * and the keystream block E(s) repeats every 256 blocks, encrypting a long message with a
+         * two-time pad. Encrypting 257 identical (zero) plaintext blocks makes ciphertext block i
+         * equal block i+256 under the buggy no-carry code; with carry they differ. See github #287.
+         */
+        private void CcmModeLongMessageKeystreamTest()
+        {
+            byte[] key = Hex.Decode("000102030405060708090A0B0C0D0E0F");
+            byte[] iv = Hex.Decode("101112131415161718191A1B1C1D1E1F");
+
+            KCcmBlockCipher ccm = new KCcmBlockCipher(new Dstu7624Engine(128));
+            int blockSize = ccm.UnderlyingCipher.GetBlockSize();
+
+            // 257 blocks of zero plaintext: with zero input each ciphertext block equals its keystream
+            // block, so a repeating keystream shows up directly as repeated ciphertext blocks.
+            byte[] input = new byte[257 * blockSize];
+
+            AeadParameters param = new AeadParameters(new KeyParameter(key), 128, iv);
+            ccm.Init(true, param);
+            byte[] encrypted = new byte[ccm.GetOutputSize(input.Length)];
+            int len = ccm.ProcessBytes(input, 0, input.Length, encrypted, 0);
+            len += ccm.DoFinal(encrypted, len);
+
+            byte[] block0 = Arrays.CopyOfRange(encrypted, 0, blockSize);
+            byte[] block256 = Arrays.CopyOfRange(encrypted, 256 * blockSize, 257 * blockSize);
+            if (Arrays.AreEqual(block0, block256))
+            {
+                Fail("Failed CCM long-message keystream test - keystream block repeats every 256 blocks (two-time pad)");
+            }
+
+            // sanity: encrypt/decrypt still round-trips over the long message
+            ccm.Init(false, param);
+            byte[] decrypted = new byte[ccm.GetOutputSize(len)];
+            int decLen = ccm.ProcessBytes(encrypted, 0, len, decrypted, 0);
+            decLen += ccm.DoFinal(decrypted, decLen);
+
+            if (decLen != input.Length || !Arrays.AreEqual(input, Arrays.CopyOfRange(decrypted, 0, input.Length)))
+            {
+                Fail("Failed CCM long-message round-trip");
+            }
+        }
+
+        /*
+         * Regression test ensuring the G1 block is processed unconditionally; it had been previously skipped when no
+         * associated data was present. The G1 block folds the nonce, data length and MAC-size flag into the MAC. If it
+         * is absent, the underlying MAC is independent of the nonce, so a chosen-plaintext attacker could forge a valid
+         * ciphertext+tag for an un-queried nonce by cancelling the nonce-dependent data/tag keystreams across three
+         * empty-AAD encryption queries. This test assembles such a forgery and requires that the decryptor rejects it.
+         * (A plain wrong-nonce decryption does NOT catch this specific bug, since the tag is masked by a nonce-
+         * dependent keystream; so it fails even when the MAC ignores it.)
+         */
+        private void CcmModeNonceBindingTest()
+        {
+            byte[] key = Hex.Decode("000102030405060708090A0B0C0D0E0F");
+            byte[] nonce1 = Hex.Decode("101112131415161718191A1B1C1D1E1F");
+            byte[] nonce2 = Hex.Decode("202122232425262728292A2B2C2D2E2F");
+            byte[] plaintext = Hex.Decode("303132333435363738393A3B3C3D3E3F");
+            int blockSize = plaintext.Length;
+
+            // Three empty-AAD encryption-oracle queries used to build a cross-nonce forgery.
+            byte[] z1 = CcmModeNoAadEncrypt(key, nonce1, new byte[blockSize]); // enc(0, N1)
+            byte[] z2 = CcmModeNoAadEncrypt(key, nonce2, new byte[blockSize]); // enc(0, N2)
+            byte[] zp = CcmModeNoAadEncrypt(key, nonce2, plaintext);           // enc(P, N2)
+
+            // C_forge = P xor C0' (decrypts to P under N1); T_forge = TP xor T0 xor T0' cancels the
+            // nonce-2 keystream and the E_K(0) terms, which only validates if the MAC ignores the nonce.
+            byte[] forged = new byte[2 * blockSize];
+            for (int i = 0; i < blockSize; i++)
+            {
+                forged[i] = (byte)(plaintext[i] ^ z1[i]);
+                forged[blockSize + i] = (byte)(zp[blockSize + i] ^ z2[blockSize + i] ^ z1[blockSize + i]);
+            }
+
+            KCcmBlockCipher ccm = new KCcmBlockCipher(new Dstu7624Engine(128));
+            ccm.Init(false, new AeadParameters(new KeyParameter(key), 128, nonce1));
+            byte[] decrypted = new byte[ccm.GetOutputSize(forged.Length)];
+            try
+            {
+                int len = ccm.ProcessBytes(forged, 0, forged.Length, decrypted, 0);
+                ccm.DoFinal(decrypted, len);
+                Fail("Failed CCM nonce-binding test - cross-nonce forgery accepted (MAC not bound to nonce)");
+            }
+            catch (InvalidCipherTextException)
+            {
+                // expected: the G1 nonce binding makes the forged tag invalid
+            }
+        }
+
+        private static byte[] CcmModeNoAadEncrypt(byte[] key, byte[] nonce, byte[] plaintext)
+        {
+            KCcmBlockCipher ccm = new KCcmBlockCipher(new Dstu7624Engine(128));
+            ccm.Init(true, new AeadParameters(new KeyParameter(key), 128, nonce));
+            byte[] output = new byte[ccm.GetOutputSize(plaintext.Length)];
+            int len = ccm.ProcessBytes(plaintext, 0, plaintext.Length, output, 0);
+            len += ccm.DoFinal(output, len);
+            return output;
+        }
+
+        /*
+         * Re-initialising for encryption with the same key and nonce is rejected (a repeated key+nonce
+         * is catastrophic for the CCM construction), matching GCMBlockCipher / KGCMBlockCipher.
+         * reset()-based reuse, a fresh nonce, and re-init for decryption are all still allowed.
+         */
+        private void KCcmNonceReuseTests()
+        {
+            byte[] key = Hex.Decode("000102030405060708090A0B0C0D0E0F");
+            byte[] nonce = Hex.Decode("101112131415161718191A1B1C1D1E1F");
+            byte[] nonce2 = Hex.Decode("202122232425262728292A2B2C2D2E2F");
+
+            KCcmBlockCipher c = new KCcmBlockCipher(new Dstu7624Engine(128));
+            c.Init(true, new AeadParameters(new KeyParameter(key), 128, nonce));
+            KCcmEncryptBlock(c);
+
+            // Reset()-based reuse must still work (it does not re-init)
+            c.Reset();
+            KCcmEncryptBlock(c);
+
+            // re-init for encryption with the same key+nonce must be rejected
+            try
+            {
+                c.Init(true, new AeadParameters(new KeyParameter(key), 128, nonce));
+                Fail("KCCM nonce reuse not detected on re-init for encryption");
+            }
+            catch (ArgumentException e)
+            {
+                IsTrue("wrong KCCM nonce-reuse message: " + e.Message,
+                    "cannot reuse nonce for KCCM encryption".Equals(e.Message));
+            }
+
+            // a different nonce is fine
+            c.Init(true, new AeadParameters(new KeyParameter(key), 128, nonce2));
+
+            // re-init for decryption with the same key+nonce is allowed (the guard is encrypt-only)
+            KCcmBlockCipher d = new KCcmBlockCipher(new Dstu7624Engine(128));
+            d.Init(true, new AeadParameters(new KeyParameter(key), 128, nonce));
+            d.Init(false, new AeadParameters(new KeyParameter(key), 128, nonce));
+        }
+
+        private void KCcmEncryptBlock(KCcmBlockCipher cipher)
+        {
+            byte[] input = new byte[16];
+            byte[] output = new byte[cipher.GetOutputSize(input.Length)];
+            int len = cipher.ProcessBytes(input, 0, input.Length, output, 0);
+            cipher.DoFinal(output, len);
         }
 
         [Test]
-        public void Dstu7624TestFunction()
+        public void TestFunction()
         {
             string resultText = Perform().ToString();
 
             Assert.AreEqual(Name + ": Okay", resultText);
-        }
-
-        public override string Name
-        {
-            get { return "Dstu7624"; }
         }
     }
 }

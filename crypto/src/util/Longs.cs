@@ -24,10 +24,19 @@ namespace Org.BouncyCastle.Utilities
             0x32, 0x18, 0x23, 0x1F, 0x3B, 0x13, 0x38, 0x0F, 0x31, 0x1E, 0x12, 0x0E, 0x1D, 0x0D, 0x0C, 0x0B };
 #endif
 
-        public static long HighestOneBit(long i)
-        {
-            return (long)HighestOneBit((ulong)i);
-        }
+        public static int BitLength(long i) => NumBits - NumberOfLeadingZeros(i);
+
+        [CLSCompliant(false)]
+        public static int BitLength(ulong u) => BitLength((long)u);
+
+        public static int Compare(long x, long y) => x.CompareTo(y);
+
+        [CLSCompliant(false)]
+        public static int Compare(ulong x, ulong y) => x.CompareTo(y);
+
+        public static int CompareUnsigned(long x, long y) => Compare((ulong)x, (ulong)y);
+
+        public static long HighestOneBit(long i) => (long)HighestOneBit((ulong)i);
 
         [CLSCompliant(false)]
         public static ulong HighestOneBit(ulong i)
@@ -41,16 +50,10 @@ namespace Org.BouncyCastle.Utilities
             return i - (i >> 1);
         }
 
-        public static long LowestOneBit(long i)
-        {
-            return i & -i;
-        }
+        public static long LowestOneBit(long i) => i & -i;
 
         [CLSCompliant(false)]
-        public static ulong LowestOneBit(ulong i)
-        {
-            return (ulong)LowestOneBit((long)i);
-        }
+        public static ulong LowestOneBit(ulong i) => (ulong)LowestOneBit((long)i);
 
         public static int NumberOfLeadingZeros(long i)
         {
@@ -67,6 +70,9 @@ namespace Org.BouncyCastle.Utilities
 #endif
         }
 
+        [CLSCompliant(false)]
+        public static int NumberOfLeadingZeros(ulong u) => NumberOfLeadingZeros((long)u);
+
         public static int NumberOfTrailingZeros(long i)
         {
 #if NETCOREAPP3_0_OR_GREATER
@@ -78,10 +84,23 @@ namespace Org.BouncyCastle.Utilities
 #endif
         }
 
-        public static long Reverse(long i)
+        [CLSCompliant(false)]
+        public static int NumberOfTrailingZeros(ulong u) => NumberOfTrailingZeros((long)u);
+
+        public static int PopCount(long i) => PopCount((ulong)i);
+
+        [CLSCompliant(false)]
+        public static int PopCount(ulong u)
         {
-            return (long)Reverse((ulong)i);
+#if NETCOREAPP3_0_OR_GREATER
+            return BitOperations.PopCount(u);
+#else
+            return Integers.PopCount((uint)u)
+                +  Integers.PopCount((uint)(u >> 32));
+#endif
         }
+
+        public static long Reverse(long i) => (long)Reverse((ulong)i);
 
         [CLSCompliant(false)]
         public static ulong Reverse(ulong i)

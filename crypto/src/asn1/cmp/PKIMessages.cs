@@ -16,15 +16,19 @@ namespace Org.BouncyCastle.Asn1.Cmp
             return new PkiMessages(Asn1Sequence.GetInstance(obj));
         }
 
-        public static PkiMessages GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
-        {
-            return new PkiMessages(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
-        }
+        public static PkiMessages GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new PkiMessages(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
+
+        public static PkiMessages GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new PkiMessages(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
         private Asn1Sequence m_content;
 
         internal PkiMessages(Asn1Sequence seq)
         {
+            if (seq == null)
+                throw new ArgumentNullException(nameof(seq));
+
             m_content = seq;
         }
 

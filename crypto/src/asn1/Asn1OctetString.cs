@@ -26,7 +26,7 @@ namespace Org.BouncyCastle.Asn1
             }
         }
 
-        internal static readonly byte[] EmptyOctets = new byte[0];
+        internal static readonly byte[] EmptyOctets = Array.Empty<byte>();
 
         /**
          * return an Octet string from the given object.
@@ -44,8 +44,7 @@ namespace Org.BouncyCastle.Asn1
 
             if (obj is IAsn1Convertible asn1Convertible)
             {
-                Asn1Object asn1Object = asn1Convertible.ToAsn1Object();
-                if (asn1Object is Asn1OctetString converted)
+                if (!(obj is Asn1Object) && asn1Convertible.ToAsn1Object() is Asn1OctetString converted)
                     return converted;
             }
             else if (obj is byte[] bytes)
@@ -56,11 +55,11 @@ namespace Org.BouncyCastle.Asn1
                 }
                 catch (IOException e)
                 {
-                    throw new ArgumentException("failed to construct OCTET STRING from byte[]: " + e.Message);
+                    throw new ArgumentException("failed to construct OCTET STRING from byte[]", nameof(obj), e);
                 }
             }
 
-            throw new ArgumentException("illegal object in GetInstance: " + Platform.GetTypeName(obj), "obj");
+            throw new ArgumentException("illegal object in GetInstance: " + Platform.GetTypeName(obj), nameof(obj));
         }
 
         /**
@@ -72,7 +71,23 @@ namespace Org.BouncyCastle.Asn1
          */
         public static Asn1OctetString GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
         {
-            return (Asn1OctetString)Meta.Instance.GetContextInstance(taggedObject, declaredExplicit);
+            return (Asn1OctetString)Meta.Instance.GetContextTagged(taggedObject, declaredExplicit);
+        }
+
+        public static Asn1OctetString GetOptional(Asn1Encodable element)
+        {
+            if (element == null)
+                throw new ArgumentNullException(nameof(element));
+
+            if (element is Asn1OctetString existing)
+                return existing;
+
+            return null;
+        }
+
+        public static Asn1OctetString GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit)
+        {
+            return (Asn1OctetString)Meta.Instance.GetTagged(taggedObject, declaredExplicit);
         }
 
         internal readonly byte[] contents;
@@ -82,10 +97,7 @@ namespace Org.BouncyCastle.Asn1
          */
         internal Asn1OctetString(byte[] contents)
         {
-			if (null == contents)
-				throw new ArgumentNullException("contents");
-
-			this.contents = contents;
+            this.contents = contents ?? throw new ArgumentNullException(nameof(contents));
         }
 
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
@@ -96,16 +108,16 @@ namespace Org.BouncyCastle.Asn1
 #endif
 
         public Stream GetOctetStream()
-		{
-			return new MemoryStream(contents, false);
-		}
+        {
+            return new MemoryStream(contents, false);
+        }
 
-		public Asn1OctetStringParser Parser
-		{
-			get { return this; }
-		}
+        public Asn1OctetStringParser Parser
+        {
+            get { return this; }
+        }
 
-		public virtual byte[] GetOctets()
+        public virtual byte[] GetOctets()
         {
             return contents;
         }
@@ -125,24 +137,21 @@ namespace Org.BouncyCastle.Asn1
 #endif
 
         protected override int Asn1GetHashCode()
-		{
-			return Arrays.GetHashCode(GetOctets());
+        {
+            return Arrays.GetHashCode(GetOctets());
         }
 
-		protected override bool Asn1Equals(Asn1Object asn1Object)
-		{
+        protected override bool Asn1Equals(Asn1Object asn1Object)
+        {
             return asn1Object is Asn1OctetString that
                 && Arrays.AreEqual(this.GetOctets(), that.GetOctets());
-		}
-
-		public override string ToString()
-		{
-			return "#" + Hex.ToHexString(contents);
-		}
-
-        internal static Asn1OctetString CreatePrimitive(byte[] contents)
-        {
-            return new DerOctetString(contents);
         }
+
+        public override string ToString()
+        {
+            return "#" + Hex.ToHexString(contents);
+        }
+
+        internal static Asn1OctetString CreatePrimitive(byte[] contents) => DerOctetString.WithContents(contents);
     }
 }

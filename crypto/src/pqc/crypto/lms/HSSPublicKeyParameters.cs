@@ -27,10 +27,10 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
                 return Parse(binaryReader);
 
             if (src is Stream stream)
-                return BinaryReaders.Parse(Parse, stream, leaveOpen: true);
+                return Parse(stream);
 
             if (src is byte[] bytes)
-                return BinaryReaders.Parse(Parse, new MemoryStream(bytes, false), leaveOpen: false);
+                return Parse(bytes);
 
             throw new ArgumentException($"cannot parse {src}");
         }
@@ -38,9 +38,20 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
         internal static HssPublicKeyParameters Parse(BinaryReader binaryReader)
         {
             int L = BinaryReaders.ReadInt32BigEndian(binaryReader);
+            if (L < 1 || L > 8)    // RFC 8554, Section 6.
+                throw new InvalidDataException($"L value of HSS public key out of range: {L}");
+
             LmsPublicKeyParameters lmsPublicKey = LmsPublicKeyParameters.Parse(binaryReader);
             return new HssPublicKeyParameters(L, lmsPublicKey);
         }
+
+        internal static HssPublicKeyParameters Parse(Stream stream) =>
+            BinaryReaders.Parse(Parse, stream, leaveOpen: true);
+
+        internal static HssPublicKeyParameters Parse(byte[] buf) => Parse(buf, 0, buf.Length);
+
+        internal static HssPublicKeyParameters Parse(byte[] buf, int off, int len) =>
+            BinaryReaders.Parse(Parse, buf, off, len, "HSS public key");
 
         [Obsolete("Use 'Level' instead")]
         public int L => m_level;
@@ -84,7 +95,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Lms
             }
             catch (IOException e)
             {
-                throw new Exception($"cannot parse signature: {e.Message}");
+                throw new Exception("cannot parse signature", e);
             }
 
             LmsSignedPubKey[] signedPubKeys = signature.SignedPubKeys;

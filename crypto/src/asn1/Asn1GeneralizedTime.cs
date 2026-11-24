@@ -15,7 +15,7 @@ namespace Org.BouncyCastle.Asn1
         {
             internal static readonly Asn1UniversalType Instance = new Meta();
 
-            private Meta() : base(typeof(Asn1GeneralizedTime), Asn1Tags.GeneralizedTime) { }
+            private Meta() : base(typeof(Asn1GeneralizedTime), Asn1Tags.GeneralizedTime) {}
 
             internal override Asn1Object FromImplicitPrimitive(DerOctetString octetString)
             {
@@ -33,8 +33,7 @@ namespace Org.BouncyCastle.Asn1
 
             if (obj is IAsn1Convertible asn1Convertible)
             {
-                Asn1Object asn1Object = asn1Convertible.ToAsn1Object();
-                if (asn1Object is Asn1GeneralizedTime converted)
+                if (!(obj is Asn1Object) && asn1Convertible.ToAsn1Object() is Asn1GeneralizedTime converted)
                     return converted;
             }
             else if (obj is byte[] bytes)
@@ -45,7 +44,7 @@ namespace Org.BouncyCastle.Asn1
                 }
                 catch (IOException e)
                 {
-                    throw new ArgumentException("failed to construct generalized time from byte[]: " + e.Message);
+                    throw new ArgumentException("failed to construct generalized time from byte[]", nameof(obj), e);
                 }
             }
 
@@ -54,7 +53,23 @@ namespace Org.BouncyCastle.Asn1
 
         public static Asn1GeneralizedTime GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
         {
-            return (Asn1GeneralizedTime)Meta.Instance.GetContextInstance(taggedObject, declaredExplicit);
+            return (Asn1GeneralizedTime)Meta.Instance.GetContextTagged(taggedObject, declaredExplicit);
+        }
+
+        public static Asn1GeneralizedTime GetOptional(Asn1Encodable element)
+        {
+            if (element == null)
+                throw new ArgumentNullException(nameof(element));
+
+            if (element is Asn1GeneralizedTime existing)
+                return existing;
+
+            return null;
+        }
+
+        public static Asn1GeneralizedTime GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit)
+        {
+            return (Asn1GeneralizedTime)Meta.Instance.GetTagged(taggedObject, declaredExplicit);
         }
 
         private readonly string m_timeString;
@@ -72,7 +87,7 @@ namespace Org.BouncyCastle.Asn1
             }
             catch (FormatException e)
             {
-                throw new ArgumentException("invalid date string: " + e.Message);
+                throw new ArgumentException("invalid GeneralizedTime format", nameof(timeString), e);
             }
         }
 
@@ -94,10 +109,7 @@ namespace Org.BouncyCastle.Asn1
 
         public string TimeString => m_timeString;
 
-        public DateTime ToDateTime()
-        {
-            return m_dateTime;
-        }
+        public DateTime ToDateTime() => m_dateTime;
 
         internal byte[] GetContents(int encoding)
         {

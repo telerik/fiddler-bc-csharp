@@ -8,7 +8,33 @@ namespace Org.BouncyCastle.Utilities.UtilTests
     public class IntegersTest
     {
         [Test]
-        public void TestNumberOfLeadingZeros()
+        public void HighestOneBit()
+        {
+            for (int i = 0; i < 31; ++i)
+            {
+                Assert.AreEqual(1 << (31 - i), Integers.HighestOneBit((int)(0x80000000U >> i)));
+                Assert.AreEqual(1 << (31 - i), Integers.HighestOneBit((int)(0xFFFFFFFFU >> i)));
+            }
+
+            Assert.AreEqual(1, Integers.HighestOneBit(1));
+            Assert.AreEqual(0, Integers.HighestOneBit(0));
+        }
+
+        [Test]
+        public void LowestOneBit()
+        {
+            for (int i = 0; i < 31; ++i)
+            {
+                Assert.AreEqual(1 << i, Integers.LowestOneBit((int)(0x00000001U << i)));
+                Assert.AreEqual(1 << i, Integers.LowestOneBit((int)(0xFFFFFFFFU << i)));
+            }
+
+            Assert.AreEqual(1, Integers.LowestOneBit(1));
+            Assert.AreEqual(0, Integers.LowestOneBit(0));
+        }
+
+        [Test]
+        public void NumberOfLeadingZeros()
         {
             for (int i = 0; i < 31; ++i)
             {
@@ -21,7 +47,7 @@ namespace Org.BouncyCastle.Utilities.UtilTests
         }
 
         [Test]
-        public void TestNumberOfTrailingZeros()
+        public void NumberOfTrailingZeros()
         {
             for (int i = 0; i < 31; ++i)
             {
@@ -34,32 +60,35 @@ namespace Org.BouncyCastle.Utilities.UtilTests
         }
 
         [Test]
-        public void TestPopCount()
+        public void PopCount()
         {
             Random random = new Random();
 
-            for (int pos = 0; pos <= 24; ++pos)
+            for (int round = 0; round < 10; ++round)
             {
-                int seed = Integers.RotateLeft(random.Next(0xFFFFFF) << 8, pos);
-                ImplTestPopCountRange(seed, pos, 0xFF);
+                int rand = random.Next() << 8;
+                int init = SimpleBitCount(rand, 8, 32);
+
+                for (int i = 0; i <= 0xFF; ++i)
+                {
+                    int pattern = rand | i;
+                    int expected = init + SimpleBitCount(i, 0, 8);
+
+                    for (int pos = 0; pos < 32; ++pos)
+                    {
+                        int input = Integers.RotateLeft(pattern, pos);
+
+                        Assert.AreEqual(expected, Integers.PopCount(input));
+                        Assert.AreEqual(expected, Integers.PopCount((uint)input));
+                    }
+                }
             }
         }
 
-        private static void ImplTestPopCountRange(int seed, int pos, int count)
-        {
-            for (int i = 0; i < count; ++i)
-            {
-                int n = seed + (i << pos);
-                int expected = SimpleBitCount(n);
-                Assert.AreEqual(expected, Integers.PopCount(n));
-                Assert.AreEqual(expected, Integers.PopCount((uint)n));
-            }
-        }
-
-        private static int SimpleBitCount(int n)
+        private static int SimpleBitCount(int n, int lo, int hi)
         {
             int count = 0;
-            for (int i = 0; i < 32; ++i)
+            for (int i = lo; i < hi; ++i)
             {
                 count += (n >> i) & 1;
             }

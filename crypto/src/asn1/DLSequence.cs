@@ -1,4 +1,7 @@
 ﻿using System;
+using System.Collections.Generic;
+
+using Org.BouncyCastle.Utilities.Collections;
 
 namespace Org.BouncyCastle.Asn1
 {
@@ -19,13 +22,34 @@ namespace Org.BouncyCastle.Asn1
             case 1:
                 return FromSequence(sequences[0]);
             default:
-                return FromElements(ConcatenateElements(sequences));
+                return WithElements(ConcatenateElements(sequences));
             }
         }
 
-        internal static new DLSequence FromElements(Asn1Encodable[] elements)
+        public static new DLSequence FromCollection(IReadOnlyCollection<Asn1Encodable> elements)
         {
-            return elements.Length < 1 ? Empty : new DLSequence(elements, clone: false);
+            return elements.Count < 1 ? Empty : new DLSequence(elements);
+        }
+
+        public static new DLSequence FromElement(Asn1Encodable element) => new DLSequence(element);
+
+        public static new DLSequence FromElements(Asn1Encodable element1, Asn1Encodable element2) =>
+            new DLSequence(element1, element2);
+
+        public static new DLSequence FromElements(Asn1Encodable[] elements)
+        {
+            if (elements == null)
+                throw new ArgumentNullException(nameof(elements));
+
+            return elements.Length < 1 ? Empty : new DLSequence(elements);
+        }
+
+        public static new DLSequence FromElementsOptional(Asn1Encodable[] elements)
+        {
+            if (elements == null)
+                return null;
+
+            return elements.Length < 1 ? Empty : new DLSequence(elements);
         }
 
         public static new DLSequence FromSequence(Asn1Sequence sequence)
@@ -33,7 +57,7 @@ namespace Org.BouncyCastle.Asn1
             if (sequence is DLSequence dlSequence)
                 return dlSequence;
 
-            return FromElements(sequence.m_elements);
+            return WithElements(sequence.m_elements);
         }
 
         public static new DLSequence FromVector(Asn1EncodableVector elementVector)
@@ -41,25 +65,36 @@ namespace Org.BouncyCastle.Asn1
             return elementVector.Count < 1 ? Empty : new DLSequence(elementVector);
         }
 
-        /**
-		 * create an empty sequence
-		 */
+        public static new DLSequence Map(Asn1Sequence sequence, Func<Asn1Encodable, Asn1Encodable> func)
+        {
+            return sequence.Count < 1 ? Empty : new DLSequence(sequence.MapElements(func), clone: false);
+        }
+
+        public static new DLSequence Map<T>(T[] ts, Func<T, Asn1Encodable> func)
+        {
+            return ts.Length < 1 ? Empty : new DLSequence(CollectionUtilities.Map(ts, func), clone: false);
+        }
+
+        public static new DLSequence Map<T>(IReadOnlyCollection<T> c, Func<T, Asn1Encodable> func)
+        {
+            return c.Count < 1 ? Empty : new DLSequence(CollectionUtilities.Map(c, func), clone: false);
+        }
+
+        internal static new DLSequence WithElements(Asn1Encodable[] elements)
+        {
+            return elements.Length < 1 ? Empty : new DLSequence(elements, clone: false);
+        }
+
         public DLSequence()
             : base()
         {
         }
 
-        /**
-		 * create a sequence containing one object
-		 */
         public DLSequence(Asn1Encodable element)
             : base(element)
         {
         }
 
-        /**
-		 * create a sequence containing two objects
-		 */
         public DLSequence(Asn1Encodable element1, Asn1Encodable element2)
             : base(element1, element2)
         {
@@ -70,11 +105,23 @@ namespace Org.BouncyCastle.Asn1
         {
         }
 
-        /**
-		 * create a sequence containing a vector of objects.
-		 */
         public DLSequence(Asn1EncodableVector elementVector)
             : base(elementVector)
+        {
+        }
+
+        public DLSequence(IReadOnlyCollection<Asn1Encodable> elements)
+            : base(elements)
+        {
+        }
+
+        public DLSequence(Asn1Sequence sequence)
+            : base(sequence)
+        {
+        }
+
+        public DLSequence(Asn1Set asn1Set)
+            : base(asn1Set)
         {
         }
 
@@ -101,19 +148,11 @@ namespace Org.BouncyCastle.Asn1
                 Asn1OutputStream.GetContentsEncodings(Asn1OutputStream.EncodingDL, m_elements));
         }
 
-        internal override DerBitString ToAsn1BitString()
-        {
-            return new DLBitString(BerBitString.FlattenBitStrings(GetConstructedBitStrings()), false);
-        }
+        internal override DerBitString ToAsn1BitString() =>
+            new DLBitString(BerBitString.FlattenBitStrings(GetConstructedBitStrings()), false);
 
-        internal override DerExternal ToAsn1External()
-        {
-            return new DLExternal(this);
-        }
+        internal override DerExternal ToAsn1External() => DLExternal.FromSequence(this);
 
-        internal override Asn1Set ToAsn1Set()
-        {
-            return new DLSet(false, m_elements);
-        }
+        internal override Asn1Set ToAsn1Set() => new DLSet(false, m_elements);
     }
 }

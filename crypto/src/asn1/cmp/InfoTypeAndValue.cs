@@ -59,22 +59,27 @@ namespace Org.BouncyCastle.Asn1.Cmp
             return new InfoTypeAndValue(Asn1Sequence.GetInstance(obj));
         }
 
-        public static InfoTypeAndValue GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
-        {
-            return new InfoTypeAndValue(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
-        }
+        public static InfoTypeAndValue GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new InfoTypeAndValue(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
+
+        public static InfoTypeAndValue GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new InfoTypeAndValue(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
         private readonly DerObjectIdentifier m_infoType;
         private readonly Asn1Encodable m_infoValue;
 
         private InfoTypeAndValue(Asn1Sequence seq)
         {
-            m_infoType = DerObjectIdentifier.GetInstance(seq[0]);
+            int count = seq.Count, pos = 0;
+            if (count < 1 || count > 2)
+                throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
 
-            if (seq.Count > 1)
-            {
-                m_infoValue = seq[1];
-            }
+            m_infoType = Asn1Utilities.Read(seq, ref pos, DerObjectIdentifier.GetInstance);
+            // TODO[asn1] Asn1Utilities helper method for this type of situation
+            m_infoValue = Asn1Utilities.ReadOptional(seq, ref pos, element => element);
+
+            if (pos != count)
+                throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
         }
 
         public InfoTypeAndValue(DerObjectIdentifier infoType)
@@ -103,10 +108,9 @@ namespace Org.BouncyCastle.Asn1.Cmp
          */
         public override Asn1Object ToAsn1Object()
         {
-            if (m_infoValue == null)
-                return new DerSequence(m_infoType);
-
-            return new DerSequence(m_infoType, m_infoValue);
+            return m_infoValue == null
+                ?  new DerSequence(m_infoType)
+                :  new DerSequence(m_infoType, m_infoValue);
         }
     }
 }

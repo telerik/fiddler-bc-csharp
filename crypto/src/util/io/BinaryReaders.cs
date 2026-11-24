@@ -1,6 +1,5 @@
 ﻿using System;
 using System.IO;
-using System.Text;
 
 namespace Org.BouncyCastle.Utilities.IO
 {
@@ -8,9 +7,20 @@ namespace Org.BouncyCastle.Utilities.IO
     {
         internal static T Parse<T>(Func<BinaryReader, T> parse, Stream stream, bool leaveOpen)
         {
-            using (var binaryReader = new BinaryReader(stream, Encoding.UTF8, leaveOpen))
+            using (var binaryReader = new BinaryReader(stream, Strings.UTF8, leaveOpen))
             {
                 return parse(binaryReader);
+            }
+        }
+
+        internal static T Parse<T>(Func<BinaryReader, T> parse, byte[] buf, int off, int len, string description)
+        {
+            using (var stream = new MemoryStream(buf, off, len, false))
+            {
+                T t = Parse(parse, stream, leaveOpen: true);
+                if (stream.Position != stream.Length)
+                    throw new InvalidDataException($"unexpected data found after {description}");
+                return t;
             }
         }
 

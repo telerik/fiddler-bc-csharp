@@ -1,7 +1,6 @@
 using System;
 using System.Threading;
 
-using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Utilities;
 
@@ -18,7 +17,20 @@ namespace Org.BouncyCastle.Crypto.Encodings
          * some providers fail to include the leading zero in PKCS1 encoded blocks. If you need to
          * work with one of these set the system property Org.BouncyCastle.Pkcs1.Strict to false.
          */
+        [Obsolete("Use 'Properties.Pkcs1NotStrict' instead")]
         public const string StrictLengthEnabledProperty = "Org.BouncyCastle.Pkcs1.Strict";
+
+        private static bool NotStrict()
+        {
+            //return Properties.GetBoolean(Properties.Pkcs1NotStrict, false);
+
+            if (Properties.TryGetBoolean(Properties.Pkcs1NotStrict, out var notStrict))
+                return notStrict;
+
+#pragma warning disable CS0618 // Type or member is obsolete
+            return !StrictLengthEnabled;
+#pragma warning restore CS0618 // Type or member is obsolete
+        }
 
         private const int HeaderLength = 10;
 
@@ -29,6 +41,7 @@ namespace Org.BouncyCastle.Crypto.Encodings
          * true by default.
          * </p>
          */
+        [Obsolete("Use 'Properties.Pkcs1NotStrict' instead")]
         public static bool StrictLengthEnabled
         {
             get { return Convert.ToBoolean(Interlocked.Read(ref m_strictLengthEnabled)); }
@@ -39,7 +52,9 @@ namespace Org.BouncyCastle.Crypto.Encodings
 
         static Pkcs1Encoding()
         {
+#pragma warning disable CS0618 // Type or member is obsolete
             string strictProperty = Platform.GetEnvironmentVariable(StrictLengthEnabledProperty);
+#pragma warning restore CS0618 // Type or member is obsolete
             bool strictLengthEnabled = strictProperty == null || Platform.EqualsIgnoreCase("true", strictProperty);
 
             m_strictLengthEnabled = Convert.ToInt64(strictLengthEnabled);
@@ -50,7 +65,7 @@ namespace Org.BouncyCastle.Crypto.Encodings
         private IAsymmetricBlockCipher engine;
         private bool forEncryption;
         private bool forPrivateKey;
-        private bool useStrictLength;
+        private readonly bool m_useStrictLength;
         private int pLen = -1;
         private byte[] fallback = null;
         private byte[] blockBuffer = null;
@@ -63,7 +78,7 @@ namespace Org.BouncyCastle.Crypto.Encodings
         public Pkcs1Encoding(IAsymmetricBlockCipher cipher)
         {
             this.engine = cipher;
-            this.useStrictLength = StrictLengthEnabled;
+            m_useStrictLength = !NotStrict();
         }
 
         /**
@@ -75,7 +90,7 @@ namespace Org.BouncyCastle.Crypto.Encodings
         public Pkcs1Encoding(IAsymmetricBlockCipher cipher, int pLen)
         {
             this.engine = cipher;
-            this.useStrictLength = StrictLengthEnabled;
+            m_useStrictLength = !NotStrict();
             this.pLen = pLen;
         }
 
@@ -91,7 +106,7 @@ namespace Org.BouncyCastle.Crypto.Encodings
         public Pkcs1Encoding(IAsymmetricBlockCipher cipher, byte[] fallback)
         {
             this.engine = cipher;
-            this.useStrictLength = StrictLengthEnabled;
+            m_useStrictLength = !NotStrict();
             this.fallback = fallback;
             this.pLen = fallback.Length;
         }
@@ -102,42 +117,35 @@ namespace Org.BouncyCastle.Crypto.Encodings
 
         public void Init(bool forEncryption, ICipherParameters parameters)
         {
-            AsymmetricKeyParameter kParam;
-            if (parameters is ParametersWithRandom withRandom)
-            {
-                kParam = (AsymmetricKeyParameter)withRandom.Parameters;
-                this.random = withRandom.Random;
-            }
-            else
-            {
-                kParam = (AsymmetricKeyParameter)parameters;
-                this.random = forEncryption && !kParam.IsPrivate ? CryptoServicesRegistrar.GetSecureRandom() : null;
-            }
-
             engine.Init(forEncryption, parameters);
+
+            parameters = ParameterUtilities.GetRandom(parameters, out var providedRandom);
+
+            AsymmetricKeyParameter kParam = (AsymmetricKeyParameter)parameters;
 
             this.forPrivateKey = kParam.IsPrivate;
             this.forEncryption = forEncryption;
             this.blockBuffer = new byte[engine.GetOutputBlockSize()];
+
+            bool needsRandom = forPrivateKey ? (pLen != -1 && fallback == null) : forEncryption;
+            this.random = needsRandom ? CryptoServicesRegistrar.GetSecureRandom(providedRandom) : null;
         }
 
         public int GetInputBlockSize()
         {
-            int baseBlockSize = engine.GetInputBlockSize();
+            int blockSize = engine.GetInputBlockSize();
 
-            return forEncryption
-                ?	baseBlockSize - HeaderLength
-                :	baseBlockSize;
+            return forEncryption ? GetReducedBlockSize(blockSize) : blockSize;
         }
 
         public int GetOutputBlockSize()
         {
-            int baseBlockSize = engine.GetOutputBlockSize();
+            int blockSize = engine.GetOutputBlockSize();
 
-            return forEncryption
-                ?	baseBlockSize
-                :	baseBlockSize - HeaderLength;
+            return forEncryption ? blockSize : GetReducedBlockSize(blockSize);
         }
+
+        private static int GetReducedBlockSize(int blockSize) => blockSize - HeaderLength;
 
         public byte[] ProcessBlock(byte[] input, int inOff, int length)
         {
@@ -148,10 +156,12 @@ namespace Org.BouncyCastle.Crypto.Encodings
 
         private byte[] EncodeBlock(byte[] input, int inOff, int inLen)
         {
-            if (inLen > GetInputBlockSize())
-                throw new ArgumentException("input data too large", "inLen");
+            int blockSize = engine.GetInputBlockSize();
 
-            byte[] block = new byte[engine.GetInputBlockSize()];
+            if (inLen > GetReducedBlockSize(blockSize))
+                throw new ArgumentException("input data too large", nameof(inLen));
+
+            byte[] block = new byte[blockSize];
 
             int lastPadPos = block.Length - 1 - inLen;
             if (forPrivateKey)
@@ -297,7 +307,7 @@ namespace Org.BouncyCastle.Crypto.Encodings
             byte[] data = block;
             if (block.Length != strictBlockSize)
             {
-                if (useStrictLength || block.Length < strictBlockSize)
+                if (m_useStrictLength || block.Length < strictBlockSize)
                 {
                     data = blockBuffer;
                 }
@@ -337,7 +347,7 @@ namespace Org.BouncyCastle.Crypto.Encodings
             int strictBlockSize = engine.GetOutputBlockSize();
             byte[] block = engine.ProcessBlock(input, inOff, inLen);
 
-            bool incorrectLength = useStrictLength & (block.Length != strictBlockSize);
+            bool incorrectLength = m_useStrictLength & (block.Length != strictBlockSize);
 
             byte[] data = block;
             if (block.Length < strictBlockSize)

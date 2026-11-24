@@ -7,8 +7,10 @@ using Org.BouncyCastle.Asn1.EdEC;
 using Org.BouncyCastle.Asn1.Gnu;
 using Org.BouncyCastle.Asn1.X509;
 using Org.BouncyCastle.Asn1.X9;
+using Org.BouncyCastle.Bcpg.Sig;
 using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Crypto.Generators;
+using Org.BouncyCastle.Crypto.Digests;
+using Org.BouncyCastle.Crypto.EC;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Crypto.Utilities;
 using Org.BouncyCastle.Math;
@@ -34,9 +36,10 @@ namespace Org.BouncyCastle.Bcpg.OpenPgp
             IBcpgKey key = publicPk.Key;
             IDigest digest;
 
-            if (publicPk.Version <= 3)
+            if (publicPk.Version <= PublicKeyPacket.Version3)
             {
-                RsaPublicBcpgKey rK = (RsaPublicBcpgKey)key;
+                if (!(key is RsaPublicBcpgKey rK))
+                    throw new PgpException("Version 3 OpenPGP keys can only use RSA. Found " + Platform.GetTypeName(key));
 
                 try
                 {
@@ -50,7 +53,7 @@ namespace Org.BouncyCastle.Bcpg.OpenPgp
                     throw new PgpException("can't encode key components: " + e.Message, e);
                 }
             }
-            else
+            else if (publicPk.Version == PublicKeyPacket.Version4)
             {
                 try
                 {
@@ -67,6 +70,31 @@ namespace Org.BouncyCastle.Bcpg.OpenPgp
                 {
                     throw new PgpException("can't encode key components: " + e.Message, e);
                 }
+            }
+            else if (publicPk.Version == PublicKeyPacket.LibrePgp5 || publicPk.Version == PublicKeyPacket.Version6)
+            {
+                try
+                {
+                    byte[] kBytes = publicPk.GetEncodedContents();
+
+                    digest = PgpUtilities.CreateDigest(HashAlgorithmTag.Sha256);
+
+                    digest.Update((byte)(publicPk.Version == PublicKeyPacket.Version6 ? 0x9B : 0x9A));
+
+                    digest.Update((byte)(kBytes.Length >> 24));
+                    digest.Update((byte)(kBytes.Length >> 16));
+                    digest.Update((byte)(kBytes.Length >> 8));
+                    digest.Update((byte)kBytes.Length);
+                    digest.BlockUpdate(kBytes, 0, kBytes.Length);
+                }
+                catch (Exception e)
+                {
+                    throw new PgpException("can't encode key components: " + e.Message, e);
+                }
+            }
+            else
+            {
+                throw new UnsupportedPacketVersionException("Unsupported PGP key version: " + publicPk.Version);
             }
 
             return DigestUtilities.DoFinal(digest);
@@ -152,7 +180,7 @@ namespace Org.BouncyCastle.Bcpg.OpenPgp
                 else if (key is ECPublicBcpgKey ecK)
                 {
                     var curveOid = ecK.CurveOid;
-                    X9ECParametersHolder ecParameters = ECKeyPairGenerator.FindECCurveByOidLazy(curveOid);
+                    X9ECParametersHolder ecParameters = ECUtilities.FindECCurveByOidLazy(curveOid);
 
                     if (ecParameters != null)
                     {
@@ -255,7 +283,7 @@ namespace Org.BouncyCastle.Bcpg.OpenPgp
                 throw new PgpException("unknown key class");
             }
 
-            this.publicPk = new PublicKeyPacket(algorithm, time, bcpgKey);
+            this.publicPk = new PublicKeyPacket(PublicKeyPacket.Version4, algorithm, time, bcpgKey);
             this.ids = new List<IUserDataPacket>();
             this.idSigs = new List<IList<PgpSignature>>();
 
@@ -399,6 +427,13 @@ namespace Org.BouncyCastle.Bcpg.OpenPgp
         }
 
         /// <summary>The number of valid seconds from creation time - zero means no expiry.</summary>
+        /// <remarks>
+        /// WARNING: for a subkey this value is derived from subkey binding signature packets that have
+        /// NOT been cryptographically verified against the primary key, so it must not be relied on as a
+        /// security boundary - a forged, unverified binding packet can alter the result. When the expiry
+        /// drives a trust decision, use <see cref="GetValidSeconds(PgpPublicKey)"/> (which verifies the
+        /// binding signatures against the primary key) or verify the binding signatures yourself.
+        /// </remarks>
         public long GetValidSeconds()
         {
             if (publicPk.Version <= 3)
@@ -435,47 +470,150 @@ namespace Org.BouncyCastle.Bcpg.OpenPgp
             return 0;
         }
 
-        private long GetExpirationTimeFromSig(bool selfSigned, int signatureType)
+        /// <summary>
+        /// The number of valid seconds from creation time - zero means no expiry - deriving a subkey's
+        /// expiry only from binding signatures that cryptographically verify against
+        /// <paramref name="masterKey"/>.
+        /// </summary>
+        /// <remarks>
+        /// Prefer this overload over <see cref="GetValidSeconds()"/> when the expiry of a subkey is used
+        /// for a security decision: any binding signature packet that does not verify against the primary
+        /// key is ignored, so an appended forged binding packet cannot influence the reported expiry.
+        /// For a (v4+) master key the expiry still comes from its own self-signatures and
+        /// <paramref name="masterKey"/> is not consulted.
+        /// </remarks>
+        /// <param name="masterKey">The primary key that binds this key; required when this is a subkey.</param>
+        /// <exception cref="ArgumentNullException">If this is a subkey and <paramref name="masterKey"/> is null.
+        /// </exception>
+        public long GetValidSeconds(PgpPublicKey masterKey)
         {
-            long expiryTime = -1;
-            long lastDate = -1;
-
-            foreach (PgpSignature sig in GetSignaturesOfType(signatureType))
+            if (publicPk.Version <= 3)
             {
-                if (selfSigned && sig.KeyId != this.KeyId)
-                    continue;
+                return (long)publicPk.ValidDays * (24 * 60 * 60);
+            }
 
-                PgpSignatureSubpacketVector hashed = sig.GetHashedSubPackets();
-                if (hashed == null)
-                    continue;
-
-                if (!hashed.HasSubpacket(SignatureSubpacketTag.KeyExpireTime))
-                    continue;
-
-                long current = hashed.GetKeyExpirationTime();
-
-                if (sig.KeyId == this.KeyId)
+            if (IsMasterKey)
+            {
+                // A master key's expiry comes from its own self-signatures (see GetValidSeconds()).
+                for (int i = 0; i != MasterKeyCertificationTypes.Length; i++)
                 {
-                    if (sig.CreationTime.Ticks > lastDate)
-                    {
-                        lastDate = sig.CreationTime.Ticks;
-                        expiryTime = current;
-                    }
+                    long seconds = GetExpirationTimeFromSig(true, MasterKeyCertificationTypes[i]);
+                    if (seconds >= 0)
+                        return seconds;
                 }
-                else if (current == 0 || current > expiryTime)
+
+                return 0;
+            }
+
+            if (masterKey == null)
+                throw new ArgumentNullException(nameof(masterKey));
+
+            // Only subkey binding signatures that verify against the master key are trusted. The DirectKey
+            // fallback used by GetValidSeconds() is intentionally omitted here: it is not the common path
+            // and a DirectKey signature is not verifiable via VerifyCertification(masterKey, subKey).
+            long bindingSeconds = GetVerifiedBindingExpirationTime(masterKey);
+            if (bindingSeconds >= 0)
+                return bindingSeconds;
+
+            return 0;
+        }
+
+        private long GetVerifiedBindingExpirationTime(PgpPublicKey masterKey)
+        {
+            long expiryTime = -1L;
+            long lastDate = -1L;
+
+            foreach (PgpSignature sig in GetSignaturesOfType(PgpSignature.SubkeyBinding))
+            {
+                /*
+                 * Trust only binding signatures that cryptographically verify against the master key. The
+                 * signature's claimed issuer Key ID is not relied on (verification uses masterKey), so a
+                 * forged packet cannot slip through by advertising any particular issuer.
+                 */
+                if (!VerifyBindingSignature(sig, masterKey))
+                    continue;
+
+                /*
+                 * RFC 4880 5.2.4.1: the most recent binding signature wins, even if it omits the Key
+                 * Expiration Time subpacket (which removes any previously asserted expiry).
+                 */
+                long thisDate = sig.CreationTime.Ticks;
+                if (thisDate > lastDate)
                 {
-                    expiryTime = current;
+                    lastDate = thisDate;
+
+                    PgpSignatureSubpacketVector hashed = sig.GetHashedSubPackets();
+                    expiryTime = hashed == null ? 0L : hashed.GetKeyExpirationTime();
                 }
             }
 
             return expiryTime;
         }
 
-        /// <summary>The key ID associated with the public key.</summary>
-        public long KeyId
+        private bool VerifyBindingSignature(PgpSignature sig, PgpPublicKey masterKey)
         {
-            get { return keyId; }
+            try
+            {
+                sig.InitVerify(masterKey);
+
+                return sig.VerifyCertification(masterKey, this);
+            }
+            catch (Exception)
+            {
+                // Any failure (malformed packet, unsupported/invalid signature, key mismatch) is treated
+                // as "not verified" so a forged binding packet cannot influence the computed expiry.
+                return false;
+            }
         }
+
+        private long GetExpirationTimeFromSig(bool selfSigned, int signatureType)
+        {
+            long expiryTime = -1L;
+            long lastDate = -1L;
+
+            foreach (PgpSignature sig in GetSignaturesOfType(signatureType))
+            {
+                if (sig.KeyId == KeyId)
+                {
+                    /*
+                     * RFC 4880 5.2.4.1: the most recent self-signature wins, even if it omits the Key Expiration Time
+                     * subpacket (which removes any previously asserted expiry).
+                     */
+                    var thisDate = sig.CreationTime.Ticks;
+                    if (thisDate > lastDate)
+                    {
+                        lastDate = thisDate;
+
+                        PgpSignatureSubpacketVector hashed = sig.GetHashedSubPackets();
+                        expiryTime = hashed == null ? 0L : hashed.GetKeyExpirationTime();
+                    }
+                }
+                else if (!selfSigned)
+                {
+                    PgpSignatureSubpacketVector hashed = sig.GetHashedSubPackets();
+                    if (hashed != null)
+                    {
+                        var keyExpireTime = hashed.GetSubpacket(SignatureSubpacketTag.KeyExpireTime);
+                        if (keyExpireTime != null)
+                        {
+                            long current = ((KeyExpirationTime)keyExpireTime).Time;
+                            if (current == 0 || current > expiryTime)
+                            {
+                                expiryTime = current;
+                            }
+                        }
+                    }
+                }
+            }
+
+            return expiryTime;
+        }
+
+        /// <summary>The Key ID associated with the public key.</summary>
+        /// <remarks>
+        /// A Key ID is an 8-octet scalar. We convert it (big-endian) to an Int64 (UInt64 is not CLS compliant).
+        /// </remarks>
+        public long KeyId => keyId;
 
         /// <summary>The fingerprint of the public key</summary>
         public byte[] GetFingerprint()
@@ -504,14 +642,17 @@ namespace Org.BouncyCastle.Bcpg.OpenPgp
             {
                 switch (publicPk.Algorithm)
                 {
-                    case PublicKeyAlgorithmTag.ECDH:
-                    case PublicKeyAlgorithmTag.ElGamalEncrypt:
-                    case PublicKeyAlgorithmTag.ElGamalGeneral:
-                    case PublicKeyAlgorithmTag.RsaEncrypt:
-                    case PublicKeyAlgorithmTag.RsaGeneral:
-                        return true;
-                    default:
-                        return false;
+                case PublicKeyAlgorithmTag.DiffieHellman:
+                case PublicKeyAlgorithmTag.ECDH:
+                case PublicKeyAlgorithmTag.ElGamalEncrypt:
+                case PublicKeyAlgorithmTag.ElGamalGeneral:
+                case PublicKeyAlgorithmTag.RsaEncrypt:
+                case PublicKeyAlgorithmTag.RsaGeneral:
+                case PublicKeyAlgorithmTag.X25519:
+                case PublicKeyAlgorithmTag.X448:
+                    return true;
+                default:
+                    return false;
                 }
             }
         }
@@ -657,7 +798,8 @@ namespace Org.BouncyCastle.Bcpg.OpenPgp
 
         private ECPublicKeyParameters GetECKey(string algorithm, ECPublicBcpgKey ecK)
         {
-            X9ECParameters x9 = ECKeyPairGenerator.FindECCurveByOid(ecK.CurveOid);
+            var parameters = ECNamedDomainParameters.LookupOid(ecK.CurveOid);
+
             BigInteger encodedPoint = ecK.EncodedPoint;
 
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
@@ -666,12 +808,12 @@ namespace Org.BouncyCastle.Bcpg.OpenPgp
                 ? stackalloc byte[encodedLength]
                 : new byte[encodedLength];
             BigIntegers.AsUnsignedByteArray(encodedPoint, encoding);
-            ECPoint q = x9.Curve.DecodePoint(encoding);
+            ECPoint q = parameters.Curve.DecodePoint(encoding);
 #else
-            ECPoint q = x9.Curve.DecodePoint(BigIntegers.AsUnsignedByteArray(encodedPoint));
+            ECPoint q = parameters.Curve.DecodePoint(BigIntegers.AsUnsignedByteArray(encodedPoint));
 #endif
 
-            return new ECPublicKeyParameters(algorithm, q, ecK.CurveOid);
+            return new ECPublicKeyParameters(algorithm, q, parameters);
         }
 
         /// <summary>Allows enumeration of any user IDs associated with the key.</summary>
@@ -881,10 +1023,11 @@ namespace Org.BouncyCastle.Bcpg.OpenPgp
         {
             BcpgOutputStream bcpgOut = BcpgOutputStream.Wrap(outStr);
 
-            bcpgOut.WritePacket(publicPk);
-            if (!forTransfer && trustPk != null)
+            publicPk.Encode(bcpgOut);
+
+            if (!forTransfer)
             {
-                bcpgOut.WritePacket(trustPk);
+                trustPk?.Encode(bcpgOut);
             }
 
             if (subSigs == null)    // not a sub-key
@@ -898,17 +1041,17 @@ namespace Org.BouncyCastle.Bcpg.OpenPgp
                 {
                     if (ids[i] is UserIdPacket id)
                     {
-                        bcpgOut.WritePacket(id);
+                        id.Encode(bcpgOut);
                     }
                     else
                     {
                         PgpUserAttributeSubpacketVector v = (PgpUserAttributeSubpacketVector)ids[i];
-                        bcpgOut.WritePacket(new UserAttributePacket(v.ToSubpacketArray()));
+                        new UserAttributePacket(v.ToSubpacketArray()).Encode(bcpgOut);
                     }
 
-                    if (!forTransfer && idTrusts[i] != null)
+                    if (!forTransfer)
                     {
-                        bcpgOut.WritePacket((TrustPacket)idTrusts[i]);
+                        idTrusts[i]?.Encode(bcpgOut);
                     }
 
                     foreach (PgpSignature sig in idSigs[i])
@@ -927,26 +1070,41 @@ namespace Org.BouncyCastle.Bcpg.OpenPgp
         }
 
         /// <summary>Check whether this (sub)key has a revocation signature on it.</summary>
-        /// <returns>True, if this (sub)key has been revoked.</returns>
-        public bool IsRevoked()
+        /// <remarks>This method is poorly named (misleading); use <see cref="HasRevocation"/> instead.</remarks>
+        /// <returns><c>true</c>, if this (sub)key has had a (possibly invalid) revocation attached.</returns>
+        [Obsolete("Use 'HasRevocation' instead")]
+        public bool IsRevoked() => HasRevocation();
+
+        /// <summary>Check whether this (sub)key has a revocation signature on it.</summary>
+        /// <remarks>
+        /// WARNING: this reports only whether a revocation-type signature packet is <em>present</em>; the packet is NOT
+        /// cryptographically verified, so for a key obtained from an untrusted source neither result is an
+        /// authenticated trust signal.
+        /// </remarks>
+        /// <returns>True, if a revocation signature (verified or not) is present on this (sub)key.</returns>
+        public bool HasRevocation()
         {
             int ns = 0;
             bool revoked = false;
-            if (IsMasterKey)	// Master key
+
+            // subSigs is null for a primary key and non-null for a subkey; it is the reliable discriminator here
+            // (isMasterKey can be false for an encryption-algorithm primary, whose subSigs would be null, which
+            // previously threw a NullPointerException).
+            if (subSigs == null)    // Primary key
             {
                 while (!revoked && (ns < keySigs.Count))
                 {
-                    if (((PgpSignature)keySigs[ns++]).SignatureType == PgpSignature.KeyRevocation)
+                    if (keySigs[ns++].SignatureType == PgpSignature.KeyRevocation)
                     {
                         revoked = true;
                     }
                 }
             }
-            else	// Sub-key
+            else                    // Sub-key
             {
                 while (!revoked && (ns < subSigs.Count))
                 {
-                    if (((PgpSignature)subSigs[ns++]).SignatureType == PgpSignature.SubkeyRevocation)
+                    if (subSigs[ns++].SignatureType == PgpSignature.SubkeyRevocation)
                     {
                         revoked = true;
                     }
@@ -1050,7 +1208,7 @@ namespace Org.BouncyCastle.Bcpg.OpenPgp
             PgpPublicKey returnKey = new PgpPublicKey(key);
             bool found = false;
 
-            for (int i = 0; i < returnKey.ids.Count; i++)
+            for (int i = returnKey.ids.Count - 1; i >= 0; i--)
             {
                 if (id.Equals(returnKey.ids[i]))
                 {
@@ -1100,7 +1258,7 @@ namespace Org.BouncyCastle.Bcpg.OpenPgp
             PgpPublicKey returnKey = new PgpPublicKey(key);
             bool found = false;
 
-            for (int i = 0; i < returnKey.ids.Count; i++)
+            for (int i = returnKey.ids.Count - 1; i >= 0 ; i--)
             {
                 if (id.Equals(returnKey.ids[i]))
                 {

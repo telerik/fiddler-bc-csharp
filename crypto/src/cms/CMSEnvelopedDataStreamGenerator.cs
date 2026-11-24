@@ -9,277 +9,266 @@ using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.IO;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Security;
-using Org.BouncyCastle.Utilities;
 using Org.BouncyCastle.Utilities.IO;
 
 namespace Org.BouncyCastle.Cms
 {
-	/**
-	* General class for generating a CMS enveloped-data message stream.
-	* <p>
-	* A simple example of usage.
-	* <pre>
-	*      CmsEnvelopedDataStreamGenerator edGen = new CmsEnvelopedDataStreamGenerator();
-	*
-	*      edGen.AddKeyTransRecipient(cert);
-	*
-	*      MemoryStream  bOut = new MemoryStream();
-	*
-	*      Stream out = edGen.Open(
-	*                              bOut, CMSEnvelopedGenerator.AES128_CBC);*
-	*      out.Write(data);
-	*
-	*      out.Close();
-	* </pre>
-	* </p>
-	*/
-	public class CmsEnvelopedDataStreamGenerator
-		: CmsEnvelopedGenerator
-	{
-		private object	_originatorInfo = null;
-		private object	_unprotectedAttributes = null;
-		private int		_bufferSize;
-		private bool	_berEncodeRecipientSet;
+    /// <summary>
+    /// Streaming generator for CMS EnvelopedData (PKCS#7 enveloped-data) messages. Add recipients via the base
+    /// <see cref="CmsEnvelopedGenerator"/> methods, then call <see cref="Open(Stream, string)"/> to obtain a
+    /// <see cref="Stream"/> to which the content to be encrypted is written; closing that stream finalizes the
+    /// CMS structure.
+    /// </summary>
+    /// <remarks>
+    /// The returned stream must be closed (disposed) to finalize the CMS structure. Closing the returned stream
+    /// does <b>not</b> close the underlying stream passed to <c>Open</c>; callers are responsible for closing the
+    /// underlying stream separately. If the underlying stream is a buffering encoder whose tail state only flushes
+    /// on close (e.g. a base64 encoding stream), failing to close it will cause the encoded output to be truncated.
+    /// <para>A simple example of usage:</para>
+    /// <code>
+    /// CmsEnvelopedDataStreamGenerator gen = new CmsEnvelopedDataStreamGenerator();
+    /// gen.AddKeyTransRecipient(cert);
+    /// using (Stream envOut = gen.Open(bOut, CmsEnvelopedGenerator.Aes128Cbc))
+    /// {
+    ///     envOut.Write(data, 0, data.Length);
+    /// }
+    /// </code>
+    /// </remarks>
+    public class CmsEnvelopedDataStreamGenerator
+        : CmsEnvelopedGenerator
+    {
+        private int m_bufferSize;
+        private bool m_berEncodeRecipientSet;
 
-		public CmsEnvelopedDataStreamGenerator()
-		{
-		}
+        /// <summary>Creates a generator using the default randomness source.</summary>
+        public CmsEnvelopedDataStreamGenerator()
+        {
+        }
 
-		/// <summary>Constructor allowing specific source of randomness</summary>
-		/// <param name="random">Instance of <c>SecureRandom</c> to use.</param>
-		public CmsEnvelopedDataStreamGenerator(SecureRandom random)
-			: base(random)
-		{
-		}
+        /// <summary>
+        /// Creates a generator with an explicit randomness source for key and encryption operations.
+        /// </summary>
+        /// <param name="random">The secure random to use.</param>
+        public CmsEnvelopedDataStreamGenerator(SecureRandom random)
+            : base(random)
+        {
+        }
 
-		/// <summary>Set the underlying string size for encapsulated data.</summary>
-		/// <param name="bufferSize">Length of octet strings to buffer the data.</param>
-		public void SetBufferSize(
-			int bufferSize)
-		{
-			_bufferSize = bufferSize;
-		}
+        /// <summary>Set the underlying string size for encapsulated data.</summary>
+        /// <param name="bufferSize">Length of octet strings to buffer the data.</param>
+        public void SetBufferSize(int bufferSize)
+        {
+            m_bufferSize = bufferSize;
+        }
 
-		/// <summary>Use a BER Set to store the recipient information.</summary>
-		public void SetBerEncodeRecipients(
-			bool berEncodeRecipientSet)
-		{
-			_berEncodeRecipientSet = berEncodeRecipientSet;
-		}
+        /// <summary>Controls whether recipient information is stored using a BER (indefinite-length) SET.</summary>
+        /// <param name="berEncodeRecipientSet">
+        /// <c>true</c> to use a BER SET; <c>false</c> to use a DER SET (the default).
+        /// </param>
+        public void SetBerEncodeRecipients(bool berEncodeRecipientSet)
+        {
+            m_berEncodeRecipientSet = berEncodeRecipientSet;
+        }
 
-		private DerInteger Version
-		{
-			get
-			{
-				int version = (_originatorInfo != null || _unprotectedAttributes != null)
-					?	2
-					:	0;
+        /// <summary>
+        /// Generate an enveloped object that contains an CMS Enveloped Data
+        /// object using the passed in key generator.
+        /// </summary>
+        private Stream Open(Stream outStream, string encryptionOid, CipherKeyGenerator keyGen)
+        {
+            byte[] encKeyBytes = keyGen.GenerateKey();
+            KeyParameter encKey = ParameterUtilities.CreateKeyParameter(encryptionOid, encKeyBytes);
 
-				return new DerInteger(version);
-			}
-		}
+#pragma warning disable CS0618 // Type or member is obsolete
+            Asn1Encodable asn1Params = GenerateAsn1Parameters(encryptionOid, encKeyBytes);
 
-		/// <summary>
-		/// Generate an enveloped object that contains an CMS Enveloped Data
-		/// object using the passed in key generator.
-		/// </summary>
-		private Stream Open(
-			Stream				outStream,
-			string				encryptionOid,
-			CipherKeyGenerator	keyGen)
-		{
-			byte[] encKeyBytes = keyGen.GenerateKey();
-			KeyParameter encKey = ParameterUtilities.CreateKeyParameter(encryptionOid, encKeyBytes);
+            AlgorithmIdentifier encAlgID = GetAlgorithmIdentifier(encryptionOid, encKey, asn1Params,
+                out var cipherParameters);
+#pragma warning restore CS0618 // Type or member is obsolete
 
-			Asn1Encodable asn1Params = GenerateAsn1Parameters(encryptionOid, encKeyBytes);
+            // TODO[cms] Do these later when we can write each one out immediately?
+            Asn1EncodableVector recipientInfos = new Asn1EncodableVector(recipientInfoGenerators.Count);
 
-			ICipherParameters cipherParameters;
-			AlgorithmIdentifier encAlgID = GetAlgorithmIdentifier(
-				encryptionOid, encKey, asn1Params, out cipherParameters);
-
-			Asn1EncodableVector recipientInfos = new Asn1EncodableVector(recipientInfoGenerators.Count);
-
-			foreach (RecipientInfoGenerator rig in recipientInfoGenerators)
-			{
-				try
-				{
-					recipientInfos.Add(rig.Generate(encKey, m_random));
-				}
-				catch (InvalidKeyException e)
-				{
-					throw new CmsException("key inappropriate for algorithm.", e);
-				}
-				catch (GeneralSecurityException e)
-				{
-					throw new CmsException("error making encrypted content.", e);
-				}
-			}
-
-			return Open(outStream, encAlgID, cipherParameters, recipientInfos);
-		}
-
-		private Stream Open(
-			Stream				outStream,
-			AlgorithmIdentifier	encAlgID,
-			ICipherParameters	cipherParameters,
-			Asn1EncodableVector	recipientInfos)
-		{
-			try
-			{
-				//
-				// ContentInfo
-				//
-				BerSequenceGenerator cGen = new BerSequenceGenerator(outStream);
-
-				cGen.AddObject(CmsObjectIdentifiers.EnvelopedData);
-
-				//
-				// Encrypted Data
-				//
-				BerSequenceGenerator envGen = new BerSequenceGenerator(
-					cGen.GetRawOutputStream(), 0, true);
-
-				envGen.AddObject(this.Version);
-
-				Stream envRaw = envGen.GetRawOutputStream();
-				using (var recipGen = _berEncodeRecipientSet
-					? (Asn1Generator)new BerSetGenerator(envRaw)
-					: new DerSetGenerator(envRaw))
-				{
-                    foreach (Asn1Encodable ae in recipientInfos)
-                    {
-                        recipGen.AddObject(ae);
-                    }
+            foreach (RecipientInfoGenerator rig in recipientInfoGenerators)
+            {
+                try
+                {
+                    recipientInfos.Add(rig.Generate(encKey, m_random));
                 }
+                catch (InvalidKeyException e)
+                {
+                    throw new CmsException("key inappropriate for algorithm.", e);
+                }
+                catch (GeneralSecurityException e)
+                {
+                    throw new CmsException("error making encrypted content.", e);
+                }
+            }
 
-				BerSequenceGenerator eiGen = new BerSequenceGenerator(envRaw);
-				eiGen.AddObject(CmsObjectIdentifiers.Data);
-				eiGen.AddObject(encAlgID);
+            // TODO[cms] Add 'Open' variant(s) with 'dataType' parameter
+            return Open(CmsObjectIdentifiers.Data, outStream, encAlgID, cipherParameters, recipientInfos);
+        }
 
-                BerOctetStringGenerator octGen = new BerOctetStringGenerator(eiGen.GetRawOutputStream(), 0, false);
-                Stream octetOutputStream = octGen.GetOctetOutputStream(_bufferSize);
+        private Stream Open(DerObjectIdentifier dataType, Stream outStream, AlgorithmIdentifier encAlgID,
+            ICipherParameters cipherParameters, Asn1EncodableVector recipientInfos)
+        {
+            try
+            {
+                // ContentInfo
+                BerSequenceGenerator cGen = new BerSequenceGenerator(outStream);
+                cGen.AddObject(CmsObjectIdentifiers.EnvelopedData);
+
+                var originatorInfo = m_originatorInformation?.ToAsn1Structure();
+
+                // EnvelopedData
+                BerSequenceGenerator envGen = new BerSequenceGenerator(cGen.GetRawOutputStream(), 0, true);
+                envGen.AddObject(GetVersion(originatorInfo, recipientInfos));
+                CmsUtilities.AddOriginatorInfoToGenerator(envGen, originatorInfo);
+                CmsUtilities.AddRecipientInfosToGenerator(envGen, recipientInfos, m_berEncodeRecipientSet);
+
+                // EncryptedContentInfo
+                BerSequenceGenerator eciGen = new BerSequenceGenerator(envGen.GetRawOutputStream());
+                eciGen.AddObject(dataType);
+                eciGen.AddObject(encAlgID);
+
+                // encryptedContent [0] IMPLICIT EncryptedContent OPTIONAL (EncryptedContent ::= OCTET STRING)
+                BerOctetStringGenerator ecGen = new BerOctetStringGenerator(eciGen.GetRawOutputStream(), 0, false);
+                Stream ecStream = ecGen.GetOctetOutputStream(m_bufferSize);
 
                 IBufferedCipher cipher = CipherUtilities.GetCipher(encAlgID.Algorithm);
-				cipher.Init(true, new ParametersWithRandom(cipherParameters, m_random));
-				CipherStream cOut = new CipherStream(octetOutputStream, null, cipher);
+                cipher.Init(true, new ParametersWithRandom(cipherParameters, m_random));
+                CipherStream cOut = new CipherStream(ecStream, null, cipher);
 
-				return new CmsEnvelopedDataOutputStream(this, cOut, cGen, envGen, eiGen, octGen);
-			}
-			catch (SecurityUtilityException e)
-			{
-				throw new CmsException("couldn't create cipher.", e);
-			}
-			catch (InvalidKeyException e)
-			{
-				throw new CmsException("key invalid in message.", e);
-			}
-			catch (IOException e)
-			{
-				throw new CmsException("exception decoding algorithm parameters.", e);
-			}
-		}
+                return new CmsEnvelopedDataOutputStream(this, cOut, cGen, envGen, eciGen, ecGen);
+            }
+            catch (SecurityUtilityException e)
+            {
+                throw new CmsException("couldn't create cipher.", e);
+            }
+            catch (InvalidKeyException e)
+            {
+                throw new CmsException("key invalid in message.", e);
+            }
+            catch (IOException e)
+            {
+                throw new CmsException("exception decoding algorithm parameters.", e);
+            }
+        }
 
-		/**
-		* generate an enveloped object that contains an CMS Enveloped Data object
-		* @throws IOException
-		*/
-		public Stream Open(
-			Stream	outStream,
-			string	encryptionOid)
-		{
-			CipherKeyGenerator keyGen = GeneratorUtilities.GetKeyGenerator(encryptionOid);
+        /// <summary>
+        /// Opens a stream for generating a CMS EnvelopedData object, deriving a content-encryption key of the
+        /// algorithm's default strength.
+        /// </summary>
+        /// <param name="outStream">The stream the CMS object is written to.</param>
+        /// <param name="encryptionOid">The content-encryption algorithm OID.</param>
+        /// <returns>A stream the content to be encrypted is written to; close it to finalize the structure.</returns>
+        public Stream Open(Stream outStream, string encryptionOid)
+        {
+            CipherKeyGenerator keyGen = GeneratorUtilities.GetKeyGenerator(encryptionOid);
 
-			keyGen.Init(new KeyGenerationParameters(m_random, keyGen.DefaultStrength));
+            keyGen.Init(new KeyGenerationParameters(m_random, keyGen.DefaultStrength));
 
-			return Open(outStream, encryptionOid, keyGen);
-		}
+            return Open(outStream, encryptionOid, keyGen);
+        }
 
-		/**
-		* generate an enveloped object that contains an CMS Enveloped Data object
-		* @throws IOException
-		*/
-		public Stream Open(
-			Stream	outStream,
-			string	encryptionOid,
-			int		keySize)
-		{
-			CipherKeyGenerator keyGen = GeneratorUtilities.GetKeyGenerator(encryptionOid);
+        /// <summary>
+        /// Opens a stream for generating a CMS EnvelopedData object, deriving a content-encryption key of the
+        /// given size.
+        /// </summary>
+        /// <param name="outStream">The stream the CMS object is written to.</param>
+        /// <param name="encryptionOid">The content-encryption algorithm OID.</param>
+        /// <param name="keySize">The content-encryption key size, in bits.</param>
+        /// <returns>A stream the content to be encrypted is written to; close it to finalize the structure.</returns>
+        public Stream Open(Stream outStream, string encryptionOid, int keySize)
+        {
+            CipherKeyGenerator keyGen = GeneratorUtilities.GetKeyGenerator(encryptionOid);
 
-			keyGen.Init(new KeyGenerationParameters(m_random, keySize));
+            keyGen.Init(new KeyGenerationParameters(m_random, keySize));
 
-			return Open(outStream, encryptionOid, keyGen);
-		}
+            return Open(outStream, encryptionOid, keyGen);
+        }
 
-		private class CmsEnvelopedDataOutputStream
-			: BaseOutputStream
-		{
-            private readonly CmsEnvelopedGenerator _outer;
+        private DerInteger GetVersion(OriginatorInfo originatorInfo, Asn1EncodableVector recipientInfos)
+        {
+            var recipientInfoSet = DLSet.FromCollection(recipientInfos);
 
-			private readonly CipherStream			_out;
-			private readonly BerSequenceGenerator	_cGen;
-			private readonly BerSequenceGenerator	_envGen;
-			private readonly BerSequenceGenerator	_eiGen;
-			private readonly BerOctetStringGenerator _octGen;
+            Asn1Set unprotectedAttrs = null;
+            if (unprotectedAttributeGenerator != null)
+            {
+                // mark unprotected attributes as non-null.
+                unprotectedAttrs = DLSet.Empty;
+            }
 
-            public CmsEnvelopedDataOutputStream(
-				CmsEnvelopedGenerator	outer,
-				CipherStream			outStream,
-				BerSequenceGenerator	cGen,
-				BerSequenceGenerator	envGen,
-				BerSequenceGenerator	eiGen,
-                BerOctetStringGenerator octGen)
-			{
-				_outer = outer;
-				_out = outStream;
-				_cGen = cGen;
-				_envGen = envGen;
-				_eiGen = eiGen;
-				_octGen = octGen;
-			}
+            int version = EnvelopedData.CalculateVersion(originatorInfo, recipientInfoSet, unprotectedAttrs);
 
-			public override void Write(byte[] buffer, int offset, int count)
-			{
-				_out.Write(buffer, offset, count);
-			}
+            return DerInteger.ValueOf(version);
+        }
+
+        private class CmsEnvelopedDataOutputStream
+            : BaseOutputStream
+        {
+            private readonly CmsEnvelopedGenerator m_outer;
+
+            private readonly CipherStream m_out;
+            private readonly BerSequenceGenerator m_cGen;
+            private readonly BerSequenceGenerator m_envGen;
+            private readonly BerSequenceGenerator m_eciGen;
+            private readonly BerOctetStringGenerator m_ecGen;
+
+            public CmsEnvelopedDataOutputStream(CmsEnvelopedGenerator outer, CipherStream outStream, BerSequenceGenerator cGen,
+                BerSequenceGenerator envGen, BerSequenceGenerator eciGen, BerOctetStringGenerator ecGen)
+            {
+                m_outer = outer;
+                m_out = outStream;
+                m_cGen = cGen;
+                m_envGen = envGen;
+                m_eciGen = eciGen;
+                m_ecGen = ecGen;
+            }
+
+            public override void Write(byte[] buffer, int offset, int count)
+            {
+                m_out.Write(buffer, offset, count);
+            }
 
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
             public override void Write(ReadOnlySpan<byte> buffer)
             {
-                _out.Write(buffer);
+                m_out.Write(buffer);
             }
 #endif
 
             public override void WriteByte(byte value)
-			{
-				_out.WriteByte(value);
-			}
+            {
+                m_out.WriteByte(value);
+            }
 
             protected override void Dispose(bool disposing)
             {
                 if (disposing)
- 				{
-                    _out.Dispose();
+                {
+                    m_out.Dispose();
 
-					// TODO Parent context(s) should really be closed explicitly
+                    // TODO Parent context(s) should really be closed explicitly
 
-					_octGen.Dispose();
-                    _eiGen.Dispose();
+                    m_ecGen.Dispose();
+                    m_eciGen.Dispose();
 
-                    if (_outer.unprotectedAttributeGenerator != null)
+                    if (m_outer.unprotectedAttributeGenerator != null)
                     {
-                        Asn1.Cms.AttributeTable attrTable = _outer.unprotectedAttributeGenerator.GetAttributes(
+                        Asn1.Cms.AttributeTable attrTable = m_outer.unprotectedAttributeGenerator.GetAttributes(
                             new Dictionary<CmsAttributeTableParameter, object>());
 
-                        Asn1Set unprotectedAttrs = BerSet.FromVector(attrTable.ToAsn1EncodableVector());
+                        Asn1Set unprotectedAttrs = BerSet.FromCollection(attrTable);
 
-                        _envGen.AddObject(new DerTaggedObject(false, 1, unprotectedAttrs));
+                        m_envGen.AddObject(new DerTaggedObject(false, 1, unprotectedAttrs));
                     }
 
-                    _envGen.Dispose();
-                    _cGen.Dispose();
+                    m_envGen.Dispose();
+                    m_cGen.Dispose();
                 }
                 base.Dispose(disposing);
             }
-		}
-	}
+        }
+    }
 }

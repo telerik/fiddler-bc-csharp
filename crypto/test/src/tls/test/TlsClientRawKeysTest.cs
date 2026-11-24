@@ -1,12 +1,11 @@
 ﻿using System;
 using System.IO;
 using System.Net.Sockets;
-using System.Text;
 
 using NUnit.Framework;
 
-using Org.BouncyCastle.Crypto.Parameters;
-using Org.BouncyCastle.Security;
+using Org.BouncyCastle.Tls.Crypto.Impl.BC;
+using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Tls.Tests
 {
@@ -34,15 +33,15 @@ namespace Org.BouncyCastle.Tls.Tests
 
         private static void RunTest(string host, int port, ProtocolVersion tlsVersion)
         {
-            MockRawKeysTlsClient client = new MockRawKeysTlsClient(CertificateType.RawPublicKey,
+            MockRawKeysTlsClient client = new MockRawKeysTlsClient(new BcTlsCrypto(), CertificateType.RawPublicKey,
                 CertificateType.RawPublicKey, new short[]{ CertificateType.RawPublicKey },
-                new short[]{ CertificateType.RawPublicKey }, new Ed25519PrivateKeyParameters(new SecureRandom()),
-                tlsVersion);
+                new short[]{ CertificateType.RawPublicKey }, tlsVersion);
             TlsClientProtocol protocol = OpenTlsClientConnection(host, port, client);
 
-            Http11Get(host, port, protocol.Stream);
-
-            protocol.Close();
+            using (var s = protocol.Stream)
+            {
+                Http11Get(host, port, s);
+            }
         }
 
         private static void Http11Get(string host, int port, Stream s)
@@ -91,7 +90,7 @@ namespace Org.BouncyCastle.Tls.Tests
 
         private static void WriteUtf8Line(Stream output, string line)
         {
-            byte[] buf = Encoding.UTF8.GetBytes(line + "\r\n");
+            byte[] buf = Strings.ToUtf8ByteArray(line + "\r\n");
             output.Write(buf, 0, buf.Length);
             Console.WriteLine(">>> " + line);
         }

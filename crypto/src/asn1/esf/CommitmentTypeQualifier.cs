@@ -32,6 +32,13 @@ namespace Org.BouncyCastle.Asn1.Esf
 #pragma warning restore CS0618 // Type or member is obsolete
         }
 
+        public static CommitmentTypeQualifier GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit)
+        {
+#pragma warning disable CS0618 // Type or member is obsolete
+            return new CommitmentTypeQualifier(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
+#pragma warning restore CS0618 // Type or member is obsolete
+        }
+
         private readonly DerObjectIdentifier m_commitmentTypeIdentifier;
         private readonly Asn1Encodable m_qualifier;
 
@@ -67,16 +74,19 @@ namespace Org.BouncyCastle.Asn1.Esf
         [Obsolete("Use 'GetInstance' instead")]
         public CommitmentTypeQualifier(Asn1Sequence seq)
         {
-            int count = seq.Count;
-			if (count < 1 || count > 2)
-				throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
+            if (seq == null)
+                throw new ArgumentNullException(nameof(seq));
 
-			m_commitmentTypeIdentifier = DerObjectIdentifier.GetInstance(seq[0]);
+            int count = seq.Count, pos = 0;
+            if (count < 1 || count > 2)
+                throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
 
-			if (count > 1)
-            {
-                m_qualifier = seq[1];
-            }
+            m_commitmentTypeIdentifier = Asn1Utilities.Read(seq, ref pos, DerObjectIdentifier.GetInstance);
+            // TODO[asn1] Asn1Utilities helper method for this type of situation
+            m_qualifier = Asn1Utilities.ReadOptional(seq, ref pos, element => element);
+
+            if (pos != count)
+                throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
         }
 
         public DerObjectIdentifier CommitmentTypeIdentifier => m_commitmentTypeIdentifier;

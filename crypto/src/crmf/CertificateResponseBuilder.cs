@@ -75,10 +75,10 @@ namespace Org.BouncyCastle.Crmf
             if (m_certKeyPair != null)
                 throw new InvalidOperationException("certificate in response already set");
 
-            var encryptedKey = new EncryptedKey(EnvelopedData.GetInstance(encryptedCertificate.ContentInfo.Content));
+            var encryptedKey = new EncryptedKey(encryptedCertificate.EnvelopedData);
+            var certOrEncCert = new CertOrEncCert(encryptedKey);
 
-            m_certKeyPair = new CertifiedKeyPair(new CertOrEncCert(encryptedKey));
-
+            m_certKeyPair = new CertifiedKeyPair(certOrEncCert);
             return this;
         }
 
@@ -93,7 +93,7 @@ namespace Org.BouncyCastle.Crmf
             if (m_rspInfo != null)
                 throw new InvalidOperationException("response info already set");
 
-            m_rspInfo = new DerOctetString(responseInfo);
+            m_rspInfo = DerOctetString.FromContents(responseInfo);
 
             return this;
         }

@@ -11,9 +11,12 @@ namespace Org.BouncyCastle.Tls.Tests
     internal class MockPskTls13Client
         : AbstractTlsClient
     {
-        internal MockPskTls13Client()
+        private readonly bool m_badKey;
+
+        internal MockPskTls13Client(bool badKey = false)
             : base(new BcTlsCrypto())
         {
+            m_badKey = badKey;
         }
 
         //public override IList GetEarlyKeyShareGroups()
@@ -48,7 +51,7 @@ namespace Org.BouncyCastle.Tls.Tests
         public override IList<TlsPskExternal> GetExternalPsks()
         {
             byte[] identity = Strings.ToUtf8ByteArray("client");
-            TlsSecret key = Crypto.CreateSecret(Strings.ToUtf8ByteArray("TLS_TEST_PSK"));
+            TlsSecret key = Crypto.CreateSecret(TlsTestUtilities.GetPskPasswordUtf8(m_badKey));
             int prfAlgorithm = PrfAlgorithm.tls13_hkdf_sha256;
 
             return TlsUtilities.VectorOfOne<TlsPskExternal>(new BasicTlsPskExternal(identity, key, prfAlgorithm));
@@ -87,7 +90,7 @@ namespace Org.BouncyCastle.Tls.Tests
         {
             base.NotifyServerVersion(serverVersion);
 
-            Console.WriteLine("TLS 1.3 PSK client negotiated " + serverVersion);
+            Console.WriteLine("TLS 1.3 PSK client negotiated version " + serverVersion);
         }
 
         public override TlsAuthentication GetAuthentication()
@@ -99,10 +102,18 @@ namespace Org.BouncyCastle.Tls.Tests
         {
             base.NotifyHandshakeComplete();
 
-            ProtocolName protocolName = m_context.SecurityParameters.ApplicationProtocol;
+            var securityParameters = m_context.SecurityParameters;
+
+            ProtocolName protocolName = securityParameters.ApplicationProtocol;
             if (protocolName != null)
             {
                 Console.WriteLine("Client ALPN: " + protocolName.GetUtf8Decoding());
+            }
+
+            int negotiatedGroup = securityParameters.NegotiatedGroup;
+            if (negotiatedGroup >= 0)
+            {
+                Console.WriteLine("Client negotiated group: " + NamedGroup.GetText(negotiatedGroup));
             }
         }
 

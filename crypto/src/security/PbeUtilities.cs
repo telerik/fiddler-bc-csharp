@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 using Org.BouncyCastle.Asn1;
 using Org.BouncyCastle.Asn1.BC;
+using Org.BouncyCastle.Asn1.Misc;
 using Org.BouncyCastle.Asn1.Nist;
 using Org.BouncyCastle.Asn1.Oiw;
 using Org.BouncyCastle.Asn1.Pkcs;
@@ -12,6 +13,7 @@ using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Digests;
 using Org.BouncyCastle.Crypto.Generators;
 using Org.BouncyCastle.Crypto.Parameters;
+using Org.BouncyCastle.Pkcs;
 using Org.BouncyCastle.Utilities;
 using Org.BouncyCastle.Utilities.Collections;
 
@@ -40,13 +42,13 @@ namespace Org.BouncyCastle.Security
             Algorithms["PKCS5SCHEME2"] = "Pkcs5scheme2";
             Algorithms["PBKDF2"] = "Pkcs5scheme2";
             Algorithms[PkcsObjectIdentifiers.IdPbeS2.Id] = "Pkcs5scheme2";
-//			algorithms[PkcsObjectIdentifiers.IdPbkdf2.Id] = "Pkcs5scheme2";
+            //algorithms[PkcsObjectIdentifiers.IdPbkdf2.Id] = "Pkcs5scheme2";
 
-            // FIXME Add support for these? (see Pkcs8Generator)
-//			algorithms[PkcsObjectIdentifiers.DesEde3Cbc.Id] = "Pkcs5scheme2";
-//			algorithms[NistObjectIdentifiers.IdAes128Cbc.Id] = "Pkcs5scheme2";
-//			algorithms[NistObjectIdentifiers.IdAes192Cbc.Id] = "Pkcs5scheme2";
-//			algorithms[NistObjectIdentifiers.IdAes256Cbc.Id] = "Pkcs5scheme2";
+            // TODO[Pkcs8Generator]
+            //algorithms[PkcsObjectIdentifiers.DesEde3Cbc.Id] = "Pkcs5scheme2";
+            //algorithms[NistObjectIdentifiers.IdAes128Cbc.Id] = "Pkcs5scheme2";
+            //algorithms[NistObjectIdentifiers.IdAes192Cbc.Id] = "Pkcs5scheme2";
+            //algorithms[NistObjectIdentifiers.IdAes256Cbc.Id] = "Pkcs5scheme2";
 
             Algorithms["PBEWITHMD2ANDDES-CBC"] = "PBEwithMD2andDES-CBC";
             Algorithms[PkcsObjectIdentifiers.PbeWithMD2AndDesCbc.Id] = "PBEwithMD2andDES-CBC";
@@ -317,14 +319,11 @@ namespace Org.BouncyCastle.Security
             return GenerateAlgorithmParameters(algorithmOid.Id, salt, iterationCount);
         }
 
-        public static Asn1Encodable GenerateAlgorithmParameters(
-            string  algorithm,
-            byte[]  salt,
-            int     iterationCount)
+        public static Asn1Encodable GenerateAlgorithmParameters(string algorithm, byte[] salt, int iterationCount)
         {
             if (IsPkcs12(algorithm))
             {
-                return new Pkcs12PbeParams(salt, iterationCount);
+                return new Pkcs12PbeParams(salt, Pkcs12Utilities.ValidateIterations(iterationCount));
             }
             else if (IsPkcs5Scheme2(algorithm))
             {
@@ -428,8 +427,8 @@ namespace Org.BouncyCastle.Security
             if (IsPkcs12(mechanism))
             {
                 Pkcs12PbeParams pbeParams = Pkcs12PbeParams.GetInstance(pbeParameters);
-                salt = pbeParams.GetIV();
-                iterationCount = pbeParams.Iterations.IntValue;
+                salt = pbeParams.IV.GetOctets();
+                iterationCount = Pkcs12Utilities.ValidateIterations(pbeParams.IterationsObject);
                 keyBytes = PbeParametersGenerator.Pkcs12PasswordToBytes(password, wrongPkcs12Zero);
             }
             else if (IsPkcs5Scheme2(mechanism))
@@ -439,8 +438,8 @@ namespace Org.BouncyCastle.Security
             else
             {
                 PbeParameter pbeParams = PbeParameter.GetInstance(pbeParameters);
-                salt = pbeParams.GetSalt();
-                iterationCount = pbeParams.IterationCount.IntValue;
+                salt = pbeParams.Salt.GetOctets();
+                iterationCount = CheckPbeIterationCount(pbeParams.IterationCountObject);
                 keyBytes = PbeParametersGenerator.Pkcs5PasswordToBytes(password);
             }
 
@@ -453,7 +452,7 @@ namespace Org.BouncyCastle.Security
                 DerObjectIdentifier encOid = encScheme.Algorithm;
                 Asn1Object encParams = encScheme.Parameters.ToAsn1Object();
 
-                Pbkdf2Params pbeParams = Pbkdf2Params.GetInstance(s2p.KeyDerivationFunc.Parameters.ToAsn1Object());
+                Pbkdf2Params pbeParams = Pbkdf2Params.GetInstance(s2p.KeyDerivationFunc.Parameters);
                 IDigest digest = DigestUtilities.GetDigest(pbeParams.Prf.Algorithm);
 
                 byte[] iv;
@@ -468,11 +467,12 @@ namespace Org.BouncyCastle.Security
                 }
 
                 salt = pbeParams.GetSalt();
-                iterationCount = pbeParams.IterationCount.IntValue;
+                iterationCount = CheckPbeIterationCount(pbeParams.IterationCountObject);
                 keyBytes = PbeParametersGenerator.Pkcs5PasswordToBytes(password);
 
-                int keyLength = pbeParams.KeyLength != null
-                    ?	pbeParams.KeyLength.IntValue * 8
+                var keyLengthObject = pbeParams.KeyLengthObject;
+                int keyLength = keyLengthObject != null
+                    ?	keyLengthObject.IntValueExact * 8
                     :	GeneratorUtilities.GetDefaultKeySize(encOid);
 
                 PbeParametersGenerator gen = MakePbeGenerator(
@@ -686,6 +686,46 @@ namespace Org.BouncyCastle.Security
         public static string GetEncodingName(DerObjectIdentifier oid)
         {
             return CollectionUtilities.GetValueOrNull(Algorithms, oid.Id);
+        }
+
+        internal static int CheckPbeIterationCount(DerInteger iterationCountObject)
+        {
+            if (!iterationCountObject.TryGetIntValueExact(out int iterationCount) || iterationCount <= 0)
+                throw new ArgumentException("invalid PBE iteration count");
+
+            int maxIterations = Properties.GetInt32(Properties.PbeMaxIterationCount, 5_000_000);
+            if (iterationCount > maxIterations)
+                throw new ArgumentException("PBE iteration count (" + iterationCount + ") greater than " + maxIterations);
+
+            return iterationCount;
+        }
+
+        // The KDF cost parameters of a PBES2-protected key arrive in an unauthenticated container, so
+        // they are bounded before the (memory/CPU intensive) derivation to cap a decryption-time DoS.
+        // TODO Should this also be property-configurable?
+        private static readonly int MaxScryptBlockSize = 1024;
+
+        internal static void CheckScryptCost(ScryptParams scryptParams)
+        {
+            if (!scryptParams.CostParameter.TryGetIntValueExact(out int costParameter) ||
+                costParameter <= 0 ||
+                !scryptParams.BlockSize.TryGetIntValueExact(out int blockSize) ||
+                blockSize <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(scryptParams), "Invalid scrypt parameters");
+            }
+
+            if (blockSize > MaxScryptBlockSize)
+            {
+                throw new ArgumentOutOfRangeException(nameof(scryptParams),
+                    $"Scrypt block size ({blockSize}) greater than {MaxScryptBlockSize}");
+            }
+
+            int maxScryptMemory = Properties.GetInt32(Properties.PbeMaxScryptMemory, 1 << 30);
+            long scryptMemory = (long)costParameter * (blockSize * 128);
+
+            if (scryptMemory > maxScryptMemory)
+                throw new ArgumentOutOfRangeException($"Scrypt parameters require more than {maxScryptMemory} bytes");
         }
 
         private static ICipherParameters FixDesParity(string mechanism, ICipherParameters parameters)

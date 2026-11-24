@@ -23,34 +23,60 @@ namespace Org.BouncyCastle.Asn1.Cms
 #pragma warning restore CS0618 // Type or member is obsolete
         }
 
-        private DerObjectIdentifier	keyAttrId;
-        private Asn1Encodable		keyAttr;
+        public static OtherKeyAttribute GetOptional(Asn1Encodable element)
+        {
+            if (element == null)
+                throw new ArgumentNullException(nameof(element));
+
+            if (element is OtherKeyAttribute otherKeyAttribute)
+                return otherKeyAttribute;
+
+            Asn1Sequence asn1Sequence = Asn1Sequence.GetOptional(element);
+            if (asn1Sequence != null)
+#pragma warning disable CS0618 // Type or member is obsolete
+                return new OtherKeyAttribute(asn1Sequence);
+#pragma warning restore CS0618 // Type or member is obsolete
+
+            return null;
+        }
+
+        public static OtherKeyAttribute GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit)
+        {
+#pragma warning disable CS0618 // Type or member is obsolete
+            return new OtherKeyAttribute(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
+#pragma warning restore CS0618 // Type or member is obsolete
+        }
+
+        private readonly DerObjectIdentifier m_keyAttrId;
+        private readonly Asn1Encodable m_keyAttr;
 
         [Obsolete("Use 'GetInstance' instead")]
-        public OtherKeyAttribute(
-            Asn1Sequence seq)
+        public OtherKeyAttribute(Asn1Sequence seq)
         {
-            keyAttrId = (DerObjectIdentifier) seq[0];
-            keyAttr = seq[1];
+            if (seq == null)
+                throw new ArgumentNullException(nameof(seq));
+
+            int count = seq.Count, pos = 0;
+            if (count < 1 || count > 2)
+                throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
+
+            m_keyAttrId = Asn1Utilities.Read(seq, ref pos, DerObjectIdentifier.GetInstance);
+            // TODO[asn1] Asn1Utilities helper method for this type of situation
+            m_keyAttr = Asn1Utilities.ReadOptional(seq, ref pos, element => element);
+
+            if (pos != count)
+                throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
         }
 
-		public OtherKeyAttribute(
-            DerObjectIdentifier	keyAttrId,
-            Asn1Encodable		keyAttr)
+        public OtherKeyAttribute(DerObjectIdentifier keyAttrId, Asn1Encodable keyAttr)
         {
-            this.keyAttrId = keyAttrId;
-            this.keyAttr = keyAttr;
+            m_keyAttrId = keyAttrId ?? throw new ArgumentNullException(nameof(keyAttrId));
+            m_keyAttr = keyAttr;
         }
 
-		public DerObjectIdentifier KeyAttrId
-		{
-			get { return keyAttrId; }
-		}
+        public DerObjectIdentifier KeyAttrId => m_keyAttrId;
 
-		public Asn1Encodable KeyAttr
-		{
-			get { return keyAttr; }
-		}
+        public Asn1Encodable KeyAttr => m_keyAttr;
 
 		/**
          * Produce an object suitable for an Asn1OutputStream.
@@ -63,7 +89,9 @@ namespace Org.BouncyCastle.Asn1.Cms
          */
         public override Asn1Object ToAsn1Object()
         {
-			return new DerSequence(keyAttrId, keyAttr);
+            return m_keyAttr == null
+                ?  new DerSequence(m_keyAttrId)
+                :  new DerSequence(m_keyAttrId, m_keyAttr);
         }
     }
 }

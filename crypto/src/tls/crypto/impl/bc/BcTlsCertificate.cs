@@ -26,8 +26,7 @@ namespace Org.BouncyCastle.Tls.Crypto.Impl.BC
         {
             try
             {
-                Asn1Object asn1 = TlsUtilities.ReadAsn1Object(encoding);
-                return X509CertificateStructure.GetInstance(asn1);
+                return TlsUtilities.ReadBerEncoding(encoding, X509CertificateStructure.GetOptional);
             }
             catch (Exception e)
             {
@@ -60,7 +59,7 @@ namespace Org.BouncyCastle.Tls.Crypto.Impl.BC
         /// <exception cref="IOException"/>
         public override byte[] GetExtension(DerObjectIdentifier extensionOid)
         {
-            X509Extensions extensions = m_certificate.TbsCertificate.Extensions;
+            X509Extensions extensions = m_certificate.Extensions;
             if (extensions != null)
             {
                 X509Extension extension = extensions.GetExtension(extensionOid);
@@ -78,9 +77,10 @@ namespace Org.BouncyCastle.Tls.Crypto.Impl.BC
 
         public override Asn1Encodable GetSigAlgParams() => m_certificate.SignatureAlgorithm.Parameters;
 
+        // TODO[api] Rename parameter to 'keyUsageBit'
         protected override bool SupportsKeyUsage(int keyUsageBits)
         {
-            X509Extensions exts = m_certificate.TbsCertificate.Extensions;
+            X509Extensions exts = m_certificate.Extensions;
             if (exts != null)
             {
                 KeyUsage ku = KeyUsage.FromExtensions(exts);

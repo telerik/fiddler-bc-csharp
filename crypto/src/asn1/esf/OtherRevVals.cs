@@ -26,22 +26,27 @@ namespace Org.BouncyCastle.Asn1.Esf
             return new OtherRevVals(Asn1Sequence.GetInstance(obj));
         }
 
-        public static OtherRevVals GetInstance(Asn1TaggedObject obj, bool explicitly)
-        {
-            return new OtherRevVals(Asn1Sequence.GetInstance(obj, explicitly));
-        }
+        public static OtherRevVals GetInstance(Asn1TaggedObject obj, bool explicitly) =>
+            new OtherRevVals(Asn1Sequence.GetInstance(obj, explicitly));
+
+        public static OtherRevVals GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new OtherRevVals(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
         private readonly DerObjectIdentifier m_otherRevValType;
         private readonly Asn1Encodable m_otherRevVals;
 
         private OtherRevVals(Asn1Sequence seq)
 		{
-			int count = seq.Count;
+			int count = seq.Count, pos = 0;
 			if (count != 2)
 				throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
 
-			m_otherRevValType = DerObjectIdentifier.GetInstance(seq[0]);
-			m_otherRevVals = seq[1];
+			m_otherRevValType = Asn1Utilities.Read(seq, ref pos, DerObjectIdentifier.GetInstance);
+            // TODO[asn1] Asn1Utilities helper method for this type of situation
+			m_otherRevVals = Asn1Utilities.Read(seq, ref pos, element => element);
+
+			if (pos != count)
+				throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
 		}
 
         public OtherRevVals(DerObjectIdentifier otherRevValType, Asn1Encodable otherRevVals)

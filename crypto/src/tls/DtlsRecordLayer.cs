@@ -2,6 +2,9 @@
 using System.Diagnostics;
 using System.IO;
 using System.Net.Sockets;
+#if NET9_0_OR_GREATER
+using System.Threading;
+#endif
 
 using Org.BouncyCastle.Tls.Crypto;
 using Org.BouncyCastle.Utilities;
@@ -92,7 +95,11 @@ namespace Org.BouncyCastle.Tls
         private readonly DatagramTransport m_transport;
 
         private readonly ByteQueue m_recordQueue = new ByteQueue();
+#if NET9_0_OR_GREATER
+        private readonly Lock m_writeLock = new();
+#else
         private readonly object m_writeLock = new object();
+#endif
 
         private volatile bool m_closed = false;
         private volatile bool m_failed = false;
@@ -119,29 +126,27 @@ namespace Org.BouncyCastle.Tls
 
         internal DtlsRecordLayer(TlsContext context, TlsPeer peer, DatagramTransport transport)
         {
-            this.m_context = context;
-            this.m_peer = peer;
-            this.m_transport = transport;
+            m_context = context;
+            m_peer = peer;
+            m_transport = transport;
 
-            this.m_inHandshake = true;
+            m_inHandshake = true;
 
-            this.m_currentEpoch = new DtlsEpoch(0, TlsNullNullCipher.Instance, RecordHeaderLength,
-                RecordHeaderLength);
-            this.m_pendingEpoch = null;
-            this.m_readEpoch = m_currentEpoch;
-            this.m_writeEpoch = m_currentEpoch;
+            m_currentEpoch = new DtlsEpoch(0, TlsNullNullCipher.Instance, RecordHeaderLength, RecordHeaderLength);
+            m_pendingEpoch = null;
+            m_readEpoch = m_currentEpoch;
+            m_writeEpoch = m_currentEpoch;
 
             SetPlaintextLimit(MAX_FRAGMENT_LENGTH);
         }
 
-        internal virtual bool IsClosed
-        {
-            get { return m_closed; }
-        }
+        internal virtual bool IsClosed => m_closed;
+
+        internal virtual bool IsFailed => m_failed;
 
         internal virtual void ResetAfterHelloVerifyRequestServer(long recordSeq)
         {
-            this.m_inConnection = true;
+            m_inConnection = true;
 
             m_currentEpoch.SequenceNumber = recordSeq;
             m_currentEpoch.ReplayWindow.Reset(recordSeq);
@@ -149,23 +154,20 @@ namespace Org.BouncyCastle.Tls
 
         internal virtual void SetPlaintextLimit(int plaintextLimit)
         {
-            this.m_plaintextLimit = plaintextLimit;
+            m_plaintextLimit = plaintextLimit;
         }
 
-        internal virtual int ReadEpoch
-        {
-            get { return m_readEpoch.Epoch; }
-        }
+        internal virtual int ReadEpoch => m_readEpoch.Epoch;
 
         internal virtual ProtocolVersion ReadVersion
         {
             get { return m_readVersion; }
-            set { this.m_readVersion = value; }
+            set { m_readVersion = value; }
         }
 
         internal virtual void SetWriteVersion(ProtocolVersion writeVersion)
         {
-            this.m_writeVersion = writeVersion;
+            m_writeVersion = writeVersion;
         }
 
         internal virtual void InitPendingEpoch(TlsCipher pendingCipher)
@@ -184,7 +186,7 @@ namespace Org.BouncyCastle.Tls
             int recordHeaderLengthWrite = RecordHeaderLength + (securityParameters.ConnectionIDLocal?.Length ?? 0);
 
             // TODO Check for overflow
-            this.m_pendingEpoch = new DtlsEpoch(m_writeEpoch.Epoch + 1, pendingCipher, recordHeaderLengthRead,
+            m_pendingEpoch = new DtlsEpoch(m_writeEpoch.Epoch + 1, pendingCipher, recordHeaderLengthRead,
                 recordHeaderLengthWrite);
         }
 
@@ -198,14 +200,14 @@ namespace Org.BouncyCastle.Tls
 
             if (null != retransmit)
             {
-                this.m_retransmit = retransmit;
-                this.m_retransmitEpoch = m_currentEpoch;
-                this.m_retransmitTimeout = new Timeout(RETRANSMIT_TIMEOUT);
+                m_retransmit = retransmit;
+                m_retransmitEpoch = m_currentEpoch;
+                m_retransmitTimeout = new Timeout(RETRANSMIT_TIMEOUT);
             }
 
-            this.m_inHandshake = false;
-            this.m_currentEpoch = m_pendingEpoch;
-            this.m_pendingEpoch = null;
+            m_inHandshake = false;
+            m_currentEpoch = m_pendingEpoch;
+            m_pendingEpoch = null;
         }
 
         internal virtual void InitHeartbeat(TlsHeartbeat heartbeat, bool heartbeatResponder)
@@ -213,8 +215,8 @@ namespace Org.BouncyCastle.Tls
             if (m_inHandshake)
                 throw new InvalidOperationException();
 
-            this.m_heartbeat = heartbeat;
-            this.m_heartBeatResponder = heartbeatResponder;
+            m_heartbeat = heartbeat;
+            m_heartBeatResponder = heartbeatResponder;
 
             if (null != heartbeat)
             {
@@ -224,14 +226,7 @@ namespace Org.BouncyCastle.Tls
 
         internal virtual void ResetWriteEpoch()
         {
-            if (null != m_retransmitEpoch)
-            {
-                this.m_writeEpoch = m_retransmitEpoch;
-            }
-            else
-            {
-                this.m_writeEpoch = m_currentEpoch;
-            }
+            m_writeEpoch = m_retransmitEpoch ?? m_currentEpoch;
         }
 
         /// <exception cref="IOException"/>
@@ -273,11 +268,12 @@ namespace Org.BouncyCastle.Tls
         }
 
         /// <exception cref="IOException"/>
-        public virtual int Receive(byte[] buf, int off, int len, int waitMillis)
-        {
-            return Receive(buf, off, len, waitMillis, null);
-        }
+        public virtual int Receive(byte[] buf, int off, int len, int waitMillis) =>
+            Receive(buf, off, len, waitMillis, null);
 
+        /// <remarks>
+        /// A <paramref name="waitMillis"/> of zero is interpreted as an infinite timeout.
+        /// </remarks>
         /// <exception cref="IOException"/>
         internal int Receive(byte[] buf, int off, int len, int waitMillis, DtlsRecordCallback recordCallback)
         {
@@ -303,19 +299,19 @@ namespace Org.BouncyCastle.Tls
                     if (null != m_heartbeatInFlight)
                         throw new TlsTimeoutException("Heartbeat timed out");
 
-                    this.m_heartbeatInFlight = HeartbeatMessage.Create(m_context,
-                        HeartbeatMessageType.heartbeat_request, m_heartbeat.GeneratePayload());
-                    this.m_heartbeatTimeout = new Timeout(m_heartbeat.TimeoutMillis, currentTimeMillis);
+                    m_heartbeatInFlight = HeartbeatMessage.Create(m_context, HeartbeatMessageType.heartbeat_request,
+                        m_heartbeat.GeneratePayload());
+                    m_heartbeatTimeout = new Timeout(m_heartbeat.TimeoutMillis, currentTimeMillis);
 
-                    this.m_heartbeatResendMillis = TlsUtilities.GetHandshakeResendTimeMillis(m_peer);
-                    this.m_heartbeatResendTimeout = new Timeout(m_heartbeatResendMillis, currentTimeMillis);
+                    m_heartbeatResendMillis = TlsUtilities.GetHandshakeResendTimeMillis(m_peer);
+                    m_heartbeatResendTimeout = new Timeout(m_heartbeatResendMillis, currentTimeMillis);
 
                     SendHeartbeatMessage(m_heartbeatInFlight);
                 }
                 else if (Timeout.HasExpired(m_heartbeatResendTimeout, currentTimeMillis))
                 {
-                    this.m_heartbeatResendMillis = DtlsReliableHandshake.BackOff(m_heartbeatResendMillis);
-                    this.m_heartbeatResendTimeout = new Timeout(m_heartbeatResendMillis, currentTimeMillis);
+                    m_heartbeatResendMillis = DtlsReliableHandshake.BackOff(m_heartbeatResendMillis);
+                    m_heartbeatResendTimeout = new Timeout(m_heartbeatResendMillis, currentTimeMillis);
 
                     SendHeartbeatMessage(m_heartbeatInFlight);
                 }
@@ -375,11 +371,11 @@ namespace Org.BouncyCastle.Tls
 
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
         /// <exception cref="IOException"/>
-        public virtual int Receive(Span<byte> buffer, int waitMillis)
-        {
-            return Receive(buffer, waitMillis, null);
-        }
+        public virtual int Receive(Span<byte> buffer, int waitMillis) => Receive(buffer, waitMillis, null);
 
+        /// <remarks>
+        /// A <paramref name="waitMillis"/> of zero is interpreted as an infinite timeout.
+        /// </remarks>
         /// <exception cref="IOException"/>
         internal int Receive(Span<byte> buffer, int waitMillis, DtlsRecordCallback recordCallback)
         {
@@ -402,19 +398,19 @@ namespace Org.BouncyCastle.Tls
                     if (null != m_heartbeatInFlight)
                         throw new TlsTimeoutException("Heartbeat timed out");
 
-                    this.m_heartbeatInFlight = HeartbeatMessage.Create(m_context,
-                        HeartbeatMessageType.heartbeat_request, m_heartbeat.GeneratePayload());
-                    this.m_heartbeatTimeout = new Timeout(m_heartbeat.TimeoutMillis, currentTimeMillis);
+                    m_heartbeatInFlight = HeartbeatMessage.Create(m_context, HeartbeatMessageType.heartbeat_request,
+                        m_heartbeat.GeneratePayload());
+                    m_heartbeatTimeout = new Timeout(m_heartbeat.TimeoutMillis, currentTimeMillis);
 
-                    this.m_heartbeatResendMillis = TlsUtilities.GetHandshakeResendTimeMillis(m_peer);
-                    this.m_heartbeatResendTimeout = new Timeout(m_heartbeatResendMillis, currentTimeMillis);
+                    m_heartbeatResendMillis = TlsUtilities.GetHandshakeResendTimeMillis(m_peer);
+                    m_heartbeatResendTimeout = new Timeout(m_heartbeatResendMillis, currentTimeMillis);
 
                     SendHeartbeatMessage(m_heartbeatInFlight);
                 }
                 else if (Timeout.HasExpired(m_heartbeatResendTimeout, currentTimeMillis))
                 {
-                    this.m_heartbeatResendMillis = DtlsReliableHandshake.BackOff(m_heartbeatResendMillis);
-                    this.m_heartbeatResendTimeout = new Timeout(m_heartbeatResendMillis, currentTimeMillis);
+                    m_heartbeatResendMillis = DtlsReliableHandshake.BackOff(m_heartbeatResendMillis);
+                    m_heartbeatResendTimeout = new Timeout(m_heartbeatResendMillis, currentTimeMillis);
 
                     SendHeartbeatMessage(m_heartbeatInFlight);
                 }
@@ -505,7 +501,7 @@ namespace Org.BouncyCastle.Tls
                     byte[] data = new byte[1]{ 1 };
                     SendRecord(ContentType.change_cipher_spec, data, 0, data.Length);
 
-                    this.m_writeEpoch = nextEpoch;
+                    m_writeEpoch = nextEpoch;
                 }
             }
 
@@ -548,7 +544,7 @@ namespace Org.BouncyCastle.Tls
                     ReadOnlySpan<byte> data = stackalloc byte[1]{ 1 };
                     SendRecord(ContentType.change_cipher_spec, data);
 
-                    this.m_writeEpoch = nextEpoch;
+                    m_writeEpoch = nextEpoch;
                 }
             }
 
@@ -585,7 +581,7 @@ namespace Org.BouncyCastle.Tls
                     }
                 }
 
-                this.m_failed = true;
+                m_failed = true;
 
                 CloseTransport();
             }
@@ -595,17 +591,15 @@ namespace Org.BouncyCastle.Tls
         {
             if (!m_closed)
             {
-                this.m_failed = true;
+                m_failed = true;
 
                 CloseTransport();
             }
         }
 
         /// <exception cref="IOException"/>
-        internal virtual void Warn(short alertDescription, string message)
-        {
+        internal virtual void Warn(short alertDescription, string message) =>
             RaiseAlert(AlertLevel.warning, alertDescription, message, null);
-        }
 
         private void CloseTransport()
         {
@@ -631,7 +625,7 @@ namespace Org.BouncyCastle.Tls
                     // Ignore
                 }
 
-                this.m_closed = true;
+                m_closed = true;
             }
         }
 
@@ -817,7 +811,7 @@ namespace Org.BouncyCastle.Tls
                 }
                 else
                 {
-                    this.m_readVersion = recordVersion;
+                    m_readVersion = recordVersion;
                 }
             }
 
@@ -858,7 +852,7 @@ namespace Org.BouncyCastle.Tls
                     if (alertLevel == AlertLevel.fatal)
                     {
                         Failed();
-                        throw new TlsFatalAlert(alertDescription);
+                        throw new TlsFatalAlertReceived(alertDescription);
                     }
 
                     // TODO Can close_notify be a fatal alert?
@@ -964,14 +958,13 @@ namespace Org.BouncyCastle.Tls
             }
 
             /*
-             * NOTE: If we receive any non-handshake data in the new epoch implies the peer has
-             * received our final flight.
+             * NB: Receipt of any non-handshake data in the new epoch implies the peer received our final flight.
              */
             if (!m_inHandshake && null != m_retransmit)
             {
-                this.m_retransmit = null;
-                this.m_retransmitEpoch = null;
-                this.m_retransmitTimeout = null;
+                m_retransmit = null;
+                m_retransmitEpoch = null;
+                m_retransmitTimeout = null;
             }
 
             // NOTE: Internal error implies GetReceiveLimit() was not used to allocate result space
@@ -1038,7 +1031,7 @@ namespace Org.BouncyCastle.Tls
             int received = ReceiveDatagram(buf, off, len, waitMillis);
             if (received >= RecordHeaderLength)
             {
-                this.m_inConnection = true;
+                m_inConnection = true;
 
                 int epoch = TlsUtilities.ReadUint16(buf, off + 3);
 
@@ -1073,10 +1066,10 @@ namespace Org.BouncyCastle.Tls
 
         private void ResetHeartbeat()
         {
-            this.m_heartbeatInFlight = null;
-            this.m_heartbeatResendMillis = -1;
-            this.m_heartbeatResendTimeout = null;
-            this.m_heartbeatTimeout = new Timeout(m_heartbeat.IdleMillis);
+            m_heartbeatInFlight = null;
+            m_heartbeatResendMillis = -1;
+            m_heartbeatResendTimeout = null;
+            m_heartbeatTimeout = new Timeout(m_heartbeat.IdleMillis);
         }
 
         /// <exception cref="IOException"/>
@@ -1164,9 +1157,7 @@ namespace Org.BouncyCastle.Tls
             }
         }
 
-        private static long GetMacSequenceNumber(int epoch, long sequence_number)
-        {
-            return ((epoch & 0xFFFFFFFFL) << 48) | sequence_number;
-        }
+        private static long GetMacSequenceNumber(int epoch, long sequence_number) =>
+            ((epoch & 0xFFFFFFFFL) << 48) | sequence_number;
     }
 }

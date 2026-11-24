@@ -1,40 +1,33 @@
-using System;
-using System.IO;
+using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Bcpg
 {
-	/// <summary>Basic type for a trust packet.</summary>
+    /// <summary>Basic type for a trust packet.</summary>
     public class TrustPacket
         : ContainedPacket
     {
-        private readonly byte[] levelAndTrustAmount;
+        private readonly byte[] m_levelAndTrustAmount;
 
-		public TrustPacket(BcpgInputStream bcpgIn)
+        public TrustPacket(BcpgInputStream bcpgIn)
+            : this(bcpgIn, newPacketFormat: false)
         {
-            MemoryStream bOut = new MemoryStream();
-
-			int ch;
-            while ((ch = bcpgIn.ReadByte()) >= 0)
-            {
-                bOut.WriteByte((byte) ch);
-            }
-
-			levelAndTrustAmount = bOut.ToArray();
         }
 
-		public TrustPacket(int trustCode)
+        public TrustPacket(BcpgInputStream bcpgIn, bool newPacketFormat)
+            : base(PacketTag.Trust, newPacketFormat)
         {
-			this.levelAndTrustAmount = new byte[]{ (byte)trustCode };
+            m_levelAndTrustAmount = bcpgIn.ReadAll();
         }
 
-		public byte[] GetLevelAndTrustAmount()
-		{
-			return (byte[]) levelAndTrustAmount.Clone();
-		}
-
-		public override void Encode(BcpgOutputStream bcpgOut)
+        public TrustPacket(int trustCode)
+            : base(PacketTag.Trust)
         {
-            bcpgOut.WritePacket(PacketTag.Trust, levelAndTrustAmount);
+            m_levelAndTrustAmount = new byte[]{ (byte)trustCode };
         }
+
+        public byte[] GetLevelAndTrustAmount() => Arrays.Clone(m_levelAndTrustAmount);
+
+        public override void Encode(BcpgOutputStream bcpgOut) =>
+            bcpgOut.WritePacket(HasNewPacketFormat, PacketTag.Trust, m_levelAndTrustAmount);
     }
 }

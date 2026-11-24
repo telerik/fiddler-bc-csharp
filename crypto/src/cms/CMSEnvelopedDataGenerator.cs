@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 
@@ -5,10 +6,9 @@ using Org.BouncyCastle.Asn1;
 using Org.BouncyCastle.Asn1.Cms;
 using Org.BouncyCastle.Asn1.X509;
 using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Crypto.IO;
 using Org.BouncyCastle.Crypto.Parameters;
+using Org.BouncyCastle.Operators;
 using Org.BouncyCastle.Security;
-using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Cms
 {
@@ -26,145 +26,64 @@ namespace Org.BouncyCastle.Cms
     /// </pre>
     /// </remarks>
     public class CmsEnvelopedDataGenerator
-		: CmsEnvelopedGenerator
+        : CmsEnvelopedGenerator
     {
-		public CmsEnvelopedDataGenerator()
+        public CmsEnvelopedDataGenerator()
         {
         }
 
-		/// <summary>Constructor allowing specific source of randomness</summary>
-		/// <param name="random">Instance of <c>SecureRandom</c> to use.</param>
-		public CmsEnvelopedDataGenerator(SecureRandom random)
-			: base(random)
-		{
-		}
-
-		/// <summary>
-		/// Generate an enveloped object that contains a CMS Enveloped Data
-		/// object using the passed in key generator.
-		/// </summary>
-        private CmsEnvelopedData Generate(
-            CmsProcessable		content,
-            string				encryptionOid,
-            CipherKeyGenerator	keyGen)
+        /// <summary>Constructor allowing specific source of randomness</summary>
+        /// <param name="random">Instance of <c>SecureRandom</c> to use.</param>
+        public CmsEnvelopedDataGenerator(SecureRandom random)
+            : base(random)
         {
-            AlgorithmIdentifier encAlgId = null;
-			KeyParameter encKey;
-            Asn1OctetString encContent;
-
-			try
-			{
-				byte[] encKeyBytes = keyGen.GenerateKey();
-				encKey = ParameterUtilities.CreateKeyParameter(encryptionOid, encKeyBytes);
-
-				Asn1Encodable asn1Params = GenerateAsn1Parameters(encryptionOid, encKeyBytes);
-
-				ICipherParameters cipherParameters;
-				encAlgId = GetAlgorithmIdentifier(
-					encryptionOid, encKey, asn1Params, out cipherParameters);
-
-				IBufferedCipher cipher = CipherUtilities.GetCipher(encryptionOid);
-				cipher.Init(true, new ParametersWithRandom(cipherParameters, m_random));
-
-				MemoryStream bOut = new MemoryStream();
-                using (var cOut = new CipherStream(bOut, null, cipher))
-                {
-                    content.Write(cOut);
-                }
-
-                encContent = new BerOctetString(bOut.ToArray());
-			}
-			catch (SecurityUtilityException e)
-			{
-				throw new CmsException("couldn't create cipher.", e);
-			}
-			catch (InvalidKeyException e)
-			{
-				throw new CmsException("key invalid in message.", e);
-			}
-			catch (IOException e)
-			{
-				throw new CmsException("exception decoding algorithm parameters.", e);
-			}
-
-
-			Asn1EncodableVector recipientInfos = new Asn1EncodableVector(recipientInfoGenerators.Count);
-
-            foreach (RecipientInfoGenerator rig in recipientInfoGenerators)
-            {
-                try
-                {
-                    recipientInfos.Add(rig.Generate(encKey, m_random));
-                }
-                catch (InvalidKeyException e)
-                {
-                    throw new CmsException("key inappropriate for algorithm.", e);
-                }
-                catch (GeneralSecurityException e)
-                {
-                    throw new CmsException("error making encrypted content.", e);
-                }
-            }
-
-            EncryptedContentInfo eci = new EncryptedContentInfo(
-                CmsObjectIdentifiers.Data,
-                encAlgId,
-                encContent);
-
-			Asn1Set unprotectedAttrSet = null;
-            if (unprotectedAttributeGenerator != null)
-            {
-                Asn1.Cms.AttributeTable attrTable = unprotectedAttributeGenerator.GetAttributes(
-                    new Dictionary<CmsAttributeTableParameter, object>());
-
-                unprotectedAttrSet = BerSet.FromVector(attrTable.ToAsn1EncodableVector());
-            }
-
-			ContentInfo contentInfo = new ContentInfo(
-                CmsObjectIdentifiers.EnvelopedData,
-                new EnvelopedData(null, DerSet.FromVector(recipientInfos), eci, unprotectedAttrSet));
-
-            return new CmsEnvelopedData(contentInfo);
         }
 
-		/// <summary>Generate an enveloped object that contains an CMS Enveloped Data object.</summary>
-        public CmsEnvelopedData Generate(
-            CmsProcessable	content,
-            string			encryptionOid)
+        /// <summary>Generate an enveloped object that contains an CMS Enveloped Data object.</summary>
+        [Obsolete("Use 'Generate(CmsTypedData, DerObjectIdentifier)' instead")]
+        public CmsEnvelopedData Generate(CmsProcessable content, string encryptionOid) =>
+            Generate(CmsUtilities.GetTypedData(content), new DerObjectIdentifier(encryptionOid));
+
+        /// <summary>Generate an enveloped object that contains an CMS Enveloped Data object.</summary>
+        [Obsolete("Use 'Generate(CmsTypedData, DerObjectIdentifier, int)' instead")]
+        public CmsEnvelopedData Generate(CmsProcessable content, string encryptionOid, int keySize) =>
+            Generate(CmsUtilities.GetTypedData(content), new DerObjectIdentifier(encryptionOid), keySize);
+
+        [Obsolete("Use 'Generate(CmsTypedData, ICipherBuilderWithKey)' instead")]
+        public CmsEnvelopedData Generate(CmsProcessable content, ICipherBuilderWithKey cipherBuilder) =>
+            Generate(CmsUtilities.GetTypedData(content), cipherBuilder);
+
+        /// <summary>Generate an enveloped object that contains an CMS Enveloped Data object.</summary>
+        public CmsEnvelopedData Generate(CmsTypedData content, DerObjectIdentifier encryptionOid) =>
+            Generate(content, encryptionOid, keySize: -1);
+
+        /// <summary>Generate an enveloped object that contains an CMS Enveloped Data object.</summary>
+        public CmsEnvelopedData Generate(CmsTypedData content, DerObjectIdentifier encryptionOid, int keySize) =>
+            Generate(content, new CmsContentEncryptorBuilder(m_random, encryptionOid, keySize).Build());
+
+        /// <seealso cref="CmsContentEncryptorBuilder"/>
+        public CmsEnvelopedData Generate(CmsTypedData content, ICipherBuilderWithKey cipherBuilder)
         {
-            try
-            {
-				CipherKeyGenerator keyGen = GeneratorUtilities.GetKeyGenerator(encryptionOid);
-               
-				keyGen.Init(new KeyGenerationParameters(m_random, keyGen.DefaultStrength));
-
-				return Generate(content, encryptionOid, keyGen);
-            }
-            catch (SecurityUtilityException e)
-            {
-                throw new CmsException("can't find key generation algorithm.", e);
-            }
-        }
-
-
-        public CmsEnvelopedData Generate(CmsProcessable content, ICipherBuilderWithKey cipherBuilder)
-        {
-            //AlgorithmIdentifier encAlgId = null;
-            KeyParameter encKey;
-            Asn1OctetString encContent;
+            KeyParameter contentEncryptionKey;
+            EncryptedContentInfo encryptedContentInfo;
 
             try
             {
-                encKey = (KeyParameter) cipherBuilder.Key;
+                contentEncryptionKey = (KeyParameter)cipherBuilder.Key;
 
-                MemoryStream collector = new MemoryStream();
-                var cipher = cipherBuilder.BuildCipher(collector);
-                using (var bOut = cipher.Stream)
+                var contentEncryptionAlgorithm = (AlgorithmIdentifier)cipherBuilder.AlgorithmDetails;
+
+                MemoryStream buf = new MemoryStream();
+                var cipher = cipherBuilder.BuildCipher(buf);
+                using (var encryptStream = cipher.Stream)
                 {
-                    content.Write(bOut);
+                    content.Write(encryptStream);
                 }
 
-                encContent = new BerOctetString(collector.ToArray());
+                var encryptedContent = BerOctetString.WithContents(buf.ToArray());
+
+                encryptedContentInfo = new EncryptedContentInfo(content.ContentType, contentEncryptionAlgorithm,
+                    encryptedContent);
             }
             catch (SecurityUtilityException e)
             {
@@ -179,64 +98,44 @@ namespace Org.BouncyCastle.Cms
                 throw new CmsException("exception decoding algorithm parameters.", e);
             }
 
+            return ImplGenerate(contentEncryptionKey, encryptedContentInfo);
+        }
 
-            Asn1EncodableVector recipientInfos = new Asn1EncodableVector(recipientInfoGenerators.Count);
-
-            foreach (RecipientInfoGenerator rig in recipientInfoGenerators)
+        private CmsEnvelopedData ImplGenerate(KeyParameter contentEncryptionKey,
+            EncryptedContentInfo encryptedContentInfo)
+        {
+            DerSet recipientInfos;
+            try
             {
-                try
-                {
-                    recipientInfos.Add(rig.Generate(encKey, m_random));
-                }
-                catch (InvalidKeyException e)
-                {
-                    throw new CmsException("key inappropriate for algorithm.", e);
-                }
-                catch (GeneralSecurityException e)
-                {
-                    throw new CmsException("error making encrypted content.", e);
-                }
+                recipientInfos = DerSet.Map(recipientInfoGenerators,
+                    rig => rig.Generate(contentEncryptionKey, m_random));
+            }
+            catch (InvalidKeyException e)
+            {
+                throw new CmsException("key inappropriate for algorithm.", e);
+            }
+            catch (GeneralSecurityException e)
+            {
+                throw new CmsException("error making encrypted content.", e);
             }
 
-            EncryptedContentInfo eci = new EncryptedContentInfo(
-                CmsObjectIdentifiers.Data,
-                (AlgorithmIdentifier) cipherBuilder.AlgorithmDetails,
-                encContent);
-
-            Asn1Set unprotectedAttrSet = null;
+            Asn1Set unprotectedAttrs = null;
             if (unprotectedAttributeGenerator != null)
             {
                 Asn1.Cms.AttributeTable attrTable = unprotectedAttributeGenerator.GetAttributes(
                     new Dictionary<CmsAttributeTableParameter, object>());
 
-                unprotectedAttrSet = BerSet.FromVector(attrTable.ToAsn1EncodableVector());
+                unprotectedAttrs = BerSet.FromCollection(attrTable);
             }
 
-            ContentInfo contentInfo = new ContentInfo(
-                CmsObjectIdentifiers.EnvelopedData,
-                new EnvelopedData(null, DerSet.FromVector(recipientInfos), eci, unprotectedAttrSet));
+            var originatorInfo = m_originatorInformation?.ToAsn1Structure();
+
+            var envelopedData = new EnvelopedData(originatorInfo, recipientInfos, encryptedContentInfo,
+                unprotectedAttrs);
+
+            var contentInfo = new ContentInfo(CmsObjectIdentifiers.EnvelopedData, envelopedData);
 
             return new CmsEnvelopedData(contentInfo);
-        }
-
-		/// <summary>Generate an enveloped object that contains an CMS Enveloped Data object.</summary>
-        public CmsEnvelopedData Generate(
-            CmsProcessable  content,
-            string          encryptionOid,
-            int             keySize)
-        {
-            try
-            {
-				CipherKeyGenerator keyGen = GeneratorUtilities.GetKeyGenerator(encryptionOid);
-
-				keyGen.Init(new KeyGenerationParameters(m_random, keySize));
-
-				return Generate(content, encryptionOid, keyGen);
-            }
-            catch (SecurityUtilityException e)
-            {
-                throw new CmsException("can't find key generation algorithm.", e);
-            }
         }
     }
 }

@@ -16,22 +16,23 @@ namespace Org.BouncyCastle.Asn1.Ocsp
             return new RevokedInfo(Asn1Sequence.GetInstance(obj));
         }
 
-        public static RevokedInfo GetInstance(Asn1TaggedObject obj, bool explicitly)
-        {
-            return new RevokedInfo(Asn1Sequence.GetInstance(obj, explicitly));
-        }
+        public static RevokedInfo GetInstance(Asn1TaggedObject obj, bool explicitly) =>
+            new RevokedInfo(Asn1Sequence.GetInstance(obj, explicitly));
+
+        public static RevokedInfo GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new RevokedInfo(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
         private readonly Asn1GeneralizedTime m_revocationTime;
         private readonly CrlReason m_revocationReason;
 
         public RevokedInfo(Asn1GeneralizedTime revocationTime)
-			: this(revocationTime, null)
-		{
-		}
+            : this(revocationTime, null)
+        {
+        }
 
         public RevokedInfo(Asn1GeneralizedTime revocationTime, CrlReason revocationReason)
         {
-			m_revocationTime = revocationTime ?? throw new ArgumentNullException("revocationTime");
+            m_revocationTime = revocationTime ?? throw new ArgumentNullException("revocationTime");
             m_revocationReason = revocationReason;
         }
 
@@ -43,10 +44,10 @@ namespace Org.BouncyCastle.Asn1.Ocsp
 
             int pos = 0;
 
-            m_revocationTime = Asn1GeneralizedTime.GetInstance(seq[pos++]);
+            m_revocationTime = Asn1Utilities.Read(seq, ref pos, Asn1GeneralizedTime.GetInstance);
 
             m_revocationReason = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 0, true,
-                (t, e) => new CrlReason(DerEnumerated.GetInstance(t, e)));
+                (t, e) => new CrlReason(DerEnumerated.GetTagged(t, e)));
 
             if (pos != count)
                 throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
@@ -56,7 +57,7 @@ namespace Org.BouncyCastle.Asn1.Ocsp
 
         public CrlReason RevocationReason => m_revocationReason;
 
-		/**
+        /**
          * Produce an object suitable for an Asn1OutputStream.
          * <pre>
          * RevokedInfo ::= Sequence {

@@ -26,22 +26,27 @@ namespace Org.BouncyCastle.Asn1.Esf
 			return new OtherRevRefs(Asn1Sequence.GetInstance(obj));
 		}
 
-        public static OtherRevRefs GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
-        {
-            return new OtherRevRefs(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
-        }
+        public static OtherRevRefs GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new OtherRevRefs(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
+
+        public static OtherRevRefs GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new OtherRevRefs(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
         private readonly DerObjectIdentifier m_otherRevRefType;
         private readonly Asn1Encodable m_otherRevRefs;
 
         private OtherRevRefs(Asn1Sequence seq)
 		{
-            int count = seq.Count;
+            int count = seq.Count, pos = 0;
             if (count != 2)
                 throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
 
-			m_otherRevRefType = DerObjectIdentifier.GetInstance(seq[0]);
-			m_otherRevRefs = seq[1];
+			m_otherRevRefType = Asn1Utilities.Read(seq, ref pos, DerObjectIdentifier.GetInstance);
+            // TODO[asn1] Asn1Utilities helper method for this type of situation
+			m_otherRevRefs = Asn1Utilities.Read(seq, ref pos, element => element);
+
+            if (pos != count)
+                throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
 		}
 
         public OtherRevRefs(DerObjectIdentifier otherRevRefType, Asn1Encodable otherRevRefs)

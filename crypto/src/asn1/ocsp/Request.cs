@@ -16,21 +16,22 @@ namespace Org.BouncyCastle.Asn1.Ocsp
             return new Request(Asn1Sequence.GetInstance(obj));
         }
 
-        public static Request GetInstance(Asn1TaggedObject obj, bool explicitly)
-        {
-            return new Request(Asn1Sequence.GetInstance(obj, explicitly));
-        }
+        public static Request GetInstance(Asn1TaggedObject obj, bool explicitly) =>
+            new Request(Asn1Sequence.GetInstance(obj, explicitly));
+
+        public static Request GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new Request(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
         private readonly CertID m_reqCert;
         private readonly X509Extensions m_singleRequestExtensions;
 
         public Request(CertID reqCert, X509Extensions singleRequestExtensions)
         {
-			m_reqCert = reqCert ?? throw new ArgumentNullException(nameof(reqCert));
+            m_reqCert = reqCert ?? throw new ArgumentNullException(nameof(reqCert));
             m_singleRequestExtensions = singleRequestExtensions;
         }
 
-		private Request(Asn1Sequence seq)
+        private Request(Asn1Sequence seq)
         {
             int count = seq.Count;
             if (count < 1 || count > 2)
@@ -38,8 +39,8 @@ namespace Org.BouncyCastle.Asn1.Ocsp
 
             int pos = 0;
 
-            m_reqCert = CertID.GetInstance(seq[pos++]);
-            m_singleRequestExtensions = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 0, true, X509Extensions.GetInstance);
+            m_reqCert = Asn1Utilities.Read(seq, ref pos, CertID.GetInstance);
+            m_singleRequestExtensions = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 0, true, X509Extensions.GetTagged);
 
             if (pos != count)
                 throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
@@ -49,7 +50,7 @@ namespace Org.BouncyCastle.Asn1.Ocsp
 
         public X509Extensions SingleRequestExtensions => m_singleRequestExtensions;
 
-		/**
+        /**
          * Produce an object suitable for an Asn1OutputStream.
          * <pre>
          * Request         ::=     Sequence {

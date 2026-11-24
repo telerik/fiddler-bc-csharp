@@ -1,11 +1,9 @@
 ﻿using System;
-using System.Text;
 using System.Threading;
 
 using NUnit.Framework;
 
 using Org.BouncyCastle.Tls.Crypto;
-using Org.BouncyCastle.Tls.Crypto.Impl.BC;
 using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Tls.Tests
@@ -16,14 +14,17 @@ namespace Org.BouncyCastle.Tls.Tests
         [Test]
         public void TestClientServer()
         {
+            MockDtlsClient client = new MockDtlsClient(null);
+            MockDtlsServer server = new MockDtlsServer();
+
             DtlsClientProtocol clientProtocol = new DtlsClientProtocol();
             DtlsServerProtocol serverProtocol = new DtlsServerProtocol();
 
             MockDatagramAssociation network = new MockDatagramAssociation(1500);
 
-            ServerTask serverTask = new ServerTask(serverProtocol, network.Server);
+            ServerTask serverTask = new ServerTask(serverProtocol, server, network.Server);
 
-            Thread serverThread = new Thread(new ThreadStart(serverTask.Run));
+            Thread serverThread = new Thread(serverTask.Run);
             serverThread.Start();
 
             DatagramTransport clientTransport = network.Client;
@@ -33,8 +34,6 @@ namespace Org.BouncyCastle.Tls.Tests
             clientTransport = new LoggingDatagramTransport(clientTransport, Console.Out);
 
             clientTransport = new MinimalHandshakeAggregator(clientTransport, false, true);
-
-            MockDtlsClient client = new MockDtlsClient(null);
 
             client.SetHandshakeTimeoutMillis(30000);    // Test gets stuck, so we need it to time out.
 
@@ -60,20 +59,22 @@ namespace Org.BouncyCastle.Tls.Tests
         internal class ServerTask
         {
             private readonly DtlsServerProtocol m_serverProtocol;
+            private readonly TlsServer m_server;
             private readonly DatagramTransport m_serverTransport;
             private volatile bool m_isShutdown = false;
 
-            internal ServerTask(DtlsServerProtocol serverProtocol, DatagramTransport serverTransport)
+            internal ServerTask(DtlsServerProtocol serverProtocol, TlsServer server, DatagramTransport serverTransport)
             {
-                this.m_serverProtocol = serverProtocol;
-                this.m_serverTransport = serverTransport;
+                m_serverProtocol = serverProtocol;
+                m_server = server;
+                m_serverTransport = serverTransport;
             }
 
             public void Run()
             {
                 try
                 {
-                    TlsCrypto serverCrypto = new BcTlsCrypto();
+                    TlsCrypto serverCrypto = m_server.Crypto;
 
                     DtlsRequest request = null;
 
@@ -82,7 +83,7 @@ namespace Org.BouncyCastle.Tls.Tests
                         DtlsVerifier verifier = new DtlsVerifier(serverCrypto);
 
                         // NOTE: Test value only - would typically be the client IP address
-                        byte[] clientID = Encoding.UTF8.GetBytes("MockDtlsClient");
+                        byte[] clientID = Strings.ToUtf8ByteArray("MockDtlsClient");
 
                         int receiveLimit = m_serverTransport.GetReceiveLimit();
                         int dummyOffset = serverCrypto.SecureRandom.Next(16) + 1;
@@ -104,8 +105,7 @@ namespace Org.BouncyCastle.Tls.Tests
 
                     // NOTE: A real server would handle each DtlsRequest in a new task/thread and continue accepting
                     {
-                        MockDtlsServer server = new MockDtlsServer(serverCrypto);
-                        DtlsTransport dtlsTransport = m_serverProtocol.Accept(server, m_serverTransport, request);
+                        DtlsTransport dtlsTransport = m_serverProtocol.Accept(m_server, m_serverTransport, request);
                         byte[] buf = new byte[dtlsTransport.GetReceiveLimit()];
                         while (!m_isShutdown)
                         {
@@ -129,7 +129,7 @@ namespace Org.BouncyCastle.Tls.Tests
             {
                 if (!m_isShutdown)
                 {
-                    this.m_isShutdown = true;
+                    m_isShutdown = true;
                     serverThread.Join();
                 }
             }

@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Text;
 
 using NUnit.Framework;
 
@@ -13,15 +12,15 @@ namespace Org.BouncyCastle.Math.EC.Rfc8032.Tests
     [TestFixture]
     public class Ed25519Test
     {
-		private static readonly SecureRandom Random = new SecureRandom();
+        private readonly SecureRandom Random = new SecureRandom();
 
-        [SetUp]
-        public void SetUp()
+        [OneTimeSetUp]
+        public void OneTimeSetUp()
         {
             Ed25519.Precompute();
         }
 
-		[Test]
+        [Test]
         public void TestEd25519Consistency()
         {
             byte[] sk = new byte[Ed25519.SecretKeySize];
@@ -29,9 +28,9 @@ namespace Org.BouncyCastle.Math.EC.Rfc8032.Tests
             byte[] pk2 = new byte[Ed25519.PublicKeySize];
             byte[] m = new byte[255];
             byte[] sig1 = new byte[Ed25519.SignatureSize];
-			byte[] sig2 = new byte[Ed25519.SignatureSize];
+            byte[] sig2 = new byte[Ed25519.SignatureSize];
 
-			Random.NextBytes(m);
+            Random.NextBytes(m);
 
             for (int i = 0; i < 10; ++i)
             {
@@ -74,6 +73,112 @@ namespace Org.BouncyCastle.Math.EC.Rfc8032.Tests
                     bool shouldNotVerify = Ed25519.Verify(sig1, 0, publicPoint, m, 0, mLen);
 
                     Assert.IsFalse(shouldNotVerify, "Ed25519 consistent verification failure #" + i);
+                }
+            }
+        }
+
+        [Test]
+        public void TestEd25519ConsistencyExpandedKey()
+        {
+            byte[] xk = new byte[Ed25519.ExpandedKey.ExpandedKeySize];
+            byte[] pk = new byte[Ed25519.PublicKeySize];
+            byte[] pk2 = new byte[Ed25519.PublicKeySize];
+            byte[] m = new byte[255];
+            byte[] sig1 = new byte[Ed25519.SignatureSize];
+            byte[] sig2 = new byte[Ed25519.SignatureSize];
+
+            Random.NextBytes(m);
+
+            for (int i = 0; i < 10; ++i)
+            {
+                Ed25519.ExpandedKey.GeneratePrivateKey(Random, xk, 0);
+                var publicPoint = Ed25519.ExpandedKey.GeneratePublicKey(xk, 0);
+                Ed25519.EncodePublicPoint(publicPoint, pk, 0);
+
+                {
+                    Ed25519.ExpandedKey.GeneratePublicKey(xk, 0, pk2, 0);
+
+                    Assert.IsTrue(Arrays.AreEqual(pk, pk2), "Ed25519.ExpandedKey consistent generation #" + i);
+                }
+
+                int mLen = Random.NextInt() & 255;
+
+                Ed25519.ExpandedKey.Sign(xk, 0, m, 0, mLen, sig1, 0);
+                Ed25519.ExpandedKey.Sign(xk, 0, pk, 0, m, 0, mLen, sig2, 0);
+
+                Assert.IsTrue(Arrays.AreEqual(sig1, sig2), "Ed25519.ExpandedKey consistent signatures #" + i);
+
+                {
+                    bool shouldVerify = Ed25519.Verify(sig1, 0, pk, 0, m, 0, mLen);
+
+                    Assert.IsTrue(shouldVerify, "Ed25519.ExpandedKey consistent sign/verify #" + i);
+                }
+                {
+                    bool shouldVerify = Ed25519.Verify(sig1, 0, publicPoint, m, 0, mLen);
+
+                    Assert.IsTrue(shouldVerify, "Ed25519.ExpandedKey consistent sign/verify #" + i);
+                }
+
+                sig1[Ed25519.PublicKeySize - 1] ^= 0x80;
+
+                {
+                    bool shouldNotVerify = Ed25519.Verify(sig1, 0, pk, 0, m, 0, mLen);
+
+                    Assert.IsFalse(shouldNotVerify, "Ed25519.ExpandedKey consistent verification failure #" + i);
+                }
+                {
+                    bool shouldNotVerify = Ed25519.Verify(sig1, 0, publicPoint, m, 0, mLen);
+
+                    Assert.IsFalse(shouldNotVerify, "Ed25519.ExpandedKey consistent verification failure #" + i);
+                }
+            }
+        }
+
+        [Test]
+        public void TestEd25519CrossConsistencyExpandedKey()
+        {
+            byte[] sk = new byte[Ed25519.SecretKeySize];
+            byte[] xk = new byte[Ed25519.ExpandedKey.ExpandedKeySize];
+            byte[] pk = new byte[Ed25519.PublicKeySize];
+            byte[] pk2 = new byte[Ed25519.PublicKeySize];
+            byte[] m = new byte[255];
+            byte[] sig1 = new byte[Ed25519.SignatureSize];
+            byte[] sig2 = new byte[Ed25519.SignatureSize];
+
+            Random.NextBytes(m);
+
+            for (int i = 0; i < 10; ++i)
+            {
+                Ed25519.GeneratePrivateKey(Random, sk);
+                Ed25519.ExpandedKey.ExpandPrivateKey(sk, 0, xk, 0);
+
+                Ed25519.GeneratePublicKey(sk, 0, pk, 0);
+
+                {
+                    Ed25519.ExpandedKey.GeneratePublicKey(xk, 0, pk2, 0);
+
+                    Assert.IsTrue(Arrays.AreEqual(pk, pk2), "Ed25519.ExpandedKey cross-consistent generation #" + i);
+                }
+                {
+                    var publicPoint = Ed25519.ExpandedKey.GeneratePublicKey(xk, 0);
+                    Ed25519.EncodePublicPoint(publicPoint, pk2, 0);
+
+                    Assert.IsTrue(Arrays.AreEqual(pk, pk2), "Ed25519.ExpandedKey cross-consistent generation #" + i);
+                }
+
+                int mLen = Random.NextInt() & 255;
+
+                Ed25519.Sign(sk, 0, m, 0, mLen, sig1, 0);
+
+                {
+                    Ed25519.ExpandedKey.Sign(xk, 0, m, 0, mLen, sig2, 0);
+
+                    Assert.IsTrue(Arrays.AreEqual(sig1, sig2), "Ed25519.ExpandedKey cross-consistent signatures #" + i);
+                }
+                {
+                    Ed25519.ExpandedKey.Sign(xk, 0, pk, 0, m, 0, mLen, sig2, 0);
+
+                    Assert.IsTrue(Arrays.AreEqual(sig1, sig2), "Ed25519.ExpandedKey cross-consistent signatures #" + i);
                 }
             }
         }
@@ -202,7 +307,7 @@ namespace Org.BouncyCastle.Math.EC.Rfc8032.Tests
         }
 
         [Test]
-		public void TestEd25519Vector1()
+        public void TestEd25519Vector1()
         {
             CheckEd25519Vector(
                 ("9d61b19deffd5a60ba844af492ec2cc4"
@@ -216,8 +321,8 @@ namespace Org.BouncyCastle.Math.EC.Rfc8032.Tests
                 + "d25bf5f0595bbe24655141438e7a100b"),
                 "Ed25519 Vector #1");
         }
-      
-		[Test]
+
+        [Test]
         public void TestEd25519Vector2()
         {
             CheckEd25519Vector(
@@ -232,8 +337,8 @@ namespace Org.BouncyCastle.Math.EC.Rfc8032.Tests
                 + "387b2eaeb4302aeeb00d291612bb0c00"),
                 "Ed25519 Vector #2");
         }
-      
-		[Test]
+
+        [Test]
         public void TestEd25519Vector3()
         {
             CheckEd25519Vector(
@@ -449,46 +554,46 @@ namespace Org.BouncyCastle.Math.EC.Rfc8032.Tests
             }
 
             // Small order points (canonical encodings)
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("0000000000000000000000000000000000000000000000000000000000000000"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("0000000000000000000000000000000000000000000000000000000000000080"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("0100000000000000000000000000000000000000000000000000000000000000"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("ECFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7F"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("C7176A703D4DD84FBA3C0B760D10670F2A2053FA2C39CCC64EC7FD7792AC037A"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("C7176A703D4DD84FBA3C0B760D10670F2A2053FA2C39CCC64EC7FD7792AC03FA"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("26E8958FC2B227B045C3F489F2EF98F0D5DFAC05D3C63339B13802886D53FC05"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("26E8958FC2B227B045C3F489F2EF98F0D5DFAC05D3C63339B13802886D53FC85"), 0));
+            InvalidPublicKeyFull("0000000000000000000000000000000000000000000000000000000000000000");
+            InvalidPublicKeyFull("0000000000000000000000000000000000000000000000000000000000000080");
+            InvalidPublicKeyFull("0100000000000000000000000000000000000000000000000000000000000000");
+            InvalidPublicKeyFull("ECFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7F");
+            InvalidPublicKeyFull("C7176A703D4DD84FBA3C0B760D10670F2A2053FA2C39CCC64EC7FD7792AC037A");
+            InvalidPublicKeyFull("C7176A703D4DD84FBA3C0B760D10670F2A2053FA2C39CCC64EC7FD7792AC03FA");
+            InvalidPublicKeyFull("26E8958FC2B227B045C3F489F2EF98F0D5DFAC05D3C63339B13802886D53FC05");
+            InvalidPublicKeyFull("26E8958FC2B227B045C3F489F2EF98F0D5DFAC05D3C63339B13802886D53FC85");
 
             // Small order points (non-canonical encodings)
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("0100000000000000000000000000000000000000000000000000000000000080"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("ECFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"), 0));
+            InvalidPublicKeyFull("0100000000000000000000000000000000000000000000000000000000000080");
+            InvalidPublicKeyFull("ECFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
 
             // Non-canonical encodings
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("EDFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7F"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("EDFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7F"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"), 0));
+            InvalidPublicKeyFull("EDFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7F");
+            InvalidPublicKeyFull("EDFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
+            InvalidPublicKeyFull("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7F");
+            InvalidPublicKeyFull("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
 
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("D73D6044821BD0DF4068AE1792F0851170F53062150AA70A87E2A58A05A26115"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("F9D557BE0F3C700571CD8AD9CFDE0A2C67F88EE71830073C7756A0599311AD94"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("7A772BBC08D53BF381B150D8411B9AF134BBF24B90A038EFD8DA4A17B32606A1"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("DC6EF81316C08B91209A73FE8E208DD319F56C6A47956A03AF7D6D826A88AC87"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("6EEDF105177868C9AD48DAF2C36EE3B169D892A02A3BF83101B1D50D86BFB19E"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("4BAAB5711F22FF7479E6D9BD2C5BC4DCD3CFC9F36921971496907B1F2B62C6BA"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("D96A46432581A80085F978F7FC0977E228C5A3FD2E64D588BB5F5E5A84E4ABAE"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("10C326AE15FA5BA89EDDAB89C860797385298F4C7750BAEB94A5AAC9A876B538"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("7808F3F6EB858E9BBD2570F20A9F7502175F312FA2DBE4C96EB5C683B384AA60"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("0DE943C51E91AA3ED9FFA82D39A9813D94F59246452F6A7780D067BC61342FE1"), 0));
+            InvalidPublicKeyFull("D73D6044821BD0DF4068AE1792F0851170F53062150AA70A87E2A58A05A26115");
+            InvalidPublicKeyFull("F9D557BE0F3C700571CD8AD9CFDE0A2C67F88EE71830073C7756A0599311AD94");
+            InvalidPublicKeyFull("7A772BBC08D53BF381B150D8411B9AF134BBF24B90A038EFD8DA4A17B32606A1");
+            InvalidPublicKeyFull("DC6EF81316C08B91209A73FE8E208DD319F56C6A47956A03AF7D6D826A88AC87");
+            InvalidPublicKeyFull("6EEDF105177868C9AD48DAF2C36EE3B169D892A02A3BF83101B1D50D86BFB19E");
+            InvalidPublicKeyFull("4BAAB5711F22FF7479E6D9BD2C5BC4DCD3CFC9F36921971496907B1F2B62C6BA");
+            InvalidPublicKeyFull("D96A46432581A80085F978F7FC0977E228C5A3FD2E64D588BB5F5E5A84E4ABAE");
+            InvalidPublicKeyFull("10C326AE15FA5BA89EDDAB89C860797385298F4C7750BAEB94A5AAC9A876B538");
+            InvalidPublicKeyFull("7808F3F6EB858E9BBD2570F20A9F7502175F312FA2DBE4C96EB5C683B384AA60");
+            InvalidPublicKeyFull("0DE943C51E91AA3ED9FFA82D39A9813D94F59246452F6A7780D067BC61342FE1");
 
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("10026DBFB4C55628716BB0EF979A10DD5AC7AA970C229B5E68DD993E2C20E7D5"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("68EC52D16C1DB4483AA8679277C34E0DC56EB7D064D302B9749F0D31A901D484"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("6E54C8F00669422D5697E09C0575AE1E699841ACF1690A5DFAA25E3160F3A2EF"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("CA66B62D361F790AA9658161BA0FFDC3CE60624151258C7301926DFE0C67EE64"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("88D912C322AE3D0907B38ED08727FBF06D51C5D1DE622B5BC24DAB30078AE9FF"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("F24683E044CE3F14BCA24F1356AE7767509E17EFA2606438BA275860819E14B8"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("B2865F02E6D19A94CE6147B574095733B3628A2FBE2C84022262D88F7D6C4F7D"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("FA4DA03321816C1C9066BD250982DDD1B4349C43C5E124D2B39F8DDA4E5364F8"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("FCADF40DE51A943F3B7847DBEBA0627B33D020D81DFFABF2B3701BD9B746952A"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict("379B071E6F7E2479D5A8588AB708137808D63F689127D4A228E2C1681873C55E"), 0));
+            InvalidPublicKeyFull("10026DBFB4C55628716BB0EF979A10DD5AC7AA970C229B5E68DD993E2C20E7D5");
+            InvalidPublicKeyFull("68EC52D16C1DB4483AA8679277C34E0DC56EB7D064D302B9749F0D31A901D484");
+            InvalidPublicKeyFull("6E54C8F00669422D5697E09C0575AE1E699841ACF1690A5DFAA25E3160F3A2EF");
+            InvalidPublicKeyFull("CA66B62D361F790AA9658161BA0FFDC3CE60624151258C7301926DFE0C67EE64");
+            InvalidPublicKeyFull("88D912C322AE3D0907B38ED08727FBF06D51C5D1DE622B5BC24DAB30078AE9FF");
+            InvalidPublicKeyFull("F24683E044CE3F14BCA24F1356AE7767509E17EFA2606438BA275860819E14B8");
+            InvalidPublicKeyFull("B2865F02E6D19A94CE6147B574095733B3628A2FBE2C84022262D88F7D6C4F7D");
+            InvalidPublicKeyFull("FA4DA03321816C1C9066BD250982DDD1B4349C43C5E124D2B39F8DDA4E5364F8");
+            InvalidPublicKeyFull("FCADF40DE51A943F3B7847DBEBA0627B33D020D81DFFABF2B3701BD9B746952A");
+            InvalidPublicKeyFull("379B071E6F7E2479D5A8588AB708137808D63F689127D4A228E2C1681873C55E");
         }
 
         [Test]
@@ -505,46 +610,46 @@ namespace Org.BouncyCastle.Math.EC.Rfc8032.Tests
             }
 
             // Small order points (canonical encodings)
-            Assert.IsFalse(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("0000000000000000000000000000000000000000000000000000000000000000"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("0000000000000000000000000000000000000000000000000000000000000080"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("0100000000000000000000000000000000000000000000000000000000000000"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("ECFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7F"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("C7176A703D4DD84FBA3C0B760D10670F2A2053FA2C39CCC64EC7FD7792AC037A"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("C7176A703D4DD84FBA3C0B760D10670F2A2053FA2C39CCC64EC7FD7792AC03FA"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("26E8958FC2B227B045C3F489F2EF98F0D5DFAC05D3C63339B13802886D53FC05"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("26E8958FC2B227B045C3F489F2EF98F0D5DFAC05D3C63339B13802886D53FC85"), 0));
+            InvalidPublicKeyPartial("0000000000000000000000000000000000000000000000000000000000000000");
+            InvalidPublicKeyPartial("0000000000000000000000000000000000000000000000000000000000000080");
+            InvalidPublicKeyPartial("0100000000000000000000000000000000000000000000000000000000000000");
+            InvalidPublicKeyPartial("ECFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7F");
+            InvalidPublicKeyPartial("C7176A703D4DD84FBA3C0B760D10670F2A2053FA2C39CCC64EC7FD7792AC037A");
+            InvalidPublicKeyPartial("C7176A703D4DD84FBA3C0B760D10670F2A2053FA2C39CCC64EC7FD7792AC03FA");
+            InvalidPublicKeyPartial("26E8958FC2B227B045C3F489F2EF98F0D5DFAC05D3C63339B13802886D53FC05");
+            InvalidPublicKeyPartial("26E8958FC2B227B045C3F489F2EF98F0D5DFAC05D3C63339B13802886D53FC85");
 
             // Small order points (non-canonical encodings)
-            Assert.IsFalse(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("0100000000000000000000000000000000000000000000000000000000000080"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("ECFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"), 0));
+            InvalidPublicKeyPartial("0100000000000000000000000000000000000000000000000000000000000080");
+            InvalidPublicKeyPartial("ECFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
 
             // Non-canonical encodings
-            Assert.IsFalse(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("EDFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7F"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("EDFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7F"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"), 0));
+            InvalidPublicKeyPartial("EDFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7F");
+            InvalidPublicKeyPartial("EDFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
+            InvalidPublicKeyPartial("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7F");
+            InvalidPublicKeyPartial("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
 
-            Assert.IsFalse(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("D73D6044821BD0DF4068AE1792F0851170F53062150AA70A87E2A58A05A26115"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("F9D557BE0F3C700571CD8AD9CFDE0A2C67F88EE71830073C7756A0599311AD94"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("7A772BBC08D53BF381B150D8411B9AF134BBF24B90A038EFD8DA4A17B32606A1"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("DC6EF81316C08B91209A73FE8E208DD319F56C6A47956A03AF7D6D826A88AC87"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("6EEDF105177868C9AD48DAF2C36EE3B169D892A02A3BF83101B1D50D86BFB19E"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("4BAAB5711F22FF7479E6D9BD2C5BC4DCD3CFC9F36921971496907B1F2B62C6BA"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("D96A46432581A80085F978F7FC0977E228C5A3FD2E64D588BB5F5E5A84E4ABAE"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("10C326AE15FA5BA89EDDAB89C860797385298F4C7750BAEB94A5AAC9A876B538"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("7808F3F6EB858E9BBD2570F20A9F7502175F312FA2DBE4C96EB5C683B384AA60"), 0));
-            Assert.IsFalse(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("0DE943C51E91AA3ED9FFA82D39A9813D94F59246452F6A7780D067BC61342FE1"), 0));
+            InvalidPublicKeyPartial("D73D6044821BD0DF4068AE1792F0851170F53062150AA70A87E2A58A05A26115");
+            InvalidPublicKeyPartial("F9D557BE0F3C700571CD8AD9CFDE0A2C67F88EE71830073C7756A0599311AD94");
+            InvalidPublicKeyPartial("7A772BBC08D53BF381B150D8411B9AF134BBF24B90A038EFD8DA4A17B32606A1");
+            InvalidPublicKeyPartial("DC6EF81316C08B91209A73FE8E208DD319F56C6A47956A03AF7D6D826A88AC87");
+            InvalidPublicKeyPartial("6EEDF105177868C9AD48DAF2C36EE3B169D892A02A3BF83101B1D50D86BFB19E");
+            InvalidPublicKeyPartial("4BAAB5711F22FF7479E6D9BD2C5BC4DCD3CFC9F36921971496907B1F2B62C6BA");
+            InvalidPublicKeyPartial("D96A46432581A80085F978F7FC0977E228C5A3FD2E64D588BB5F5E5A84E4ABAE");
+            InvalidPublicKeyPartial("10C326AE15FA5BA89EDDAB89C860797385298F4C7750BAEB94A5AAC9A876B538");
+            InvalidPublicKeyPartial("7808F3F6EB858E9BBD2570F20A9F7502175F312FA2DBE4C96EB5C683B384AA60");
+            InvalidPublicKeyPartial("0DE943C51E91AA3ED9FFA82D39A9813D94F59246452F6A7780D067BC61342FE1");
 
-            Assert.IsTrue(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("10026DBFB4C55628716BB0EF979A10DD5AC7AA970C229B5E68DD993E2C20E7D5"), 0));
-            Assert.IsTrue(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("68EC52D16C1DB4483AA8679277C34E0DC56EB7D064D302B9749F0D31A901D484"), 0));
-            Assert.IsTrue(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("6E54C8F00669422D5697E09C0575AE1E699841ACF1690A5DFAA25E3160F3A2EF"), 0));
-            Assert.IsTrue(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("CA66B62D361F790AA9658161BA0FFDC3CE60624151258C7301926DFE0C67EE64"), 0));
-            Assert.IsTrue(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("88D912C322AE3D0907B38ED08727FBF06D51C5D1DE622B5BC24DAB30078AE9FF"), 0));
-            Assert.IsTrue(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("F24683E044CE3F14BCA24F1356AE7767509E17EFA2606438BA275860819E14B8"), 0));
-            Assert.IsTrue(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("B2865F02E6D19A94CE6147B574095733B3628A2FBE2C84022262D88F7D6C4F7D"), 0));
-            Assert.IsTrue(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("FA4DA03321816C1C9066BD250982DDD1B4349C43C5E124D2B39F8DDA4E5364F8"), 0));
-            Assert.IsTrue(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("FCADF40DE51A943F3B7847DBEBA0627B33D020D81DFFABF2B3701BD9B746952A"), 0));
-            Assert.IsTrue(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict("379B071E6F7E2479D5A8588AB708137808D63F689127D4A228E2C1681873C55E"), 0));
+            ValidPublicKeyPartial("10026DBFB4C55628716BB0EF979A10DD5AC7AA970C229B5E68DD993E2C20E7D5");
+            ValidPublicKeyPartial("68EC52D16C1DB4483AA8679277C34E0DC56EB7D064D302B9749F0D31A901D484");
+            ValidPublicKeyPartial("6E54C8F00669422D5697E09C0575AE1E699841ACF1690A5DFAA25E3160F3A2EF");
+            ValidPublicKeyPartial("CA66B62D361F790AA9658161BA0FFDC3CE60624151258C7301926DFE0C67EE64");
+            ValidPublicKeyPartial("88D912C322AE3D0907B38ED08727FBF06D51C5D1DE622B5BC24DAB30078AE9FF");
+            ValidPublicKeyPartial("F24683E044CE3F14BCA24F1356AE7767509E17EFA2606438BA275860819E14B8");
+            ValidPublicKeyPartial("B2865F02E6D19A94CE6147B574095733B3628A2FBE2C84022262D88F7D6C4F7D");
+            ValidPublicKeyPartial("FA4DA03321816C1C9066BD250982DDD1B4349C43C5E124D2B39F8DDA4E5364F8");
+            ValidPublicKeyPartial("FCADF40DE51A943F3B7847DBEBA0627B33D020D81DFFABF2B3701BD9B746952A");
+            ValidPublicKeyPartial("379B071E6F7E2479D5A8588AB708137808D63F689127D4A228E2C1681873C55E");
         }
 
         #region Taming EdDSA
@@ -556,8 +661,8 @@ namespace Org.BouncyCastle.Math.EC.Rfc8032.Tests
         [Test]
         public void TamingNonRepudiation()
         {
-            byte[] msg1 = Encoding.UTF8.GetBytes("Send 100 USD to Alice");
-            byte[] msg2 = Encoding.UTF8.GetBytes("Send 100000 USD to Alice");
+            byte[] msg1 = Strings.ToUtf8ByteArray("Send 100 USD to Alice");
+            byte[] msg2 = Strings.ToUtf8ByteArray("Send 100000 USD to Alice");
             byte[] pub = Hex.DecodeStrict("ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f");
             byte[] sig = Hex.DecodeStrict("a9d55260f765261eb9b84e106f665e00b867287a761990d7135963ee0a7d59dc" +
                                           "a5bb704786be79fc476f91d3f3f89b03984d8068dcf1bb7dfc6637b45450ac04");
@@ -716,6 +821,15 @@ namespace Org.BouncyCastle.Math.EC.Rfc8032.Tests
 
         #endregion
 
+        private static void InvalidPublicKeyFull(string sPK) =>
+            Assert.IsFalse(Ed25519.ValidatePublicKeyFull(Hex.DecodeStrict(sPK), 0), sPK);
+
+        private static void InvalidPublicKeyPartial(string sPK) =>
+            Assert.IsFalse(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict(sPK), 0), sPK);
+
+        private static void ValidPublicKeyPartial(string sPK) =>
+            Assert.IsTrue(Ed25519.ValidatePublicKeyPartial(Hex.DecodeStrict(sPK), 0), sPK);
+
         private static void CheckEd25519Vector(string sSK, string sPK, string sM, string sSig, string text)
         {
             byte[] sk = Hex.Decode(sSK);
@@ -724,8 +838,8 @@ namespace Org.BouncyCastle.Math.EC.Rfc8032.Tests
             byte[] pkGen = new byte[Ed25519.PublicKeySize];
             Ed25519.GeneratePublicKey(sk, 0, pkGen, 0);
             Assert.IsTrue(Arrays.AreEqual(pk, pkGen), text);
-         
-			byte[] m = Hex.Decode(sM);
+
+            byte[] m = Hex.Decode(sM);
             byte[] sig = Hex.Decode(sSig);
 
             byte[] badsig = Arrays.Clone(sig);
@@ -743,6 +857,18 @@ namespace Org.BouncyCastle.Math.EC.Rfc8032.Tests
 
             bool shouldNotVerify = Ed25519.Verify(badsig, 0, pk, 0, m, 0, m.Length);
             Assert.IsFalse(shouldNotVerify, text);
+
+            byte[] xk = new byte[Ed25519.ExpandedKey.ExpandedKeySize];
+            Ed25519.ExpandedKey.ExpandPrivateKey(sk, 0, xk, 0);
+
+            Ed25519.ExpandedKey.GeneratePublicKey(xk, 0, pkGen, 0);
+            Assert.IsTrue(Arrays.AreEqual(pk, pkGen), text);
+
+            Ed25519.ExpandedKey.Sign(xk, 0, m, 0, m.Length, sigGen, 0);
+            Assert.IsTrue(Arrays.AreEqual(sig, sigGen), text);
+
+            Ed25519.ExpandedKey.Sign(xk, 0, pk, 0, m, 0, m.Length, sigGen, 0);
+            Assert.IsTrue(Arrays.AreEqual(sig, sigGen), text);
         }
 
         private static void CheckEd25519ctxVector(string sSK, string sPK, string sM, string sCTX, string sSig, string text)

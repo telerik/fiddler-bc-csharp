@@ -1,3 +1,5 @@
+using System;
+
 namespace Org.BouncyCastle.Asn1.Cmp
 {
 	public class CAKeyUpdAnnContent
@@ -12,10 +14,11 @@ namespace Org.BouncyCastle.Asn1.Cmp
             return new CAKeyUpdAnnContent(Asn1Sequence.GetInstance(obj));
         }
 
-        public static CAKeyUpdAnnContent GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
-        {
-            return new CAKeyUpdAnnContent(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
-        }
+        public static CAKeyUpdAnnContent GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new CAKeyUpdAnnContent(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
+
+        public static CAKeyUpdAnnContent GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new CAKeyUpdAnnContent(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
         private readonly CmpCertificate m_oldWithNew;
 		private readonly CmpCertificate m_newWithOld;
@@ -23,9 +26,16 @@ namespace Org.BouncyCastle.Asn1.Cmp
 
 		private CAKeyUpdAnnContent(Asn1Sequence seq)
 		{
-			m_oldWithNew = CmpCertificate.GetInstance(seq[0]);
-			m_newWithOld = CmpCertificate.GetInstance(seq[1]);
-			m_newWithNew = CmpCertificate.GetInstance(seq[2]);
+            int count = seq.Count, pos = 0;
+            if (count != 3)
+                throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
+
+            m_oldWithNew = Asn1Utilities.Read(seq, ref pos, CmpCertificate.GetInstance);
+			m_newWithOld = Asn1Utilities.Read(seq, ref pos, CmpCertificate.GetInstance);
+			m_newWithNew = Asn1Utilities.Read(seq, ref pos, CmpCertificate.GetInstance);
+
+            if (pos != count)
+                throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
 		}
 
 		public virtual CmpCertificate OldWithNew => m_oldWithNew;

@@ -29,6 +29,7 @@ namespace Org.BouncyCastle.Crypto.Parameters
 	/// <seealso cref="Org.BouncyCastle.Crypto.Digests.SkeinEngine"/>
 	/// <seealso cref="Org.BouncyCastle.Crypto.Digests.SkeinDigest"/>
 	/// <seealso cref="Org.BouncyCastle.Crypto.Macs.SkeinMac"/>
+    // TODO[api] Don't implement ICipherParameters
 	public class SkeinParameters
 		: ICipherParameters
 	{
@@ -225,7 +226,7 @@ namespace Org.BouncyCastle.Crypto.Parameters
 				try
 				{
 					MemoryStream bout = new MemoryStream();
-					using (var outBytes = new StreamWriter(bout, System.Text.Encoding.UTF8))
+					using (var outBytes = new StreamWriter(bout, Strings.UTF8))
 					{
                         outBytes.Write(date.ToString("YYYYMMDD", CultureInfo.InvariantCulture));
                         outBytes.Write(" ");

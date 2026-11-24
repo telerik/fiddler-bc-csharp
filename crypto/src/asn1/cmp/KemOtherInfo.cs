@@ -32,6 +32,9 @@ namespace Org.BouncyCastle.Asn1.Cmp
         public static KemOtherInfo GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
             new KemOtherInfo(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
 
+        public static KemOtherInfo GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new KemOtherInfo(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
+
         private static readonly PkiFreeText DEFAULT_staticString = new PkiFreeText("CMP-KEM");
 
         private readonly PkiFreeText m_staticString;
@@ -56,53 +59,29 @@ namespace Org.BouncyCastle.Asn1.Cmp
 
         public KemOtherInfo(Asn1OctetString transactionID, Asn1OctetString senderNonce, Asn1OctetString recipNonce,
             long len, AlgorithmIdentifier mac, Asn1OctetString ct)
-            : this(transactionID, senderNonce, recipNonce, new DerInteger(len), mac, ct)
+            : this(transactionID, senderNonce, recipNonce, DerInteger.ValueOf(len), mac, ct)
         {
         }
 
         private KemOtherInfo(Asn1Sequence seq)
         {
-            if (seq.Count < 4 || seq.Count > 7)
-                throw new ArgumentException("sequence size should be between 4 and 7 inclusive", nameof(seq));
+            int count = seq.Count, pos = 0;
+            if (count < 4 || count > 7)
+                throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
 
-            int seqPos = 0;
-
-            m_staticString = PkiFreeText.GetInstance(seq[seqPos]);
+            m_staticString = Asn1Utilities.Read(seq, ref pos, PkiFreeText.GetInstance);
             if (!DEFAULT_staticString.Equals(m_staticString))
                 throw new ArgumentException("staticString field should be " + DEFAULT_staticString);
 
-            Asn1TaggedObject tagged = seq[++seqPos] as Asn1TaggedObject;
+            m_transactionID = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 0, true, Asn1OctetString.GetTagged);
+            m_senderNonce = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 1, true, Asn1OctetString.GetTagged);
+            m_recipNonce = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 2, true, Asn1OctetString.GetTagged);
+            m_len = Asn1Utilities.Read(seq, ref pos, DerInteger.GetInstance);
+            m_mac = Asn1Utilities.Read(seq, ref pos, AlgorithmIdentifier.GetInstance);
+            m_ct = Asn1Utilities.Read(seq, ref pos, Asn1OctetString.GetInstance);
 
-            if (tagged != null &&
-                Asn1Utilities.TryGetContextBaseUniversal(tagged, 0, true, Asn1Tags.OctetString, out var transactionID))
-            {
-                m_transactionID = (Asn1OctetString)transactionID;
-                tagged = seq[++seqPos] as Asn1TaggedObject;
-            }
-
-            if (tagged != null &&
-                Asn1Utilities.TryGetContextBaseUniversal(tagged, 1, true, Asn1Tags.OctetString, out var senderNonce))
-            {
-                m_senderNonce = (Asn1OctetString)senderNonce;
-                tagged = seq[++seqPos] as Asn1TaggedObject;
-            }
-
-            if (tagged != null &&
-                Asn1Utilities.TryGetContextBaseUniversal(tagged, 2, true, Asn1Tags.OctetString, out var recipNonce))
-            {
-                m_recipNonce = (Asn1OctetString)recipNonce;
-                tagged = seq[++seqPos] as Asn1TaggedObject;
-            }
-
-            if (tagged != null)
-                throw new ArgumentException("unknown tag: " + Asn1Utilities.GetTagText(tagged));
-
-            m_len = DerInteger.GetInstance(seq[seqPos]);
-            m_mac = AlgorithmIdentifier.GetInstance(seq[++seqPos]);
-            m_ct = Asn1OctetString.GetInstance(seq[++seqPos]);
-
-            if (++seqPos != seq.Count)
-                throw new ArgumentException("unexpected data at end of sequence", nameof(seq));
+            if (pos != count)
+                throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
         }
 
         public virtual Asn1OctetString TransactionID => m_transactionID;

@@ -5,9 +5,7 @@ using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Asn1
 {
-    /**
-     * A Null object.
-     */
+    /// <summary>A NULL object.</summary>
     public abstract class Asn1Null
         : Asn1Object
     {
@@ -19,7 +17,7 @@ namespace Org.BouncyCastle.Asn1
 
             internal override Asn1Object FromImplicitPrimitive(DerOctetString octetString)
             {
-                return CreatePrimitive(octetString.GetOctets());
+                return CreatePrimitive(octetString.GetOctetsLength());
             }
         }
 
@@ -33,8 +31,7 @@ namespace Org.BouncyCastle.Asn1
 
             if (obj is IAsn1Convertible asn1Convertible)
             {
-                Asn1Object asn1Object = asn1Convertible.ToAsn1Object();
-                if (asn1Object is Asn1Null converted)
+                if (!(obj is Asn1Object) && asn1Convertible.ToAsn1Object() is Asn1Null converted)
                     return converted;
             }
             else if (obj is byte[] bytes)
@@ -45,32 +42,51 @@ namespace Org.BouncyCastle.Asn1
                 }
                 catch (IOException e)
                 {
-                    throw new ArgumentException("failed to construct NULL from byte[]: " + e.Message);
+                    throw new ArgumentException("failed to construct NULL from byte[]", nameof(obj), e);
                 }
             }
 
-            throw new ArgumentException("illegal object in GetInstance: " + Platform.GetTypeName(obj));
+            throw new ArgumentException("illegal object in GetInstance: " + Platform.GetTypeName(obj), nameof(obj));
         }
 
         public static Asn1Null GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
         {
-            return (Asn1Null)Meta.Instance.GetContextInstance(taggedObject, declaredExplicit);
+            return (Asn1Null)Meta.Instance.GetContextTagged(taggedObject, declaredExplicit);
+        }
+
+        public static Asn1Null GetOptional(Asn1Encodable element)
+        {
+            if (element == null)
+                throw new ArgumentNullException(nameof(element));
+
+            if (element is Asn1Null existing)
+                return existing;
+
+            return null;
+        }
+
+        public static Asn1Null GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit)
+        {
+            return (Asn1Null)Meta.Instance.GetTagged(taggedObject, declaredExplicit);
         }
 
         internal Asn1Null()
         {
         }
 
-        public override string ToString()
+        public override string ToString() => "NULL";
+
+        private static void CheckContentsLength(int contentsLength)
         {
-            return "NULL";
+            if (0 != contentsLength)
+                throw new InvalidOperationException("malformed NULL encoding encountered");
         }
 
-        internal static Asn1Null CreatePrimitive(byte[] contents)
-        {
-            if (0 != contents.Length)
-                throw new InvalidOperationException("malformed NULL encoding encountered");
+        internal static Asn1Null CreatePrimitive(DefiniteLengthInputStream defIn) => CreatePrimitive(defIn.Remaining);
 
+        private static Asn1Null CreatePrimitive(int contentsLength)
+        {
+            CheckContentsLength(contentsLength);
             return DerNull.Instance;
         }
     }

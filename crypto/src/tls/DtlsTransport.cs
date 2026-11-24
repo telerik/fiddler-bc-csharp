@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics;
 using System.IO;
 using System.Net.Sockets;
 
@@ -49,6 +50,9 @@ namespace Org.BouncyCastle.Tls
         }
 
         // TODO[api] Add to DatagramTransport (with a default null parameter)
+        /// <remarks>
+        /// A <paramref name="waitMillis"/> of zero is interpreted as an infinite timeout.
+        /// </remarks>
         /// <exception cref="IOException"/>
         public virtual int Receive(byte[] buf, int off, int len, int waitMillis, DtlsRecordCallback recordCallback)
         {
@@ -68,6 +72,11 @@ namespace Org.BouncyCastle.Tls
             try
             {
                 return m_recordLayer.Receive(buf, off, len, waitMillis, recordCallback);
+            }
+            catch (TlsFatalAlertReceived)
+            {
+                Debug.Assert(m_recordLayer.IsFailed);
+                throw;
             }
             catch (TlsFatalAlert fatalAlert)
             {
@@ -125,6 +134,11 @@ namespace Org.BouncyCastle.Tls
             {
                 return m_recordLayer.ReceivePending(buf, off, len, recordCallback);
             }
+            catch (TlsFatalAlertReceived)
+            {
+                Debug.Assert(m_recordLayer.IsFailed);
+                throw;
+            }
             catch (TlsFatalAlert fatalAlert)
             {
                 if (m_ignoreCorruptRecords && AlertDescription.bad_record_mac == fatalAlert.AlertDescription)
@@ -171,6 +185,9 @@ namespace Org.BouncyCastle.Tls
         }
 
         // TODO[api] Add to DatagramTransport (with a default null parameter)
+        /// <remarks>
+        /// A <paramref name="waitMillis"/> of zero is interpreted as an infinite timeout.
+        /// </remarks>
         /// <exception cref="IOException"/>
         public virtual int Receive(Span<byte> buffer, int waitMillis, DtlsRecordCallback recordCallback)
         {
@@ -180,6 +197,11 @@ namespace Org.BouncyCastle.Tls
             try
             {
                 return m_recordLayer.Receive(buffer, waitMillis, recordCallback);
+            }
+            catch (TlsFatalAlertReceived)
+            {
+                Debug.Assert(m_recordLayer.IsFailed);
+                throw;
             }
             catch (TlsFatalAlert fatalAlert)
             {
@@ -225,6 +247,11 @@ namespace Org.BouncyCastle.Tls
             try
             {
                 return m_recordLayer.ReceivePending(buffer, recordCallback);
+            }
+            catch (TlsFatalAlertReceived)
+            {
+                Debug.Assert(m_recordLayer.IsFailed);
+                throw;
             }
             catch (TlsFatalAlert fatalAlert)
             {

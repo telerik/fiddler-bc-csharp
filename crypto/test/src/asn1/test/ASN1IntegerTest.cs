@@ -3,6 +3,7 @@
 using NUnit.Framework;
 
 using Org.BouncyCastle.Math;
+using Org.BouncyCastle.Utilities;
 using Org.BouncyCastle.Utilities.Encoders;
 using Org.BouncyCastle.Utilities.Test;
 
@@ -17,10 +18,7 @@ namespace Org.BouncyCastle.Asn1.Tests
             "MIGJAoGBAHNc+iExm94LUrJdPSJ4QJ9tDRuvaNmGVHpJ4X7a5zKI02v+2E7RotuiR2MHDJfVJkb9LUs2kb3XBlyENhtMLsbeH+3Muy3" +
             "hGDlh/mLJSh1s4c5jDKBRYOHom7Uc8wP0P2+zBCA+OEdikNDFBaP5PbR2Xq9okG2kPh35M2quAiMTAgMBAAE=");
 
-        public override string Name
-        {
-            get { return "Asn1Integer"; }
-        }
+        public override string Name => "Asn1Integer";
 
         public override void PerformTest()
         {
@@ -61,12 +59,23 @@ namespace Org.BouncyCastle.Asn1.Tests
                 CheckArgumentException(e, "malformed integer");
             }
 
-            // No support for thread-local override in C# version
-            //IsTrue(!Properties.SetThreadOverride("org.bouncycastle.asn1.allow_unsafe_integer", true));
+            {
+                Assert.Null(Properties.GetThreadProperty(Properties.Asn1AllowUnsafeInteger));
 
-            //new DerInteger(Hex.Decode("ffda47bfc776bcd269da4832626ac332adfca6dd835e8ecd83cd1ebe7d709b"));
+                Properties.SetThreadBoolean(Properties.Asn1AllowUnsafeInteger, true);
 
-            //IsTrue(Properties.RemoveThreadOverride("org.bouncycastle.asn1.allow_unsafe_integer"));
+                new DerInteger(Hex.Decode("ffda47bfc776bcd269da4832626ac332adfca6dd835e8ecd83cd1ebe7d709b"));
+
+                Assert.True(Properties.RemoveThreadProperty(Properties.Asn1AllowUnsafeInteger));
+            }
+
+            {
+                Properties.WithThreadProperty(Properties.Asn1AllowUnsafeInteger, bool.TrueString, () =>
+                {
+                    new DerInteger(Hex.Decode("ffda47bfc776bcd269da4832626ac332adfca6dd835e8ecd83cd1ebe7d709b"));
+                });
+                Assert.Null(Properties.GetThreadProperty(Properties.Asn1AllowUnsafeInteger));
+            }
 
             try
             {
@@ -76,7 +85,7 @@ namespace Org.BouncyCastle.Asn1.Tests
             }
             catch (ArgumentException e)
             {
-                CheckArgumentException("test 1", e, "failed to construct sequence from byte[]: corrupted stream detected");
+                CheckArgumentException("test 1", e, "failed to construct sequence from byte[]");
             }
 
             try
@@ -111,12 +120,22 @@ namespace Org.BouncyCastle.Asn1.Tests
             {
                 CheckArgumentException(e, "malformed enumerated");
             }
+
+            ClearAllowUnsafeProperty();
+        }
+
+        [Test]
+        public void TestFunction()
+        {
+            string resultText = Perform().ToString();
+
+            Assert.AreEqual(Name + ": Okay", resultText);
         }
 
         /**
          * Ensure existing single byte behavior.
          */
-        public void DoTestValidEncodingSingleByte()
+        private void DoTestValidEncodingSingleByte()
         {
             SetAllowUnsafeProperty(false);
 
@@ -137,7 +156,7 @@ namespace Org.BouncyCastle.Asn1.Tests
             CheckIntValue(i, 16);
         }
 
-        public void DoTestValidEncodingMultiByte()
+        private void DoTestValidEncodingMultiByte()
         {
             SetAllowUnsafeProperty(false);
 
@@ -158,7 +177,7 @@ namespace Org.BouncyCastle.Asn1.Tests
             CheckIntValue(i, 4351);
         }
 
-        public void DoTestInvalidEncoding_00()
+        private void DoTestInvalidEncoding_00()
         {
             SetAllowUnsafeProperty(false);
             try
@@ -174,7 +193,7 @@ namespace Org.BouncyCastle.Asn1.Tests
             }
         }
 
-        public void DoTestInvalidEncoding_ff()
+        private void DoTestInvalidEncoding_ff()
         {
             SetAllowUnsafeProperty(false);
 
@@ -190,7 +209,7 @@ namespace Org.BouncyCastle.Asn1.Tests
             }
         }
 
-        public void DoTestInvalidEncoding_00_32bits()
+        private void DoTestInvalidEncoding_00_32bits()
         {
             SetAllowUnsafeProperty(false);
 
@@ -209,7 +228,7 @@ namespace Org.BouncyCastle.Asn1.Tests
             }
         }
 
-        public void DoTestInvalidEncoding_ff_32bits()
+        private void DoTestInvalidEncoding_ff_32bits()
         {
             SetAllowUnsafeProperty(false);
 
@@ -232,7 +251,7 @@ namespace Org.BouncyCastle.Asn1.Tests
          Unfortunately it turns out that integers stored without sign bits that are assumed to be
          unsigned.. this means a string of FF may occur and then the user will call getPositiveValue().
          Sigh..
-        public void DoTestLooseInvalidValidEncoding_zero_32B()
+        private void DoTestLooseInvalidValidEncoding_zero_32B()
             throws Exception
         {
             //
@@ -251,7 +270,7 @@ namespace Org.BouncyCastle.Asn1.Tests
             }
         }
 
-        public void DoTestLooseInvalidValidEncoding_FF_32B()
+        private void DoTestLooseInvalidValidEncoding_FF_32B()
             throws Exception
         {
             //
@@ -271,7 +290,7 @@ namespace Org.BouncyCastle.Asn1.Tests
         }
         */
 
-        public void DoTestLooseValidEncoding_zero_32BAligned()
+        private void DoTestLooseValidEncoding_zero_32BAligned()
         {
             //
             // Should pass as loose validation permits 3 leading 0x00 bytes.
@@ -282,7 +301,7 @@ namespace Org.BouncyCastle.Asn1.Tests
             CheckLongValue(i, 72997666816L);
         }
 
-        public void DoTestLooseValidEncoding_FF_32BAligned()
+        private void DoTestLooseValidEncoding_FF_32BAligned()
         {
             //
             // Should pass as loose validation permits 3 leading 0xFF bytes
@@ -293,7 +312,7 @@ namespace Org.BouncyCastle.Asn1.Tests
             CheckLongValue(i, -1026513960960L);
         }
 
-        public void DoTestLooseValidEncoding_FF_32BAligned_1not0()
+        private void DoTestLooseValidEncoding_FF_32BAligned_1not0()
         {
             //
             // Should pass as loose validation permits 3 leading 0xFF bytes.
@@ -304,7 +323,7 @@ namespace Org.BouncyCastle.Asn1.Tests
             CheckLongValue(i, -282501490671616L);
         }
 
-        public void DoTestLooseValidEncoding_FF_32BAligned_2not0()
+        private void DoTestLooseValidEncoding_FF_32BAligned_2not0()
         {
             //
             // Should pass as loose validation permits 3 leading 0xFF bytes.
@@ -315,7 +334,7 @@ namespace Org.BouncyCastle.Asn1.Tests
             CheckLongValue(i, -2126025588736L);
         }
 
-        public void DoTestOversizedEncoding()
+        private void DoTestOversizedEncoding()
         {
             //
             // Should pass as loose validation permits 3 leading 0xFF bytes.
@@ -335,20 +354,12 @@ namespace Org.BouncyCastle.Asn1.Tests
                 CheckArgumentException(e, "malformed integer");
             }
         }
-        private void CheckArgumentException(ArgumentException e, string expectedMessage)
-        {
+
+        private void CheckArgumentException(ArgumentException e, string expectedMessage) =>
             IsTrue(e.Message.StartsWith(expectedMessage));
-        }
 
-        private void CheckArgumentException(string errorText, ArgumentException e, string expectedMessage)
-        {
+        private void CheckArgumentException(string errorText, ArgumentException e, string expectedMessage) =>
             IsTrue(errorText, e.Message.StartsWith(expectedMessage));
-        }
-
-        private void SetAllowUnsafeProperty(bool allowUnsafe)
-        {
-            Environment.SetEnvironmentVariable(DerInteger.AllowUnsafeProperty, allowUnsafe ? "true" : "false");
-        }
 
         private void CheckIntValue(DerInteger i, int n)
         {
@@ -368,12 +379,11 @@ namespace Org.BouncyCastle.Asn1.Tests
             IsTrue(i.HasValue(n));
         }
 
-        [Test]
-        public void TestFunction()
-        {
-            string resultText = Perform().ToString();
+        private static void ClearAllowUnsafeProperty() => SetAllowUnsafeProperty(null);
 
-            Assert.AreEqual(Name + ": Okay", resultText);
-        }
+        private static void SetAllowUnsafeProperty(bool value) => SetAllowUnsafeProperty(value ? "true" : "false");
+
+        private static void SetAllowUnsafeProperty(string value) =>
+            Environment.SetEnvironmentVariable(DerInteger.AllowUnsafeProperty, value);
     }
 }

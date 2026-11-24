@@ -39,7 +39,12 @@ namespace Org.BouncyCastle.Crypto.Signers
 				TrailerImplicit);
 		}
 
-		public static PssSigner CreateRawSigner(IAsymmetricBlockCipher cipher, IDigest contentDigest, IDigest mgfDigest,
+        public static PssSigner CreateRawSigner(IAsymmetricBlockCipher cipher, IDigest digest, int saltLen)
+        {
+            return new PssSigner(cipher, Prehash.ForDigest(digest), digest, digest, saltLen, null, TrailerImplicit);
+        }
+
+        public static PssSigner CreateRawSigner(IAsymmetricBlockCipher cipher, IDigest contentDigest, IDigest mgfDigest,
 			int saltLen, byte trailer)
 		{
 			return new PssSigner(cipher, Prehash.ForDigest(contentDigest), contentDigest, mgfDigest, saltLen, null,
@@ -155,37 +160,32 @@ namespace Org.BouncyCastle.Crypto.Signers
 			get { return mgfDigest.AlgorithmName + "withRSAandMGF1"; }
 		}
 
-		public virtual void Init(bool forSigning, ICipherParameters parameters)
-		{
-			if (parameters is ParametersWithRandom withRandom)
-			{
-				parameters = withRandom.Parameters;
-				random = withRandom.Random;
-                cipher.Init(forSigning, withRandom);
-            }
-            else
-			{
-				random = forSigning ? CryptoServicesRegistrar.GetSecureRandom() : null;
-                cipher.Init(forSigning, parameters);
-            }
+        public virtual void Init(bool forSigning, ICipherParameters parameters)
+        {
+            cipher.Init(forSigning, parameters);
+
+            parameters = ParameterUtilities.GetRandom(parameters, out var providedRandom);
+
+            // TODO Only needed if salt generation needed?
+            random = forSigning ? CryptoServicesRegistrar.GetSecureRandom(providedRandom) : null;
 
             RsaKeyParameters kParam;
-			if (parameters is RsaBlindingParameters blinding)
-			{
-				kParam = blinding.PublicKey;
-			}
-			else
-			{
-				kParam = (RsaKeyParameters)parameters;
-			}
+            if (parameters is RsaBlindingParameters blinding)
+            {
+                kParam = blinding.PublicKey;
+            }
+            else
+            {
+                kParam = (RsaKeyParameters)parameters;
+            }
 
-			emBits = kParam.Modulus.BitLength - 1;
+            emBits = kParam.Modulus.BitLength - 1;
 
-			if (emBits < (8 * hLen + 8 * sLen + 9))
-				throw new ArgumentException("key too small for specified hash and salt lengths");
+            if (emBits < (8 * hLen + 8 * sLen + 9))
+                throw new ArgumentException("key too small for specified hash and salt lengths");
 
-			block = new byte[(emBits + 7) / 8];
-		}
+            block = new byte[(emBits + 7) / 8];
+        }
 
 		/// <summary> clear possible sensitive data</summary>
 		private void ClearBlock(byte[] block)

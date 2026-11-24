@@ -1,10 +1,11 @@
+using System;
 using System.Collections.Generic;
 
 using Org.BouncyCastle.Utilities.Collections;
 
 namespace Org.BouncyCastle.Asn1.X509
 {
-	/**
+    /**
 	 * This extension may contain further X.500 attributes of the subject. See also
 	 * RFC 3039.
 	 *
@@ -21,13 +22,11 @@ namespace Org.BouncyCastle.Asn1.X509
 	 *     AttributeValue ::= ANY DEFINED BY AttributeType
 	 * </pre>
 	 *
-	 * @see org.bouncycastle.asn1.x509.X509Name for AttributeType ObjectIdentifiers.
+	 * @see Org.BouncyCastle.Asn1.X509.X509Name for AttributeType ObjectIdentifiers.
 	 */
-	public class SubjectDirectoryAttributes
+    public class SubjectDirectoryAttributes
 		: Asn1Encodable
 	{
-		private readonly List<AttributeX509> m_attributes;
-
         public static SubjectDirectoryAttributes GetInstance(object obj)
         {
             if (obj == null)
@@ -37,7 +36,16 @@ namespace Org.BouncyCastle.Asn1.X509
             return new SubjectDirectoryAttributes(Asn1Sequence.GetInstance(obj));
         }
 
-		/**
+        public static SubjectDirectoryAttributes GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new SubjectDirectoryAttributes(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
+
+        public static SubjectDirectoryAttributes GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new SubjectDirectoryAttributes(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
+
+        // TODO[asn1] Tighten to DLSequence if/when safe
+        private readonly DerSequence m_attributes;
+
+        /**
 		 * Constructor from Asn1Sequence.
 		 *
 		 * The sequence is of type SubjectDirectoryAttributes:
@@ -58,17 +66,13 @@ namespace Org.BouncyCastle.Asn1.X509
 		 * @param seq
 		 *            The ASN.1 sequence.
 		 */
-		private SubjectDirectoryAttributes(
-			Asn1Sequence seq)
-		{
-            m_attributes = new List<AttributeX509>();
+        private SubjectDirectoryAttributes(Asn1Sequence seq)
+        {
+            if (seq.Count < 1)
+                throw new ArgumentException("Minimum sequence size is 1", nameof(seq));
 
-            foreach (object o in seq)
-			{
-				Asn1Sequence s = Asn1Sequence.GetInstance(o);
-				m_attributes.Add(AttributeX509.GetInstance(s));
-			}
-		}
+            m_attributes = DerSequence.Map(seq, AttributeX509.GetInstance);
+        }
 
         /**
 		 * Constructor from an ArrayList of attributes.
@@ -78,12 +82,17 @@ namespace Org.BouncyCastle.Asn1.X509
 		 * @param attributes The attributes.
 		 *
 		 */
-		public SubjectDirectoryAttributes(IList<AttributeX509> attributes)
-		{
-			m_attributes = new List<AttributeX509>(attributes);
-		}
+        public SubjectDirectoryAttributes(IList<AttributeX509> attributes)
+        {
+            if (attributes == null)
+                throw new ArgumentNullException(nameof(attributes));
+            if (attributes.Count < 1)
+                throw new ArgumentException("Minimum sequence size is 1", nameof(attributes));
 
-		/**
+            m_attributes = DerSequence.Map(Asn1EncodableVector.FromEnumerable(attributes), AttributeX509.GetInstance);
+        }
+
+        /**
 		 * Produce an object suitable for an Asn1OutputStream.
 		 *
 		 * Returns:
@@ -103,17 +112,9 @@ namespace Org.BouncyCastle.Asn1.X509
 		 *
 		 * @return a DERObject
 		 */
-		public override Asn1Object ToAsn1Object()
-		{
-            return new DerSequence(m_attributes.ToArray());
-		}
+        public override Asn1Object ToAsn1Object() => m_attributes;
 
-        /**
-		 * @return Returns the attributes.
-		 */
-		public IEnumerable<AttributeX509> Attributes
-		{
-			get { return CollectionUtilities.Proxy(m_attributes); }
-		}
-	}
+        public IEnumerable<AttributeX509> Attributes =>
+            CollectionUtilities.Select(m_attributes, AttributeX509.GetInstance);
+    }
 }

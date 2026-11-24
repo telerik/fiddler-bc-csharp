@@ -16,6 +16,7 @@ namespace Org.BouncyCastle.Crypto.Engines
     /// https://csrc.nist.gov/CSRC/media/Projects/lightweight-cryptography/documents/finalist-round/updated-spec-doc/ascon-spec-final.pdf<br/>
     /// ASCON v1.2 AEAD with reference to C Reference Impl from: https://github.com/ascon/ascon-c .
     /// </remarks>
+    [Obsolete("This class is deprecated. For the latest Ascon version, use AsconAead128 instead.")]
     public sealed class AsconEngine
         : IAeadCipher
     {
@@ -132,7 +133,7 @@ namespace Org.BouncyCastle.Crypto.Engines
             {
                 key = withIV.Parameters as KeyParameter;
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
-                npub = withIV.IV;
+                npub = withIV.InternalIV;
 #else
                 npub = withIV.GetIV();
 #endif
@@ -149,7 +150,7 @@ namespace Org.BouncyCastle.Crypto.Engines
                 throw new ArgumentException(asconParameters + " requires exactly " + CRYPTO_ABYTES + " bytes of IV");
 
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
-            var k = key.Key;
+            var k = key.InternalKey;
 #else
             byte[] k = key.GetKey();
 #endif

@@ -1,7 +1,5 @@
 using System.IO;
 
-using Org.BouncyCastle.Utilities.IO;
-
 namespace Org.BouncyCastle.Asn1
 {
     public abstract class DerGenerator
@@ -13,7 +11,7 @@ namespace Org.BouncyCastle.Asn1
 
         protected DerGenerator(Stream outStream)
             : base(outStream)
-		{
+        {
         }
 
         protected DerGenerator(Stream outStream, int tagNo, bool isExplicit)
@@ -24,70 +22,45 @@ namespace Org.BouncyCastle.Asn1
             _tagNo = tagNo;
         }
 
-		internal void WriteDerEncoded(int tag, byte[] bytes)
+        internal void WriteDerEncoded(int tag, byte[] bytes)
         {
-            if (_tagged)
+            if (!_tagged)
             {
-                int tagNum = _tagNo | Asn1Tags.ContextSpecific;
-
-                if (_isExplicit)
-                {
-                    int newTag = _tagNo | Asn1Tags.Constructed | Asn1Tags.ContextSpecific;
-					MemoryStream bOut = new MemoryStream();
-                    WriteDerEncoded(bOut, tag, bytes);
-                    WriteDerEncoded(OutStream, newTag, bOut.ToArray());
-                }
-                else
-                {
-					if ((tag & Asn1Tags.Constructed) != 0)
-					{
-						tagNum |= Asn1Tags.Constructed;
-					}
-
-					WriteDerEncoded(OutStream, tagNum, bytes);
-                }
+                WriteDerEncoded(OutStream, tag, bytes);
+            }
+            else if (_isExplicit)
+            {
+                /*
+                 * X.690-0207 8.14.2. If implicit tagging [..] was not used [..], the encoding shall be constructed
+                 * and the contents octets shall be the complete base encoding.
+                 */
+                MemoryStream buf = new MemoryStream();
+                WriteDerEncoded(buf, tag, bytes);
+                WriteDerEncoded(OutStream, Asn1Tags.ContextSpecific | Asn1Tags.Constructed, _tagNo, buf.ToArray());
             }
             else
             {
-                WriteDerEncoded(OutStream, tag, bytes);
+                /*
+                 * X.690-0207 8.14.3. If implicit tagging was used [..], then: a) the encoding shall be constructed
+                 * if the base encoding is constructed, and shall be primitive otherwise; and b) the contents octets
+                 * shall be [..] the contents octets of the base encoding.
+                 */
+                WriteDerEncoded(OutStream, InheritConstructedFlag(Asn1Tags.ContextSpecific, tag), _tagNo, bytes);
             }
         }
 
         internal static void WriteDerEncoded(Stream outStream, int tag, byte[] bytes)
         {
             outStream.WriteByte((byte)tag);
-            WriteLength(outStream, bytes.Length);
+            Asn1OutputStream.WriteDL(outStream, bytes.Length);
             outStream.Write(bytes, 0, bytes.Length);
         }
 
-        internal static void WriteDerEncoded(Stream	outStream, int tag, Stream	inStream)
+        private void WriteDerEncoded(Stream outStream, int flags, int tagNo, byte[] bytes)
         {
-			WriteDerEncoded(outStream, tag, Streams.ReadAll(inStream));
-        }
-
-        private static void WriteLength(Stream outStream, int length)
-        {
-            if (length > 127)
-            {
-                int size = 1;
-                int val = length;
-
-                while ((val >>= 8) != 0)
-                {
-                    size++;
-                }
-
-                outStream.WriteByte((byte)(size | 0x80));
-
-                for (int i = (size - 1) * 8; i >= 0; i -= 8)
-                {
-                    outStream.WriteByte((byte)(length >> i));
-                }
-            }
-            else
-            {
-                outStream.WriteByte((byte)length);
-            }
+            Asn1OutputStream.WriteIdentifier(outStream, flags, tagNo);
+            Asn1OutputStream.WriteDL(outStream, bytes.Length);
+            outStream.Write(bytes, 0, bytes.Length);
         }
     }
 }

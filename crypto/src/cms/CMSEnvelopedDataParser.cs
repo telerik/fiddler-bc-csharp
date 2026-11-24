@@ -1,4 +1,3 @@
-using System;
 using System.IO;
 
 using Org.BouncyCastle.Asn1;
@@ -7,135 +6,147 @@ using Org.BouncyCastle.Asn1.X509;
 
 namespace Org.BouncyCastle.Cms
 {
-	/**
-	* Parsing class for an CMS Enveloped Data object from an input stream.
-	* <p>
-	* Note: that because we are in a streaming mode only one recipient can be tried and it is important
-	* that the methods on the parser are called in the appropriate order.
-	* </p>
-	* <p>
-	* Example of use - assuming the first recipient matches the private key we have.
-	* <pre>
-	*      CmsEnvelopedDataParser     ep = new CmsEnvelopedDataParser(inputStream);
-	*
-	*      RecipientInformationStore  recipients = ep.GetRecipientInfos();
-	*
-	*      Collection  c = recipients.getRecipients();
-	*      Iterator    it = c.iterator();
-	*
-	*      if (it.hasNext())
-	*      {
-	*          RecipientInformation   recipient = (RecipientInformation)it.next();
-	*
-	*          CMSTypedStream recData = recipient.getContentStream(privateKey);
-	*
-	*          processDataStream(recData.getContentStream());
-	*      }
-	*  </pre>
-	*  Note: this class does not introduce buffering - if you are processing large files you should create
-	*  the parser with:
-	*  <pre>
-	*          CmsEnvelopedDataParser     ep = new CmsEnvelopedDataParser(new BufferedInputStream(inputStream, bufSize));
-	*  </pre>
-	*  where bufSize is a suitably large buffer size.
-	* </p>
-	*/
-	public class CmsEnvelopedDataParser
-		: CmsContentInfoParser
-	{
-		internal RecipientInformationStore	recipientInfoStore;
-		internal EnvelopedDataParser		envelopedData;
+    /**
+     * Parsing class for an CMS Enveloped Data object from an input stream.
+     * <p>
+     * Note: that because we are in a streaming mode only one recipient can be tried and it is important
+     * that the methods on the parser are called in the appropriate order.
+     * </p>
+     * <p>
+     * Example of use - assuming the first recipient matches the private key we have.
+     * <pre>
+     *      CmsEnvelopedDataParser     ep = new CmsEnvelopedDataParser(inputStream);
+     *
+     *      RecipientInformationStore  recipients = ep.GetRecipientInfos();
+     *
+     *      Collection  c = recipients.GetRecipients();
+     *      Iterator    it = c.iterator();
+     *
+     *      if (it.hasNext())
+     *      {
+     *          RecipientInformation   recipient = (RecipientInformation)it.next();
+     *
+     *          CMSTypedStream recData = recipient.GetContentStream(privateKey);
+     *
+     *          processDataStream(recData.GetContentStream());
+     *      }
+     *  </pre>
+     *  Note: this class does not introduce buffering - if you are processing large files you should create
+     *  the parser with:
+     *  <pre>
+     *          CmsEnvelopedDataParser     ep = new CmsEnvelopedDataParser(new BufferedInputStream(inputStream, bufSize));
+     *  </pre>
+     *  where bufSize is a suitably large buffer size.
+     * </p>
+     * <p>
+     * <b>Stream handling note:</b>
+     * <ul>
+     *   <li>The constructor reads only enough of the supplied Stream to expose the
+     *       CMS structure metadata (originator info, recipient infos, content-encryption
+     *       algorithm). The encrypted content is drained lazily by the caller via
+     *       {@link RecipientInformation#GetContentStream} /
+     *       {@link RecipientInformation#GetContent}.</li>
+     *   <li>The supplied Stream is <b>not closed automatically</b>. Call
+     *       {@link #Close()} on this parser (inherited from
+     *       {@link CmsContentInfoParser}) to close the underlying Stream, or close
+     *       it yourself.</li>
+     * </ul>
+     * </p>
+     */
+    public class CmsEnvelopedDataParser
+        : CmsContentInfoParser
+    {
+        internal RecipientInformationStore recipientInfoStore;
+        internal EnvelopedDataParser envelopedData;
 
-		private AlgorithmIdentifier			_encAlg;
-		private Asn1.Cms.AttributeTable		_unprotectedAttributes;
-		private bool						_attrNotRead;
+        private AlgorithmIdentifier _encAlg;
+        private Asn1.Cms.AttributeTable _unprotectedAttributes;
+        private bool _attrNotRead;
+        private OriginatorInformation m_originatorInformation;
 
-		public CmsEnvelopedDataParser(
-			byte[] envelopedData)
-			: this(new MemoryStream(envelopedData, false))
-		{
-		}
+        public CmsEnvelopedDataParser(byte[] envelopedData)
+            : this(new MemoryStream(envelopedData, false))
+        {
+        }
 
-		public CmsEnvelopedDataParser(
-			Stream envelopedData)
-			: base(envelopedData)
-		{
-			this._attrNotRead = true;
-			this.envelopedData = new EnvelopedDataParser(
-				(Asn1SequenceParser)this.contentInfo.GetContent(Asn1Tags.Sequence));
+        public CmsEnvelopedDataParser(Stream envelopedData)
+            : base(envelopedData)
+        {
+            this._attrNotRead = true;
+            this.envelopedData = new EnvelopedDataParser(
+                (Asn1SequenceParser)this.contentInfo.GetContent(Asn1Tags.Sequence));
 
-			// TODO Validate version?
-			//DerInteger version = this.envelopedData.Version;
+            // TODO Validate version?
+            //DerInteger version = this.envelopedData.Version;
 
-			//
-			// read the recipients
-			//
-			Asn1Set recipientInfos = Asn1Set.GetInstance(this.envelopedData.GetRecipientInfos().ToAsn1Object());
+            var originatorInfo = this.envelopedData.GetOriginatorInfo();
+            m_originatorInformation = originatorInfo == null ? null : new OriginatorInformation(originatorInfo);
 
-			//
-			// read the encrypted content info
-			//
-			EncryptedContentInfoParser encInfo = this.envelopedData.GetEncryptedContentInfo();
-			this._encAlg = encInfo.ContentEncryptionAlgorithm;
-			CmsReadable readable = new CmsProcessableInputStream(
-				((Asn1OctetStringParser)encInfo.GetEncryptedContent(Asn1Tags.OctetString)).GetOctetStream());
-			CmsSecureReadable secureReadable = new CmsEnvelopedHelper.CmsEnvelopedSecureReadable(
-				this._encAlg, readable);
+            //
+            // read the recipients
+            //
+            Asn1Set recipientInfos = Asn1Set.GetInstance(this.envelopedData.GetRecipientInfos().ToAsn1Object());
 
-			//
-			// build the RecipientInformationStore
-			//
-			this.recipientInfoStore = CmsEnvelopedHelper.BuildRecipientInformationStore(
-				recipientInfos, secureReadable);
-		}
+            //
+            // read the encrypted content info
+            //
+            EncryptedContentInfoParser encInfo = this.envelopedData.GetEncryptedContentInfo();
+            this._encAlg = encInfo.ContentEncryptionAlgorithm;
+            CmsReadable readable = new CmsProcessableInputStream(
+                ((Asn1OctetStringParser)encInfo.GetEncryptedContent(Asn1Tags.OctetString)).GetOctetStream());
+            CmsSecureReadable secureReadable = new CmsEnvelopedHelper.CmsEnvelopedSecureReadable(
+                this._encAlg, readable);
 
-		public AlgorithmIdentifier EncryptionAlgorithmID
-		{
-			get { return _encAlg; }
-		}
+            //
+            // build the RecipientInformationStore
+            //
+            this.recipientInfoStore = CmsEnvelopedHelper.BuildRecipientInformationStore(
+                recipientInfos, secureReadable);
+        }
 
-		/**
-		 * return the object identifier for the content encryption algorithm.
-		 */
-		public string EncryptionAlgOid
-		{
-            get { return _encAlg.Algorithm.Id; }
-		}
+        public AlgorithmIdentifier EncryptionAlgorithmID => _encAlg;
 
-		/**
-		 * return the ASN.1 encoded encryption algorithm parameters, or null if
-		 * there aren't any.
-		 */
-		public Asn1Object EncryptionAlgParams => _encAlg.Parameters?.ToAsn1Object();
+        /**
+         * return the object identifier for the content encryption algorithm.
+         */
+        public string EncryptionAlgOid => _encAlg.Algorithm.GetID();
 
-		/**
-		 * return a store of the intended recipients for this message
-		 */
-		public RecipientInformationStore GetRecipientInfos()
-		{
-			return this.recipientInfoStore;
-		}
+        /**
+         * return the ASN.1 encoded encryption algorithm parameters, or null if there aren't any.
+         */
+        public Asn1Object EncryptionAlgParams => _encAlg.Parameters?.ToAsn1Object();
 
-		/**
-		 * return a table of the unprotected attributes indexed by
-		 * the OID of the attribute.
-		 * @throws IOException
-		 */
-		public Asn1.Cms.AttributeTable GetUnprotectedAttributes()
-		{
-			if (_unprotectedAttributes == null && _attrNotRead)
-			{
-				Asn1SetParser asn1Set = this.envelopedData.GetUnprotectedAttrs();
+        /**
+         * Return the originator information associated with this message if present.
+         *
+         * @return OriginatorInformation, null if not present.
+         */
+        public OriginatorInformation OriginatorInformation => m_originatorInformation;
 
-				_attrNotRead = false;
+        /**
+         * return a store of the intended recipients for this message
+         */
+        public RecipientInformationStore GetRecipientInfos() => this.recipientInfoStore;
 
-				if (asn1Set != null)
-				{
+        /**
+         * return a table of the unprotected attributes indexed by the OID of the attribute.
+         * @throws IOException
+         */
+        public Asn1.Cms.AttributeTable GetUnprotectedAttributes()
+        {
+            if (_unprotectedAttributes == null && _attrNotRead)
+            {
+                Asn1SetParser asn1Set = this.envelopedData.GetUnprotectedAttrs();
+
+                _attrNotRead = false;
+
+                if (asn1Set != null)
+                {
                     _unprotectedAttributes = CmsUtilities.ParseAttributeTable(asn1Set);
-				}
-			}
+                }
+            }
 
-			return _unprotectedAttributes;
-		}
-	}
+            return _unprotectedAttributes;
+        }
+    }
 }

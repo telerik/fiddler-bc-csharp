@@ -23,6 +23,13 @@ namespace Org.BouncyCastle.Asn1.Ocsp
 #pragma warning restore CS0618 // Type or member is obsolete
         }
 
+        public static CrlID GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit)
+        {
+#pragma warning disable CS0618 // Type or member is obsolete
+            return new CrlID(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
+#pragma warning restore CS0618 // Type or member is obsolete
+        }
+
         private readonly DerIA5String m_crlUrl;
         private readonly DerInteger m_crlNum;
         private readonly Asn1GeneralizedTime m_crlTime;
@@ -30,15 +37,18 @@ namespace Org.BouncyCastle.Asn1.Ocsp
         [Obsolete("Use 'GetInstance' instead")]
         public CrlID(Asn1Sequence seq)
         {
+            if (seq == null)
+                throw new ArgumentNullException(nameof(seq));
+
             int count = seq.Count;
             if (count < 0 || count > 3)
                 throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
 
             int pos = 0;
 
-            m_crlUrl = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 0, true, DerIA5String.GetInstance);
-            m_crlNum = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 1, true, DerInteger.GetInstance);
-            m_crlTime = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 2, true, Asn1GeneralizedTime.GetInstance);
+            m_crlUrl = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 0, true, DerIA5String.GetTagged);
+            m_crlNum = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 1, true, DerInteger.GetTagged);
+            m_crlTime = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 2, true, Asn1GeneralizedTime.GetTagged);
 
             if (pos != count)
                 throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
@@ -50,7 +60,7 @@ namespace Org.BouncyCastle.Asn1.Ocsp
 
         public Asn1GeneralizedTime CrlTime => m_crlTime;
 
-		/**
+        /**
          * Produce an object suitable for an Asn1OutputStream.
          * <pre>
          * CrlID ::= Sequence {

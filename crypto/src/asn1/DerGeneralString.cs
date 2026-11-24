@@ -30,8 +30,7 @@ namespace Org.BouncyCastle.Asn1
 
             if (obj is IAsn1Convertible asn1Convertible)
             {
-                Asn1Object asn1Object = asn1Convertible.ToAsn1Object();
-                if (asn1Object is DerGeneralString converted)
+                if (!(obj is Asn1Object) && asn1Convertible.ToAsn1Object() is DerGeneralString converted)
                     return converted;
             }
             else if (obj is byte[] bytes)
@@ -42,26 +41,42 @@ namespace Org.BouncyCastle.Asn1
                 }
                 catch (IOException e)
                 {
-                    throw new ArgumentException("failed to construct general string from byte[]: " + e.Message);
+                    throw new ArgumentException("failed to construct general string from byte[]", nameof(obj), e);
                 }
             }
 
-            throw new ArgumentException("illegal object in GetInstance: " + Platform.GetTypeName(obj));
+            throw new ArgumentException("illegal object in GetInstance: " + Platform.GetTypeName(obj), nameof(obj));
         }
 
         public static DerGeneralString GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
         {
-            return (DerGeneralString)Meta.Instance.GetContextInstance(taggedObject, declaredExplicit);
+            return (DerGeneralString)Meta.Instance.GetContextTagged(taggedObject, declaredExplicit);
+        }
+
+        public static DerGeneralString GetOptional(Asn1Encodable element)
+        {
+            if (element == null)
+                throw new ArgumentNullException(nameof(element));
+
+            if (element is DerGeneralString existing)
+                return existing;
+
+            return null;
+        }
+
+        public static DerGeneralString GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit)
+        {
+            return (DerGeneralString)Meta.Instance.GetTagged(taggedObject, declaredExplicit);
         }
 
         private readonly byte[] m_contents;
 
-		public DerGeneralString(string str)
+        public DerGeneralString(string str)
         {
-			if (str == null)
-				throw new ArgumentNullException("str");
+            if (str == null)
+                throw new ArgumentNullException("str");
 
-			m_contents = Strings.ToAsciiByteArray(str);
+            m_contents = Strings.ToAsciiByteArray(str);
         }
 
         public DerGeneralString(byte[] contents)
@@ -72,7 +87,7 @@ namespace Org.BouncyCastle.Asn1
         internal DerGeneralString(byte[] contents, bool clone)
         {
             if (null == contents)
-                throw new ArgumentNullException("contents");
+                throw new ArgumentNullException(nameof(contents));
 
             m_contents = clone ? Arrays.Clone(contents) : contents;
         }
@@ -82,7 +97,7 @@ namespace Org.BouncyCastle.Asn1
             return Strings.FromAsciiByteArray(m_contents);
         }
 
-		public byte[] GetOctets()
+        public byte[] GetOctets()
         {
             return Arrays.Clone(m_contents);
         }

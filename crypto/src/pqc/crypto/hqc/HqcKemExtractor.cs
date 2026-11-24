@@ -1,37 +1,34 @@
-﻿using Org.BouncyCastle.Crypto;
+using System;
+
+using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Pqc.Crypto.Hqc
 {
-    public class HqcKemExtractor : IEncapsulatedSecretExtractor
+    // TODO[api] Make sealed
+    public class HqcKemExtractor
+        : IEncapsulatedSecretExtractor
     {
-        private HqcEngine engine;
+        private readonly HqcPrivateKeyParameters m_privateKey;
+        private readonly HqcEngine m_engine;
 
-        private HqcKeyParameters key;
-
+        // TODO[api] 'privateKey'
         public HqcKemExtractor(HqcPrivateKeyParameters privParams)
         {
-            key = privParams;
-            InitCipher(key.Parameters);
+            m_privateKey = privParams ?? throw new ArgumentNullException(nameof(privParams));
+            m_engine = privParams.Parameters.Engine;
         }
 
-        private void InitCipher(HqcParameters param)
-        {
-            engine = param.Engine;
-        }
-
-        
         public byte[] ExtractSecret(byte[] encapsulation)
         {
-            byte[] session_key = new byte[engine.GetSessionKeySize()];
-            HqcPrivateKeyParameters secretKey = (HqcPrivateKeyParameters)key;
-            byte[] sk = secretKey.PrivateKey;
+            byte[] ss = new byte[64];
+            byte[] sk = m_privateKey.InternalPrivateKey;
 
-            engine.Decaps(session_key, encapsulation, sk);
+            m_engine.Decaps(ss, ct: encapsulation, sk);
 
-            return session_key;
+            return Arrays.CopySegment(ss, 0, 32);
         }
 
-        public int EncapsulationLength => key.Parameters.NBytes + key.Parameters.N1n2Bytes + 64 + 16; // SHA-512 + salt
- 
+        public int EncapsulationLength => m_engine.CipherTextBytes;
     }
 }

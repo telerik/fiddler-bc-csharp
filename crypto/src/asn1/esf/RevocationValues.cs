@@ -17,90 +17,99 @@ namespace Org.BouncyCastle.Asn1.Esf
     /// </code>
     /// </remarks>
     public class RevocationValues
-		: Asn1Encodable
-	{
-		public static RevocationValues GetInstance(object obj)
-		{
+        : Asn1Encodable
+    {
+        public static RevocationValues GetInstance(object obj)
+        {
             if (obj == null)
                 return null;
             if (obj is RevocationValues revocationValues)
-				return revocationValues;
-			return new RevocationValues(Asn1Sequence.GetInstance(obj));
-		}
-
-        public static RevocationValues GetInstance(Asn1TaggedObject obj, bool explicitly)
-        {
-            return new RevocationValues(Asn1Sequence.GetInstance(obj, explicitly));
+                return revocationValues;
+            return new RevocationValues(Asn1Sequence.GetInstance(obj));
         }
+
+        public static RevocationValues GetInstance(Asn1TaggedObject obj, bool explicitly) =>
+            new RevocationValues(Asn1Sequence.GetInstance(obj, explicitly));
+
+        public static RevocationValues GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new RevocationValues(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
         private readonly Asn1Sequence m_crlVals;
         private readonly Asn1Sequence m_ocspVals;
         private readonly OtherRevVals m_otherRevVals;
 
         private RevocationValues(Asn1Sequence seq)
-		{
-			int count = seq.Count;
-			if (count < 0 || count > 3)
-				throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
+        {
+            int count = seq.Count;
+            if (count < 0 || count > 3)
+                throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
 
-			int pos = 0;
+            int pos = 0;
 
-			m_crlVals = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 0, true, Asn1Sequence.GetInstance);
+            m_crlVals = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 0, true, Asn1Sequence.GetTagged);
             m_crlVals?.MapElements(CertificateList.GetInstance); // Validate
 
-            m_ocspVals = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 1, true, Asn1Sequence.GetInstance);
+            m_ocspVals = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 1, true, Asn1Sequence.GetTagged);
             m_ocspVals?.MapElements(BasicOcspResponse.GetInstance); // Validate
 
-            m_otherRevVals = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 2, true, OtherRevVals.GetInstance);
+            m_otherRevVals = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 2, true, OtherRevVals.GetTagged);
 
             if (pos != count)
                 throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
         }
 
         public RevocationValues(CertificateList[] crlVals, BasicOcspResponse[] ocspVals, OtherRevVals otherRevVals)
-		{
-			if (crlVals != null)
-			{
-				m_crlVals = DerSequence.FromElements(crlVals);
-			}
+        {
+            m_crlVals = DerSequence.FromElementsOptional(crlVals);
+            m_ocspVals = DerSequence.FromElementsOptional(ocspVals);
+            m_otherRevVals = otherRevVals;
+        }
 
-			if (ocspVals != null)
-			{
-				m_ocspVals = DerSequence.FromElements(ocspVals);
-			}
+        public RevocationValues(IEnumerable<CertificateList> crlVals, IEnumerable<BasicOcspResponse> ocspVals,
+            OtherRevVals otherRevVals)
+        {
+            if (crlVals != null)
+            {
+                m_crlVals = DerSequence.FromVector(Asn1EncodableVector.FromEnumerable(crlVals));
+            }
 
-			m_otherRevVals = otherRevVals;
-		}
+            if (ocspVals != null)
+            {
+                m_ocspVals = DerSequence.FromVector(Asn1EncodableVector.FromEnumerable(ocspVals));
+            }
 
-		public RevocationValues(IEnumerable<CertificateList> crlVals, IEnumerable<BasicOcspResponse> ocspVals,
-			OtherRevVals otherRevVals)
-		{
-			if (crlVals != null)
-			{
-				m_crlVals = DerSequence.FromVector(Asn1EncodableVector.FromEnumerable(crlVals));
-			}
+            m_otherRevVals = otherRevVals;
+        }
 
-			if (ocspVals != null)
-			{
-				m_ocspVals = DerSequence.FromVector(Asn1EncodableVector.FromEnumerable(ocspVals));
-			}
+        public RevocationValues(IReadOnlyCollection<CertificateList> crlVals,
+            IReadOnlyCollection<BasicOcspResponse> ocspVals, OtherRevVals otherRevVals)
+        {
+            if (crlVals != null)
+            {
+                m_crlVals = DerSequence.FromCollection(crlVals);
+            }
 
-			m_otherRevVals = otherRevVals;
-		}
+            if (ocspVals != null)
+            {
+                m_ocspVals = DerSequence.FromCollection(ocspVals);
+            }
 
-		public CertificateList[] GetCrlVals() => m_crlVals?.MapElements(CertificateList.GetInstance);
+            m_otherRevVals = otherRevVals;
+        }
 
-		public BasicOcspResponse[] GetOcspVals() => m_ocspVals?.MapElements(BasicOcspResponse.GetInstance);
+        public CertificateList[] GetCrlVals() => m_crlVals?.MapElements(CertificateList.GetInstance);
 
-		public OtherRevVals OtherRevVals => m_otherRevVals;
+        public BasicOcspResponse[] GetOcspVals() => m_ocspVals?.MapElements(BasicOcspResponse.GetInstance);
 
-		public override Asn1Object ToAsn1Object()
-		{
-			Asn1EncodableVector v = new Asn1EncodableVector(3);
+        public OtherRevVals OtherRevVals => m_otherRevVals;
+
+        public override Asn1Object ToAsn1Object()
+        {
+            Asn1EncodableVector v = new Asn1EncodableVector(3);
             v.AddOptionalTagged(true, 0, m_crlVals);
             v.AddOptionalTagged(true, 1, m_ocspVals);
             v.AddOptionalTagged(true, 2, m_otherRevVals);
             return DerSequence.FromVector(v);
-		}
-	}
+        }
+    }
 }

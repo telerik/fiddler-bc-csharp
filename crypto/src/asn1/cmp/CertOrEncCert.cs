@@ -7,46 +7,45 @@ namespace Org.BouncyCastle.Asn1.Cmp
 	public class CertOrEncCert
 		: Asn1Encodable, IAsn1Choice
 	{
-        public static CertOrEncCert GetInstance(object obj)
+        public static CertOrEncCert GetInstance(object obj) => Asn1Utilities.GetInstanceChoice(obj, GetOptional);
+
+        public static CertOrEncCert GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            Asn1Utilities.GetInstanceChoice(taggedObject, declaredExplicit, GetInstance);
+
+        public static CertOrEncCert GetOptional(Asn1Encodable element)
         {
-			if (obj == null)
-				return null;
-            if (obj is CertOrEncCert certOrEncCert)
+            if (element == null)
+                throw new ArgumentNullException(nameof(element));
+
+            if (element is CertOrEncCert certOrEncCert)
                 return certOrEncCert;
-            return new CertOrEncCert(Asn1TaggedObject.GetInstance(obj, Asn1Tags.ContextSpecific));
+
+            Asn1TaggedObject taggedObject = Asn1TaggedObject.GetOptional(element);
+            if (taggedObject != null)
+            {
+                if (taggedObject.HasContextTag(0))
+                    return new CertOrEncCert(CmpCertificate.GetInstance(taggedObject.GetExplicitBaseObject()));
+
+                if (taggedObject.HasContextTag(1))
+                    return new CertOrEncCert(EncryptedKey.GetInstance(taggedObject.GetExplicitBaseObject()));
+            }
+
+            return null;
         }
 
-        public static CertOrEncCert GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
-        {
-            return Asn1Utilities.GetInstanceFromChoice(taggedObject, declaredExplicit, GetInstance);
-        }
+        public static CertOrEncCert GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            Asn1Utilities.GetTaggedChoice(taggedObject, declaredExplicit, GetInstance);
 
         private readonly CmpCertificate m_certificate;
 		private readonly EncryptedKey m_encryptedCert;
-
-		private CertOrEncCert(Asn1TaggedObject taggedObject)
-		{
-			if (taggedObject.HasContextTag(0))
-			{
-				m_certificate = CmpCertificate.GetInstance(taggedObject.GetExplicitBaseObject());
-			}
-			else if (taggedObject.HasContextTag(1))
-			{
-                m_encryptedCert = EncryptedKey.GetInstance(taggedObject.GetExplicitBaseObject());
-			}
-			else
-			{
-				throw new ArgumentException("unknown tag: " + Asn1Utilities.GetTagText(taggedObject),
-					nameof(taggedObject));
-            }
-        }
 
 		public CertOrEncCert(CmpCertificate certificate)
 		{
 			m_certificate = certificate ?? throw new ArgumentNullException(nameof(certificate));
         }
 
-		public CertOrEncCert(EncryptedValue encryptedValue)
+        [Obsolete("Use constructor with EncryptedKey instead")]
+        public CertOrEncCert(EncryptedValue encryptedValue)
 		{
 			m_encryptedCert = new EncryptedKey(
 				encryptedValue ?? throw new ArgumentNullException(nameof(encryptedValue)));

@@ -29,14 +29,15 @@ namespace Org.BouncyCastle.Asn1.X509
      */
     public class V2TbsCertListGenerator
     {
-        private DerInteger			version = new DerInteger(1);
-        private AlgorithmIdentifier	signature;
-        private X509Name			issuer;
-        private Time				thisUpdate, nextUpdate;
-        private X509Extensions		extensions;
-        private List<Asn1Sequence>  crlEntries;
+        private DerInteger version = DerInteger.One;
+        private AlgorithmIdentifier signature;
+        private X509Name issuer;
+        private Time thisUpdate, nextUpdate;
+        // TODO[api] Eventually should be 'Extensions', but support X509Extensions for now
+        private Asn1Encodable m_extensions;
+        private List<Asn1Sequence> crlEntries;
 
-		public V2TbsCertListGenerator()
+        public V2TbsCertListGenerator()
         {
         }
 
@@ -126,40 +127,37 @@ namespace Org.BouncyCastle.Asn1.X509
 				}
 			}
 
-			if (extOids.Count != 0)
-			{
-				AddCrlEntry(userCertificate, revocationDate, new X509Extensions(extOids, extValues));
-			}
-			else
-			{
-				AddCrlEntry(userCertificate, revocationDate, null);
-			}
+            var extensions = extOids.Count < 1 ? null : new X509Extensions(extOids, extValues);
+
+            AddCrlEntry(userCertificate, revocationDate, extensions);
 		}
 
-		public void AddCrlEntry(DerInteger userCertificate, Time revocationDate, X509Extensions extensions)
-		{
-			Asn1EncodableVector v = new Asn1EncodableVector(userCertificate, revocationDate);
-
-			if (extensions != null)
-			{
-				v.Add(extensions);
-			}
-
-			AddCrlEntry(new DerSequence(v));
-		}
-
-		public void SetExtensions(X509Extensions extensions)
+        public void AddCrlEntry(DerInteger userCertificate, Time revocationDate, X509Extensions extensions)
         {
-            this.extensions = extensions;
+            Asn1EncodableVector v = new Asn1EncodableVector(userCertificate, revocationDate);
+            v.AddOptional(extensions);
+            AddCrlEntry(new DerSequence(v));
+        }
+
+        public void SetExtensions(X509Extensions extensions)
+        {
+            //SetExtensions(Extensions.GetInstance(extensions));
+            m_extensions = extensions;
+        }
+
+        public void SetExtensions(Extensions extensions)
+        {
+            m_extensions = extensions;
         }
 
         public Asn1Sequence GeneratePreTbsCertList()
         {
             if (signature != null)
-                throw new InvalidOperationException("signature should not be set in PreTBSCertList generator");
-
+                throw new InvalidOperationException("Signature should not be set in PreTBSCertList generator");
             if ((issuer == null) || (thisUpdate == null))
                 throw new InvalidOperationException("Not all mandatory fields set in V2 PreTBSCertList generator");
+            if (issuer.IsEmpty)
+                throw new InvalidOperationException("Issuer is an empty distinguished name");
 
             return GenerateTbsCertificateStructure();
         }
@@ -168,6 +166,8 @@ namespace Org.BouncyCastle.Asn1.X509
         {
             if ((signature == null) || (issuer == null) || (thisUpdate == null))
                 throw new InvalidOperationException("Not all mandatory fields set in V2 TbsCertList generator.");
+            if (issuer.IsEmpty)
+                throw new InvalidOperationException("Issuer is an empty distinguished name");
 
             return TbsCertificateList.GetInstance(GenerateTbsCertificateStructure());
         }
@@ -188,7 +188,7 @@ namespace Org.BouncyCastle.Asn1.X509
                 v.Add(new DerSequence(crlEntries.ToArray()));
             }
 
-            v.AddOptionalTagged(true, 0, extensions);
+            v.AddOptionalTagged(true, 0, m_extensions);
 
             return new DerSequence(v);
         }

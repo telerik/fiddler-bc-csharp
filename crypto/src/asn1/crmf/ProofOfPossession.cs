@@ -1,6 +1,4 @@
-﻿using System;
-
-using Org.BouncyCastle.Utilities;
+using System;
 
 namespace Org.BouncyCastle.Asn1.Crmf
 {
@@ -12,53 +10,71 @@ namespace Org.BouncyCastle.Asn1.Crmf
         public const int TYPE_KEY_ENCIPHERMENT = 2;
         public const int TYPE_KEY_AGREEMENT = 3;
 
-        private readonly int tagNo;
-        private readonly Asn1Encodable obj;
+        public static ProofOfPossession GetInstance(object obj) => Asn1Utilities.GetInstanceChoice(obj, GetOptional);
 
-        private ProofOfPossession(Asn1TaggedObject tagged)
-        {
-            tagNo = tagged.TagNo;
-            switch (tagNo)
-            {
-            case 0:
-                obj = DerNull.Instance;
-                break;
-            case 1:
-                obj = PopoSigningKey.GetInstance(tagged, false);
-                break;
-            case 2:
-            case 3:
-                // CHOICE so explicit
-                obj = PopoPrivKey.GetInstance(tagged, true);
-                break;
-            default:
-                throw new ArgumentException("unknown tag: " + tagNo, "tagged");
-            }
-        }
+        public static ProofOfPossession GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            Asn1Utilities.GetInstanceChoice(taggedObject, declaredExplicit, GetInstance);
 
-        public static ProofOfPossession GetInstance(object obj)
+        public static ProofOfPossession GetOptional(Asn1Encodable element)
         {
-            if (obj is ProofOfPossession proofOfPossession)
+            if (element == null)
+                throw new ArgumentNullException(nameof(element));
+
+            if (element is ProofOfPossession proofOfPossession)
                 return proofOfPossession;
 
-            if (obj is Asn1TaggedObject taggedObject)
-                return new ProofOfPossession(taggedObject);
+            Asn1TaggedObject taggedObject = Asn1TaggedObject.GetOptional(element);
+            if (taggedObject != null)
+            {
+                Asn1Encodable baseObject = GetOptionalBaseObject(taggedObject);
+                if (baseObject != null)
+                    return new ProofOfPossession(taggedObject.TagNo, baseObject);
+            }
 
-            throw new ArgumentException("Invalid object: " + Platform.GetTypeName(obj), "obj");
+            return null;
+        }
+
+        public static ProofOfPossession GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            Asn1Utilities.GetTaggedChoice(taggedObject, declaredExplicit, GetInstance);
+
+        private static Asn1Encodable GetOptionalBaseObject(Asn1TaggedObject taggedObject)
+        {
+            if (taggedObject.HasContextTag())
+            {
+                switch (taggedObject.TagNo)
+                {
+                case 0:
+                    return Asn1Null.GetTagged(taggedObject, false);
+                case 1:
+                    return PopoSigningKey.GetTagged(taggedObject, false);
+                case 2:
+                case 3:
+                    // CHOICE so explicit
+                    return PopoPrivKey.GetTagged(taggedObject, true);
+                }
+            }
+            return null;
+        }
+
+        private readonly int m_tagNo;
+        private readonly Asn1Encodable m_obj;
+
+        private ProofOfPossession(int tagNo, Asn1Encodable obj)
+        {
+            m_tagNo = tagNo;
+            m_obj = obj ?? throw new ArgumentNullException(nameof(obj));
         }
 
         /** Creates a ProofOfPossession with type raVerified. */
         public ProofOfPossession()
+            : this(TYPE_RA_VERIFIED, DerNull.Instance)
         {
-            tagNo = TYPE_RA_VERIFIED;
-            obj = DerNull.Instance;
         }
 
         /** Creates a ProofOfPossession for a signing key. */
         public ProofOfPossession(PopoSigningKey Poposk)
+            : this(TYPE_SIGNING_KEY, Poposk)
         {
-            tagNo = TYPE_SIGNING_KEY;
-            obj = Poposk;
         }
 
         /**
@@ -66,20 +82,13 @@ namespace Org.BouncyCastle.Asn1.Crmf
          * @param type one of TYPE_KEY_ENCIPHERMENT or TYPE_KEY_AGREEMENT
          */
         public ProofOfPossession(int type, PopoPrivKey privkey)
+            : this(type, (Asn1Encodable)privkey)
         {
-            tagNo = type;
-            obj = privkey;
         }
 
-        public virtual int Type
-        {
-            get { return tagNo; }
-        }
+        public virtual int Type => m_tagNo;
 
-        public virtual Asn1Encodable Object
-        {
-            get { return obj; }
-        }
+        public virtual Asn1Encodable Object => m_obj;
 
         /**
          * <pre>
@@ -95,7 +104,8 @@ namespace Org.BouncyCastle.Asn1.Crmf
          */
         public override Asn1Object ToAsn1Object()
         {
-            return new DerTaggedObject(false, tagNo, obj);
+            // NOTE: Explicit tagging automatically applied for PopoPrivKey (a CHOICE)
+            return new DerTaggedObject(false, m_tagNo, m_obj);
         }
     }
 }

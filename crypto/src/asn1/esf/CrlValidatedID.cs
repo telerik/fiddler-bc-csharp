@@ -22,26 +22,26 @@ namespace Org.BouncyCastle.Asn1.Esf
             return new CrlValidatedID(Asn1Sequence.GetInstance(obj));
         }
 
-        public static CrlValidatedID GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
-        {
-            return new CrlValidatedID(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
-        }
+        public static CrlValidatedID GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new CrlValidatedID(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
+
+        public static CrlValidatedID GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new CrlValidatedID(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
         private readonly OtherHash m_crlHash;
         private readonly CrlIdentifier m_crlIdentifier;
 
         private CrlValidatedID(Asn1Sequence seq)
 		{
-			int count = seq.Count;
+			int count = seq.Count, pos = 0;
 			if (count < 1 || count > 2)
 				throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
 
-			m_crlHash = OtherHash.GetInstance(seq[0]);
+			m_crlHash = Asn1Utilities.Read(seq, ref pos, OtherHash.GetInstance);
+			m_crlIdentifier = Asn1Utilities.ReadOptional(seq, ref pos, CrlIdentifier.GetOptional);
 
-			if (count > 1)
-			{
-				m_crlIdentifier = CrlIdentifier.GetInstance(seq[1]);
-			}
+			if (pos != count)
+				throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
 		}
 
 		public CrlValidatedID(OtherHash crlHash)

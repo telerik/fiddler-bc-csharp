@@ -6,6 +6,7 @@ using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Crypto.Signers
 {
+    // TODO[api] Make sealed (no need for protected virtual methods)
     public class StandardDsaEncoding
         : IDsaEncoding
     {
@@ -13,7 +14,7 @@ namespace Org.BouncyCastle.Crypto.Signers
 
         public virtual BigInteger[] Decode(BigInteger n, byte[] encoding)
         {
-            Asn1Sequence seq = (Asn1Sequence)Asn1Object.FromByteArray(encoding);
+            Asn1Sequence seq = Asn1Sequence.GetInstance(encoding);
             if (seq.Count == 2)
             {
                 BigInteger r = DecodeValue(n, seq, 0);

@@ -1,6 +1,5 @@
 using System;
 
-using Org.BouncyCastle.Asn1;
 using Org.BouncyCastle.Asn1.Oiw;
 using Org.BouncyCastle.Asn1.Pkcs;
 
@@ -23,60 +22,62 @@ namespace Org.BouncyCastle.Asn1.Smime
         public static readonly DerObjectIdentifier DesEde3Cbc = PkcsObjectIdentifiers.DesEde3Cbc;
         public static readonly DerObjectIdentifier RC2Cbc = PkcsObjectIdentifiers.RC2Cbc;
 
-		private DerObjectIdentifier capabilityID;
-        private Asn1Object			parameters;
-
-		public SmimeCapability(
-            Asn1Sequence seq)
+        public static SmimeCapability GetInstance(object obj)
         {
-            capabilityID = (DerObjectIdentifier) seq[0].ToAsn1Object();
-
-			if (seq.Count > 1)
-            {
-                parameters = seq[1].ToAsn1Object();
-            }
+            if (obj == null)
+                return null;
+            if (obj is SmimeCapability smimeCapability)
+                return smimeCapability;
+#pragma warning disable CS0618 // Type or member is obsolete
+            return new SmimeCapability(Asn1Sequence.GetInstance(obj));
+#pragma warning restore CS0618 // Type or member is obsolete
         }
 
-		public SmimeCapability(
-            DerObjectIdentifier	capabilityID,
-            Asn1Encodable		parameters)
+        public static SmimeCapability GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
         {
-			if (capabilityID == null)
-				throw new ArgumentNullException("capabilityID");
-
-			this.capabilityID = capabilityID;
-
-			if (parameters != null)
-			{
-				this.parameters = parameters.ToAsn1Object();
-			}
+#pragma warning disable CS0618 // Type or member is obsolete
+            return new SmimeCapability(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
+#pragma warning restore CS0618 // Type or member is obsolete
         }
 
-		public static SmimeCapability GetInstance(
-            object obj)
+        public static SmimeCapability GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit)
         {
-            if (obj == null || obj is SmimeCapability)
-            {
-                return (SmimeCapability) obj;
-            }
-
-			if (obj is Asn1Sequence)
-            {
-                return new SmimeCapability((Asn1Sequence) obj);
-            }
-
-			throw new ArgumentException("Invalid SmimeCapability");
+#pragma warning disable CS0618 // Type or member is obsolete
+            return new SmimeCapability(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
+#pragma warning restore CS0618 // Type or member is obsolete
         }
 
-		public DerObjectIdentifier CapabilityID
-		{
-			get { return capabilityID; }
-		}
+        private readonly DerObjectIdentifier m_capabilityID;
+        private readonly Asn1Encodable m_parameters;
 
-		public Asn1Object Parameters
-		{
-			get { return parameters; }
-		}
+        [Obsolete("Use 'GetInstance' instead")]
+        public SmimeCapability(Asn1Sequence seq)
+        {
+            if (seq == null)
+                throw new ArgumentNullException(nameof(seq));
+
+            int count = seq.Count, pos = 0;
+            if (count < 1 || count > 2)
+                throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
+
+            m_capabilityID = Asn1Utilities.Read(seq, ref pos, DerObjectIdentifier.GetInstance);
+            // TODO[asn1] Asn1Utilities helper method for this type of situation
+            m_parameters = Asn1Utilities.ReadOptional(seq, ref pos, element => element);
+
+            if (pos != count)
+                throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
+        }
+
+        public SmimeCapability(DerObjectIdentifier capabilityID, Asn1Encodable parameters)
+        {
+            m_capabilityID = capabilityID ?? throw new ArgumentNullException(nameof(capabilityID));
+            m_parameters = parameters;
+        }
+
+        public DerObjectIdentifier CapabilityID => m_capabilityID;
+
+        // TODO[api] return Asn1Encodable
+        public Asn1Object Parameters => m_parameters?.ToAsn1Object();
 
 		/**
          * Produce an object suitable for an Asn1OutputStream.
@@ -89,9 +90,9 @@ namespace Org.BouncyCastle.Asn1.Smime
          */
         public override Asn1Object ToAsn1Object()
         {
-            Asn1EncodableVector v = new Asn1EncodableVector(capabilityID);
-            v.AddOptional(parameters);
-            return new DerSequence(v);
+            return m_parameters == null
+                ?  new DerSequence(m_capabilityID)
+                :  new DerSequence(m_capabilityID, m_parameters);
         }
     }
 }

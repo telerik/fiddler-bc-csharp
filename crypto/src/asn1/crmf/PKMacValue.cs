@@ -1,4 +1,6 @@
-﻿using Org.BouncyCastle.Asn1.Cmp;
+﻿using System;
+
+using Org.BouncyCastle.Asn1.Cmp;
 using Org.BouncyCastle.Asn1.X509;
 
 namespace Org.BouncyCastle.Asn1.Crmf
@@ -18,18 +20,41 @@ namespace Org.BouncyCastle.Asn1.Crmf
             return new PKMacValue(Asn1Sequence.GetInstance(obj));
         }
 
-        public static PKMacValue GetInstance(Asn1TaggedObject obj, bool isExplicit)
+        public static PKMacValue GetInstance(Asn1TaggedObject obj, bool isExplicit) =>
+            new PKMacValue(Asn1Sequence.GetInstance(obj, isExplicit));
+
+        public static PKMacValue GetOptional(Asn1Encodable element)
         {
-            return new PKMacValue(Asn1Sequence.GetInstance(obj, isExplicit));
+            if (element == null)
+                throw new ArgumentNullException(nameof(element));
+
+            if (element is PKMacValue pkMacValue)
+                return pkMacValue;
+
+            Asn1Sequence asn1Sequence = Asn1Sequence.GetOptional(element);
+            if (asn1Sequence != null)
+                return new PKMacValue(asn1Sequence);
+
+            return null;
         }
+
+        public static PKMacValue GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new PKMacValue(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
         private readonly AlgorithmIdentifier m_algID;
         private readonly DerBitString m_macValue;
 
         private PKMacValue(Asn1Sequence seq)
         {
-            m_algID = AlgorithmIdentifier.GetInstance(seq[0]);
-            m_macValue = DerBitString.GetInstance(seq[1]);
+            int count = seq.Count, pos = 0;
+            if (count != 2)
+                throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
+
+            m_algID = Asn1Utilities.Read(seq, ref pos, AlgorithmIdentifier.GetInstance);
+            m_macValue = Asn1Utilities.Read(seq, ref pos, DerBitString.GetInstance);
+
+            if (pos != count)
+                throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
         }
 
         /**

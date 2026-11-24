@@ -1,111 +1,123 @@
 using System;
 using System.IO;
 
-using Org.BouncyCastle.Math;
+using Org.BouncyCastle.Crypto.Utilities;
 using Org.BouncyCastle.Utilities;
 using Org.BouncyCastle.Utilities.IO;
 
 namespace Org.BouncyCastle.Bcpg
 {
-	/// <remarks>Basic packet for a PGP public key.</remarks>
-	public class PublicKeyEncSessionPacket
-		: ContainedPacket //, PublicKeyAlgorithmTag
-	{
-		private int version;
-		private long keyId;
-		private PublicKeyAlgorithmTag algorithm;
-        private byte[][] data;
+    /// <summary>Basic packet for a PGP public key.</summary>
+    public class PublicKeyEncSessionPacket
+        : ContainedPacket //, PublicKeyAlgorithmTag
+    {
+        /// <summary>Version 3 PKESK packet.</summary>
+        /// <remarks>
+        /// Used only with <see cref="SymmetricEncIntegrityPacket.Version1">V1 SEIPD</see> or
+        /// <see cref="SymmetricEncDataPacket">SED</see> packets.
+        /// </remarks>
+        public const int Version3 = 3;
 
-		internal PublicKeyEncSessionPacket(
-			BcpgInputStream bcpgIn)
-		{
-			version = bcpgIn.ReadByte();
+        /// <summary>Version 6 PKESK packet.</summary>
+        /// <remarks>
+        /// Used only with <see cref="SymmetricEncIntegrityPacket.Version2">V2 SEIPD</see> packets.
+        /// </remarks>
+        public const int Version6 = 6;
 
-			keyId |= (long)bcpgIn.ReadByte() << 56;
-			keyId |= (long)bcpgIn.ReadByte() << 48;
-			keyId |= (long)bcpgIn.ReadByte() << 40;
-			keyId |= (long)bcpgIn.ReadByte() << 32;
-			keyId |= (long)bcpgIn.ReadByte() << 24;
-			keyId |= (long)bcpgIn.ReadByte() << 16;
-			keyId |= (long)bcpgIn.ReadByte() << 8;
-			keyId |= (uint)bcpgIn.ReadByte();
+        private readonly int m_version;
+        private readonly ulong m_keyID;
+        private readonly PublicKeyAlgorithmTag m_algorithm;
+        private readonly byte[][] m_data;
 
-			algorithm = (PublicKeyAlgorithmTag) bcpgIn.ReadByte();
+        internal PublicKeyEncSessionPacket(BcpgInputStream bcpgIn)
+            : this(bcpgIn, newPacketFormat: false)
+        {
+        }
 
-			switch ((PublicKeyAlgorithmTag) algorithm)
-			{
-				case PublicKeyAlgorithmTag.RsaEncrypt:
-				case PublicKeyAlgorithmTag.RsaGeneral:
-					data = new byte[][]{ new MPInteger(bcpgIn).GetEncoded() };
-					break;
-				case PublicKeyAlgorithmTag.ElGamalEncrypt:
-				case PublicKeyAlgorithmTag.ElGamalGeneral:
-                    MPInteger p = new MPInteger(bcpgIn);
-                    MPInteger g = new MPInteger(bcpgIn);
-					data = new byte[][]{
-                        p.GetEncoded(),
-                        g.GetEncoded(),
-                    };
-					break;
-                case PublicKeyAlgorithmTag.ECDH:
-                    data = new byte[][]{ Streams.ReadAll(bcpgIn) };
-                    break;
-				default:
-					throw new IOException("unknown PGP public key algorithm encountered");
-			}
-		}
+        internal PublicKeyEncSessionPacket(BcpgInputStream bcpgIn, bool newPacketFormat)
+            : base(PacketTag.PublicKeyEncryptedSession, newPacketFormat)
+        {
+            m_version = bcpgIn.RequireByte();
+            m_keyID = StreamUtilities.RequireUInt64BE(bcpgIn);
+            m_algorithm = (PublicKeyAlgorithmTag)bcpgIn.RequireByte();
 
-        public PublicKeyEncSessionPacket(
-			long                    keyId,
-			PublicKeyAlgorithmTag   algorithm,
-			byte[][]                data)
-		{
-			this.version = 3;
-			this.keyId = keyId;
-			this.algorithm = algorithm;
-            this.data = new byte[data.Length][];
+            switch (m_algorithm)
+            {
+            case PublicKeyAlgorithmTag.RsaEncrypt:
+            case PublicKeyAlgorithmTag.RsaGeneral:
+                m_data = new byte[][]{ new MPInteger(bcpgIn).GetEncoded() };
+                break;
+            case PublicKeyAlgorithmTag.ElGamalEncrypt:
+            case PublicKeyAlgorithmTag.ElGamalGeneral:
+                MPInteger p = new MPInteger(bcpgIn);
+                MPInteger g = new MPInteger(bcpgIn);
+                m_data = new byte[][]{
+                    p.GetEncoded(),
+                    g.GetEncoded(),
+                };
+                break;
+            case PublicKeyAlgorithmTag.ECDH:
+                m_data = new byte[][]{ Streams.ReadAll(bcpgIn) };
+                break;
+            default:
+                throw new IOException("unknown PGP public key algorithm encountered");
+            }
+        }
+
+        public PublicKeyEncSessionPacket(long keyId, PublicKeyAlgorithmTag algorithm, byte[][] data)
+            : base(PacketTag.PublicKeyEncryptedSession)
+        {
+            m_version = 3;
+            m_keyID = (ulong)keyId;
+            m_algorithm = algorithm;
+            m_data = new byte[data.Length][];
             for (int i = 0; i < data.Length; ++i)
             {
-                this.data[i] = Arrays.Clone(data[i]);
+                m_data[i] = Arrays.Clone(data[i]);
             }
-		}
+        }
 
-        public int Version
-		{
-			get { return version; }
-		}
+        public int Version => m_version;
 
-		public long KeyId
-		{
-			get { return keyId; }
-		}
+        /// <remarks>
+        /// A Key ID is an 8-octet scalar. We convert it (big-endian) to an Int64 (UInt64 is not CLS compliant).
+        /// </remarks>
+        public long KeyId => (long)m_keyID;
 
-		public PublicKeyAlgorithmTag Algorithm
-		{
-			get { return algorithm; }
-		}
+        public PublicKeyAlgorithmTag Algorithm => m_algorithm;
 
-        public byte[][] GetEncSessionKey()
-		{
-			return data;
-		}
+        public byte[][] GetEncSessionKey() => m_data;
 
         public override void Encode(BcpgOutputStream bcpgOut)
-		{
-			MemoryStream bOut = new MemoryStream();
-			using (var pOut = new BcpgOutputStream(bOut))
-			{
-				pOut.WriteByte((byte)version);
-				pOut.WriteLong(keyId);
-				pOut.WriteByte((byte)algorithm);
+        {
+            uint bodyLength = 1U + 8U + 1U;
+            foreach (var data in m_data)
+            {
+                bodyLength += (uint)data.Length;
+            }
 
-				for (int i = 0; i < data.Length; ++i)
-				{
-					pOut.Write(data[i]);
-				}
-			}
+            bcpgOut.WritePacketHeader(HasNewPacketFormat, PacketTag.PublicKeyEncryptedSession, bodyLength);
 
-			bcpgOut.WritePacket(PacketTag.PublicKeyEncryptedSession, bOut.ToArray());
-		}
-	}
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+            Span<byte> body = stackalloc byte[10];
+#else
+            byte[] body = new byte[10];
+#endif
+
+            body[0] = (byte)m_version;
+            Pack.UInt64_To_BE(m_keyID, body, 1);
+            body[9] = (byte)m_algorithm;
+
+            bcpgOut.Write(body);
+
+            foreach (var data in m_data)
+            {
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+                bcpgOut.Write(data.AsSpan());
+#else
+                bcpgOut.Write(data, 0, data.Length);
+#endif
+            }
+        }
+    }
 }

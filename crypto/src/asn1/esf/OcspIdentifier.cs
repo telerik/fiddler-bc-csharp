@@ -28,22 +28,26 @@ namespace Org.BouncyCastle.Asn1.Esf
 			return new OcspIdentifier(Asn1Sequence.GetInstance(obj));
 		}
 
-        public static OcspIdentifier GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
-        {
-            return new OcspIdentifier(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
-        }
+        public static OcspIdentifier GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new OcspIdentifier(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
+
+        public static OcspIdentifier GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new OcspIdentifier(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
         private readonly ResponderID m_ocspResponderID;
         private readonly Asn1GeneralizedTime m_producedAt;
 
         private OcspIdentifier(Asn1Sequence seq)
 		{
-			int count = 2;
+			int count = seq.Count, pos = 0;
 			if (count != 2)
 				throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
 
-			m_ocspResponderID = ResponderID.GetInstance(seq[0]);
-			m_producedAt = Asn1GeneralizedTime.GetInstance(seq[1]);
+			m_ocspResponderID = Asn1Utilities.Read(seq, ref pos, ResponderID.GetInstance);
+			m_producedAt = Asn1Utilities.Read(seq, ref pos, Asn1GeneralizedTime.GetInstance);
+
+			if (pos != count)
+				throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
 		}
 
 		public OcspIdentifier(ResponderID ocspResponderID, DateTime producedAt)

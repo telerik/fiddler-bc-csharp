@@ -3,33 +3,28 @@ using System.Collections.Generic;
 
 using NUnit.Framework;
 
-using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Tls.Crypto;
-using Org.BouncyCastle.Tls.Crypto.Impl.BC;
-using Org.BouncyCastle.X509;
 
 namespace Org.BouncyCastle.Tls.Tests
 {
     internal class MockRawKeysTlsServer
         : DefaultTlsServer
     {
-        private short m_serverCertType;
-        private short m_clientCertType;
-        private short[] m_allowedClientCertTypes;
-        private Ed25519PrivateKeyParameters m_privateKey;
-        private ProtocolVersion m_tlsVersion;
-        private TlsCredentialedSigner m_credentials;
+        private readonly short m_serverCertType;
+        private readonly short m_clientCertType;
+        private readonly short[] m_allowedClientCertTypes;
+        private readonly ProtocolVersion m_tlsVersion;
 
+        private TlsCredentialedSigner m_credentials;
         internal IDictionary<int, byte[]> m_receivedClientExtensions;
 
-        internal MockRawKeysTlsServer(short serverCertType, short clientCertType, short[] allowedClientCertTypes,
-            Ed25519PrivateKeyParameters privateKey, ProtocolVersion tlsVersion)
-            : base(new BcTlsCrypto())
+        internal MockRawKeysTlsServer(TlsCrypto crypto, short serverCertType, short clientCertType,
+            short[] allowedClientCertTypes, ProtocolVersion tlsVersion)
+            : base(crypto)
         {
             m_serverCertType = serverCertType;
             m_clientCertType = clientCertType;
             m_allowedClientCertTypes = allowedClientCertTypes;
-            m_privateKey = privateKey;
             m_tlsVersion = tlsVersion;
         }
 
@@ -68,8 +63,6 @@ namespace Org.BouncyCastle.Tls.Tests
         {
             if (m_credentials == null)
             {
-                var crypto = (BcTlsCrypto)Crypto;
-
                 switch (m_serverCertType)
                 {
                 case CertificateType.X509:
@@ -78,13 +71,7 @@ namespace Org.BouncyCastle.Tls.Tests
                         "x509-client-ed25519.pem", "x509-client-key-ed25519.pem");
                     break;
                 case CertificateType.RawPublicKey:
-                    TlsCertificate rawKeyCert = new BcTlsRawKeyCertificate(crypto,
-                        SubjectPublicKeyInfoFactory.CreateSubjectPublicKeyInfo(m_privateKey.GeneratePublicKey()));
-                    Certificate cert = new Certificate(CertificateType.RawPublicKey,
-                        TlsUtilities.IsTlsV13(m_context) ? TlsUtilities.EmptyBytes : null,
-                        new CertificateEntry[]{ new CertificateEntry(rawKeyCert, null) });
-                    m_credentials = new BcDefaultTlsCredentialedSigner(new TlsCryptoParameters(m_context),
-                        crypto, m_privateKey, cert, SignatureAndHashAlgorithm.ed25519);
+                    m_credentials = TlsTestUtilities.CreateRawKeyEd25519Credentials(m_context);
                     break;
                 default:
                     throw new ArgumentException("Only supports X509 and raw keys");
@@ -96,15 +83,11 @@ namespace Org.BouncyCastle.Tls.Tests
 
         protected override short[] GetAllowedClientCertificateTypes() => m_allowedClientCertTypes;
 
-        protected override bool AllowCertificateStatus()
-        {
-            return m_serverCertType == CertificateType.RawPublicKey ? false : base.AllowCertificateStatus();
-        }
+        protected override bool AllowCertificateStatus() =>
+            m_serverCertType != CertificateType.RawPublicKey && base.AllowCertificateStatus();
 
-        protected override bool AllowMultiCertStatus()
-        {
-            return m_serverCertType == CertificateType.RawPublicKey ? false : base.AllowMultiCertStatus();
-        }
+        protected override bool AllowMultiCertStatus() =>
+            m_serverCertType != CertificateType.RawPublicKey && base.AllowMultiCertStatus();
 
         public override CertificateRequest GetCertificateRequest()
         {

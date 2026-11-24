@@ -1,6 +1,3 @@
-using System;
-
-using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Math;
 using Org.BouncyCastle.Math.EC.Multiplier;
@@ -130,8 +127,8 @@ namespace Org.BouncyCastle.Crypto.Generators
                 BigInteger qInv = BigIntegers.ModOddInverse(p, q);
 
                 return new AsymmetricCipherKeyPair(
-                    new RsaKeyParameters(false, n, e),
-                    new RsaPrivateCrtKeyParameters(n, e, d, p, q, dP, dQ, qInv));
+                    new RsaKeyParameters(isPrivate: false, n, e, isInternal: true),
+                    new RsaPrivateCrtKeyParameters(n, e, d, p, q, dP, dQ, qInv, isInternal: true));
             }
         }
 
@@ -145,7 +142,7 @@ namespace Org.BouncyCastle.Crypto.Generators
 
             for (;;)
             {
-                BigInteger p = new BigInteger(bitlength, 1, parameters.Random);
+                BigInteger p = BigIntegers.CreateRandomPrime(bitlength, 1, parameters.Random);
 
                 if (p.Mod(e).Equals(One))
                     continue;

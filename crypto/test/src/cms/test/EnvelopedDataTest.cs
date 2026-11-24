@@ -3,14 +3,13 @@ using System.Collections.Generic;
 using System.Text;
 
 using NUnit.Framework;
+
 using Org.BouncyCastle.Asn1;
-using Org.BouncyCastle.Asn1.CryptoPro;
 using Org.BouncyCastle.Asn1.Kisa;
 using Org.BouncyCastle.Asn1.Nist;
 using Org.BouncyCastle.Asn1.Ntt;
 using Org.BouncyCastle.Asn1.Oiw;
 using Org.BouncyCastle.Asn1.Pkcs;
-using Org.BouncyCastle.Asn1.Rosstandart;
 using Org.BouncyCastle.Asn1.X509;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Operators;
@@ -22,75 +21,95 @@ using Org.BouncyCastle.X509;
 
 namespace Org.BouncyCastle.Cms.Tests
 {
-	[TestFixture]
-	public class EnvelopedDataTest
-	{
-		private const string SignDN = "O=Bouncy Castle, C=AU";
+    [TestFixture]
+    [Parallelizable(ParallelScope.All)]
+    public class EnvelopedDataTest
+    {
+        private const string SignDN = "O=Bouncy Castle, C=AU";
 
-		private static AsymmetricCipherKeyPair signKP;
-//		private static X509Certificate signCert;
-		//signCert = CmsTestUtil.MakeCertificate(_signKP, SignDN, _signKP, SignDN);
+        private static AsymmetricCipherKeyPair signKP;
+        private static X509Certificate signCert;
 
-//		private const string OrigDN = "CN=Bob, OU=Sales, O=Bouncy Castle, C=AU";
+        private const string OrigDN = "CN=Bob, OU=Sales, O=Bouncy Castle, C=AU";
 
-//		private static AsymmetricCipherKeyPair origKP;
-		//origKP = CmsTestUtil.MakeKeyPair();
-//		private static X509Certificate origCert;
-		//origCert = CmsTestUtil.MakeCertificate(_origKP, OrigDN, _signKP, SignDN);
+        private static AsymmetricCipherKeyPair origKP;
+        private static X509Certificate origCert;
 
-		private const string ReciDN = "CN=Doug, OU=Sales, O=Bouncy Castle, C=AU";
-		private const string ReciDN2 = "CN=Fred, OU=Sales, O=Bouncy Castle, C=AU";
+        private const string ReciDN = "CN=Doug, OU=Sales, O=Bouncy Castle, C=AU";
+        private const string ReciDN2 = "CN=Fred, OU=Sales, O=Bouncy Castle, C=AU";
 
-		private static AsymmetricCipherKeyPair reciKP;
-		private static X509Certificate reciCert;
+        private static AsymmetricCipherKeyPair reciKP;
+        private static X509Certificate reciCert;
 
-		private static AsymmetricCipherKeyPair origECKP;
-		private static AsymmetricCipherKeyPair reciECKP;
-		private static X509Certificate reciECCert;
-		private static AsymmetricCipherKeyPair reciECKP2;
-		private static X509Certificate reciECCert2;
+        private static AsymmetricCipherKeyPair reciKP_2048;
+        private static X509Certificate reciCert_2048;
 
-		private static AsymmetricCipherKeyPair SignKP
-		{
-			get { return signKP == null ? (signKP = CmsTestUtil.MakeKeyPair()) : signKP; }
-		}
+        private static AsymmetricCipherKeyPair origECKP;
+        private static AsymmetricCipherKeyPair reciECKP;
+        private static X509Certificate reciECCert;
+        private static AsymmetricCipherKeyPair reciECKP2;
+        private static X509Certificate reciECCert2;
+        private static AsymmetricCipherKeyPair reciMLKem512KP;
+        private static X509Certificate reciMLKem512Cert;
+        private static AsymmetricCipherKeyPair reciMLKem768KP;
+        private static X509Certificate reciMLKem768Cert;
+        private static AsymmetricCipherKeyPair reciMLKem1024KP;
+        private static X509Certificate reciMLKem1024Cert;
 
-		private static AsymmetricCipherKeyPair ReciKP
-		{
-			get { return reciKP == null ? (reciKP = CmsTestUtil.MakeKeyPair()) : reciKP; }
-		}
+        private static AsymmetricCipherKeyPair OrigECKP =>
+            CmsTestUtil.InitKP(ref origECKP, CmsTestUtil.MakeECDsaKeyPair);
 
-		private static X509Certificate ReciCert
-		{
-			get { return reciCert == null ? (reciCert = CmsTestUtil.MakeCertificate(ReciKP, ReciDN, SignKP, SignDN)) : reciCert; }
-		}
+        private static AsymmetricCipherKeyPair OrigKP => CmsTestUtil.InitKP(ref origKP, CmsTestUtil.MakeKeyPair);
 
-		private static AsymmetricCipherKeyPair OrigECKP
-		{
-			get { return origECKP == null ? (origECKP = CmsTestUtil.MakeECDsaKeyPair()) : origECKP; }
-		}
+        private static AsymmetricCipherKeyPair ReciKP => CmsTestUtil.InitKP(ref reciKP, CmsTestUtil.MakeKeyPair);
 
-		private static AsymmetricCipherKeyPair ReciECKP
-		{
-			get { return reciECKP == null ? (reciECKP = CmsTestUtil.MakeECDsaKeyPair()) : reciECKP; }
-		}
+        private static AsymmetricCipherKeyPair ReciKP_2048 => CmsTestUtil.InitKP(ref reciKP_2048, CmsTestUtil.MakeKeyPair_2048);
 
-		private static X509Certificate ReciECCert
-		{
-			get { return reciECCert == null ? (reciECCert = CmsTestUtil.MakeCertificate(ReciECKP, ReciDN, SignKP, SignDN)) : reciECCert; }
-		}
+        private static AsymmetricCipherKeyPair ReciECKP =>
+            CmsTestUtil.InitKP(ref reciECKP, CmsTestUtil.MakeECDsaKeyPair);
 
-		private static AsymmetricCipherKeyPair ReciECKP2
-		{
-			get { return reciECKP2 == null ? (reciECKP2 = CmsTestUtil.MakeECDsaKeyPair()) : reciECKP2; }
-		}
+        private static AsymmetricCipherKeyPair ReciMLKem512KP =>
+            CmsTestUtil.InitKP(ref reciMLKem512KP, CmsTestUtil.MakeMLKem512KeyPair);
 
-		private static X509Certificate ReciECCert2
-		{
-			get { return reciECCert2 == null ? (reciECCert2 = CmsTestUtil.MakeCertificate(ReciECKP2, ReciDN2, SignKP, SignDN)) : reciECCert2; }
-		}
+        private static AsymmetricCipherKeyPair ReciMLKem768KP =>
+            CmsTestUtil.InitKP(ref reciMLKem768KP, CmsTestUtil.MakeMLKem768KeyPair);
 
-		private static readonly byte[] oldKEK = Base64.Decode(
+        private static AsymmetricCipherKeyPair ReciMLKem1024KP =>
+            CmsTestUtil.InitKP(ref reciMLKem1024KP, CmsTestUtil.MakeMLKem1024KeyPair);
+
+        private static AsymmetricCipherKeyPair ReciECKP2 =>
+            CmsTestUtil.InitKP(ref reciECKP2, CmsTestUtil.MakeECDsaKeyPair);
+
+        private static AsymmetricCipherKeyPair SignKP => CmsTestUtil.InitKP(ref signKP, CmsTestUtil.MakeKeyPair);
+
+        private static X509Certificate OrigCert => CmsTestUtil.InitCertificate(ref origCert,
+            () => CmsTestUtil.MakeCertificate(OrigKP, OrigDN, SignKP, SignDN));
+
+        private static X509Certificate ReciCert => CmsTestUtil.InitCertificate(ref reciCert,
+            () => CmsTestUtil.MakeCertificate(ReciKP, ReciDN, SignKP, SignDN));
+
+        private static X509Certificate ReciCert_2048 => CmsTestUtil.InitCertificate(ref reciCert_2048,
+            () => CmsTestUtil.MakeCertificate(ReciKP_2048, ReciDN, SignKP, SignDN));
+
+        private static X509Certificate ReciECCert => CmsTestUtil.InitCertificate(ref reciECCert,
+            () => CmsTestUtil.MakeCertificate(ReciECKP, ReciDN, SignKP, SignDN));
+
+        private static X509Certificate ReciECCert2 => CmsTestUtil.InitCertificate(ref reciECCert2,
+            () => CmsTestUtil.MakeCertificate(ReciECKP2, ReciDN2, SignKP, SignDN));
+
+        private static X509Certificate ReciMLKem512Cert => CmsTestUtil.InitCertificate(ref reciMLKem512Cert,
+            () => CmsTestUtil.MakeCertificate(ReciMLKem512KP, ReciDN, SignKP, SignDN));
+
+        private static X509Certificate ReciMLKem768Cert => CmsTestUtil.InitCertificate(ref reciMLKem768Cert,
+            () => CmsTestUtil.MakeCertificate(ReciMLKem768KP, ReciDN, SignKP, SignDN));
+
+        private static X509Certificate ReciMLKem1024Cert => CmsTestUtil.InitCertificate(ref reciMLKem1024Cert,
+            () => CmsTestUtil.MakeCertificate(ReciMLKem1024KP, ReciDN, SignKP, SignDN));
+
+        private static X509Certificate SignCert => CmsTestUtil.InitCertificate(ref signCert,
+            () => CmsTestUtil.MakeCertificate(SignKP, SignDN, SignKP, SignDN));
+
+        private static readonly byte[] oldKEK = Base64.Decode(
 			"MIAGCSqGSIb3DQEHA6CAMIACAQIxQaI/MD0CAQQwBwQFAQIDBAUwDQYJYIZIAWUDBAEFBQAEI"
 			+ "Fi2eHTPM4bQSjP4DUeDzJZLpfemW2gF1SPq7ZPHJi1mMIAGCSqGSIb3DQEHATAUBggqhkiG9w"
 			+ "0DBwQImtdGyUdGGt6ggAQYk9X9z01YFBkU7IlS3wmsKpm/zpZClTceAAAAAAAAAAAAAA==");
@@ -331,7 +350,133 @@ namespace Org.BouncyCastle.Cms.Tests
 			"l43OVnBpGM+FjQ=="
 		);
 
-		[Test]
+        //[Test]
+        //public void TestMLKem512()
+        //{
+        //    byte[] data = Encoding.ASCII.GetBytes("WallaWallaWashington");
+
+        //    // Send response with encrypted certificate
+        //    CmsEnvelopedDataGenerator edGen = new CmsEnvelopedDataGenerator();
+
+        //    // note: use cert req ID as key ID, don't want to use issuer/serial in this case!
+        //    edGen.AddKemRecipient( // ...or AddRecipientInfoGenerator?
+        //        PkcsObjectIdentifiers.IdAlgHkdfWithSha256.GetID(),
+        //        ReciMLKem512Cert,
+        //        CmsEnvelopedGenerator.Aes128Wrap);
+
+        //    CmsEnvelopedData ed = edGen.Generate(
+        //        new CmsProcessableByteArray(data),
+        //        CmsEnvelopedGenerator.Aes128Cbc);
+
+        //    RecipientInformationStore recipients = ed.GetRecipientInfos();
+
+        //    Assert.AreEqual(ed.EncryptionAlgOid, CmsEnvelopedGenerator.Aes128Cbc);
+
+        //    var c = recipients.GetRecipients();
+
+        //    Assert.AreEqual(1, c.Count);
+
+        //    int expectedLength = new DefaultKemEncapsulationLengthProvider().getEncapsulationLength(
+        //        SubjectPublicKeyInfoFactory.CreateSubjectPublicKeyInfo(ReciMLKem512KP.Public).Algorithm);
+
+        //    foreach (KemRecipientInformation recipient in c)
+        //    {
+        //        Assert.AreEqual(expectedLength, recipient.GetEncapsulation().Length);
+
+        //        Assert.AreEqual(NistObjectIdentifiers.id_alg_ml_kem_512.GetID(), recipient.KeyEncryptionAlgOid);
+
+        //        CmsTypedStream contentStream = recipient.GetContentStream(ReciMLKem512KP.Private);
+
+        //        Assert.AreEqual(PkcsObjectIdentifiers.Data.GetID(), contentStream.ContentType);
+        //        Assert.True(Arrays.AreEqual(data, Streams.ReadAll(contentStream.ContentStream)));
+        //    }
+        //}
+
+        //[Test]
+        //public void TestMLKem768()
+        //{
+        //    byte[] data = Encoding.ASCII.GetBytes("WallaWallaWashington");
+
+        //    // Send response with encrypted certificate
+        //    CmsEnvelopedDataGenerator edGen = new CmsEnvelopedDataGenerator();
+
+        //    // note: use cert req ID as key ID, don't want to use issuer/serial in this case!
+        //    edGen.AddKemRecipient( // ...or AddRecipientInfoGenerator?
+        //        PkcsObjectIdentifiers.IdAlgHkdfWithSha256.GetID(),
+        //        ReciMLKem768Cert,
+        //        CmsEnvelopedGenerator.Aes256Wrap);
+
+        //    CmsEnvelopedData ed = edGen.Generate(
+        //        new CmsProcessableByteArray(data),
+        //        CmsEnvelopedGenerator.Aes256Cbc);
+
+        //    RecipientInformationStore recipients = ed.GetRecipientInfos();
+
+        //    Assert.AreEqual(ed.EncryptionAlgOid, CmsEnvelopedGenerator.Aes256Cbc);
+
+        //    var c = recipients.GetRecipients();
+
+        //    Assert.AreEqual(1, c.Count);
+
+        //    int expectedLength = new DefaultKemEncapsulationLengthProvider().getEncapsulationLength(
+        //        SubjectPublicKeyInfoFactory.CreateSubjectPublicKeyInfo(ReciMLKem768KP.Public).Algorithm);
+
+        //    foreach (KemRecipientInformation recipient in c)
+        //    {
+        //        Assert.AreEqual(expectedLength, recipient.GetEncapsulation().Length);
+
+        //        Assert.AreEqual(NistObjectIdentifiers.id_alg_ml_kem_768.GetID(), recipient.KeyEncryptionAlgOid);
+
+        //        CmsTypedStream contentStream = recipient.GetContentStream(ReciMLKem768KP.Private);
+
+        //        Assert.AreEqual(PkcsObjectIdentifiers.Data.GetID(), contentStream.ContentType);
+        //        Assert.True(Arrays.AreEqual(data, Streams.ReadAll(contentStream.ContentStream)));
+        //    }
+        //}
+
+        //[Test]
+        //public void TestMLKem1024()
+        //{
+        //    byte[] data = Encoding.ASCII.GetBytes("WallaWallaWashington");
+
+        //    // Send response with encrypted certificate
+        //    CmsEnvelopedDataGenerator edGen = new CmsEnvelopedDataGenerator();
+
+        //    // note: use cert req ID as key ID, don't want to use issuer/serial in this case!
+        //    edGen.AddKemRecipient( // ...or AddRecipientInfoGenerator?
+        //        PkcsObjectIdentifiers.IdAlgHkdfWithSha256.GetID(),
+        //        ReciMLKem1024Cert,
+        //        CmsEnvelopedGenerator.Aes256Wrap);
+
+        //    CmsEnvelopedData ed = edGen.Generate(
+        //        new CmsProcessableByteArray(data),
+        //        CmsEnvelopedGenerator.Aes256Cbc);
+
+        //    RecipientInformationStore recipients = ed.GetRecipientInfos();
+
+        //    Assert.AreEqual(ed.EncryptionAlgOid, CmsEnvelopedGenerator.Aes256Cbc);
+
+        //    var c = recipients.GetRecipients();
+
+        //    Assert.AreEqual(1, c.Count);
+
+        //    int expectedLength = new DefaultKemEncapsulationLengthProvider().getEncapsulationLength(
+        //        SubjectPublicKeyInfoFactory.CreateSubjectPublicKeyInfo(ReciMLKem1024KP.Public).Algorithm);
+
+        //    foreach (KemRecipientInformation recipient in c)
+        //    {
+        //        Assert.AreEqual(expectedLength, recipient.GetEncapsulation().Length);
+
+        //        Assert.AreEqual(NistObjectIdentifiers.id_alg_ml_kem_1024.GetID(), recipient.KeyEncryptionAlgOid);
+
+        //        CmsTypedStream contentStream = recipient.GetContentStream(ReciMLKem1024KP.Private);
+
+        //        Assert.AreEqual(PkcsObjectIdentifiers.Data.GetID(), contentStream.ContentType);
+        //        Assert.True(Arrays.AreEqual(data, Streams.ReadAll(contentStream.ContentStream)));
+        //    }
+        //}
+
+        [Test]
 		public void TestKeyTrans()
 		{
 			byte[] data = Encoding.ASCII.GetBytes("WallaWallaWashington");
@@ -364,7 +509,81 @@ namespace Org.BouncyCastle.Cms.Tests
 			}
 		}
 
-		[Test]
+        [Test]
+        public void OriginatorInfoGeneration()
+        {
+            byte[] data = Encoding.ASCII.GetBytes("WallaWallaWashington");
+
+            CmsEnvelopedDataGenerator edGen = new CmsEnvelopedDataGenerator();
+
+            edGen.OriginatorInformation = new OriginatorInformation(new OriginatorInfoGenerator(OrigCert).Generate());
+
+            edGen.AddKeyTransRecipient(ReciCert);
+
+            CmsEnvelopedData ed = edGen.Generate(
+                new CmsProcessableByteArray(data),
+                CmsEnvelopedGenerator.DesEde3Cbc);
+
+            RecipientInformationStore recipients = ed.GetRecipientInfos();
+
+            Assert.AreEqual(ed.EncryptionAlgOid, CmsEnvelopedGenerator.DesEde3Cbc);
+
+            var originatorCerts = new List<X509Certificate>(
+                ed.OriginatorInformation.GetCertificates().EnumerateMatches(null));
+            Assert.True(originatorCerts.Contains(OrigCert));
+
+            var c = recipients.GetRecipients();
+
+            Assert.AreEqual(1, c.Count);
+
+            foreach (RecipientInformation recipient in c)
+            {
+                Assert.AreEqual(recipient.KeyEncryptionAlgOid, PkcsObjectIdentifiers.RsaEncryption.Id);
+                Assert.True(recipient.RecipientID.Match(ReciCert));
+
+                byte[] recData = recipient.GetContent(ReciKP.Private);
+
+                Assert.IsTrue(Arrays.AreEqual(data, recData));
+            }
+        }
+
+        [Test]
+        public void TestKeyTransRC2bit40()
+        {
+            byte[] data = Encoding.ASCII.GetBytes("WallaWallaBouncyCastle");
+
+            CmsEnvelopedDataGenerator edGen = new CmsEnvelopedDataGenerator();
+
+            edGen.AddKeyTransRecipient(ReciCert);
+
+            CmsEnvelopedData ed = edGen.Generate(
+                new CmsProcessableByteArray(data),
+                CmsEnvelopedGenerator.RC2Cbc,
+                keySize: 40);
+
+            RecipientInformationStore recipients = ed.GetRecipientInfos();
+
+            Assert.AreEqual(ed.EncryptionAlgOid, CmsEnvelopedGenerator.RC2Cbc);
+
+            RC2CbcParameter rc2P = RC2CbcParameter.GetInstance(ed.EncryptionAlgorithmID.Parameters);
+            Assert.AreEqual(160, rc2P.RC2ParameterVersionData.IntValueExact);
+
+            var c = recipients.GetRecipients();
+
+            Assert.AreEqual(1, c.Count);
+
+            foreach (RecipientInformation recipient in c)
+            {
+                Assert.True(recipient.RecipientID.Match(ReciCert));
+
+                byte[] recData = Properties.WithThreadProperty(Properties.CmsAllowLenientRsaPkcs1, bool.TrueString,
+                    () => recipient.GetContent(ReciKP.Private));
+
+                Assert.IsTrue(Arrays.AreEqual(data, recData));
+            }
+        }
+
+        [Test]
 		public void TestKeyTransRC4()
 		{
 			byte[] data = Encoding.ASCII.GetBytes("WallaWallaBouncyCastle");
@@ -379,7 +598,7 @@ namespace Org.BouncyCastle.Cms.Tests
 
 			RecipientInformationStore  recipients = ed.GetRecipientInfos();
 
-			Assert.AreEqual(ed.EncryptionAlgOid, PkcsObjectIdentifiers.rc4.GetID());
+			Assert.AreEqual(PkcsObjectIdentifiers.rc4, ed.EncryptionAlgorithmID.Algorithm);
 
 			var c = recipients.GetRecipients();
 
@@ -389,7 +608,8 @@ namespace Org.BouncyCastle.Cms.Tests
 			{
                 Assert.True(recipient.RecipientID.Match(ReciCert));
 
-                byte[] recData = recipient.GetContent(ReciKP.Private);
+                byte[] recData = Properties.WithThreadProperty(Properties.CmsAllowLenientRsaPkcs1, bool.TrueString,
+                    () => recipient.GetContent(ReciKP.Private));
 
 				Assert.IsTrue(Arrays.AreEqual(data, recData));
 			}
@@ -411,7 +631,7 @@ namespace Org.BouncyCastle.Cms.Tests
 
 			RecipientInformationStore recipients = ed.GetRecipientInfos();
 
-			Assert.AreEqual(ed.EncryptionAlgOid, PkcsObjectIdentifiers.rc4.GetID());
+			Assert.AreEqual(PkcsObjectIdentifiers.rc4, ed.EncryptionAlgorithmID.Algorithm);
 
 			var c = recipients.GetRecipients();
 
@@ -421,7 +641,8 @@ namespace Org.BouncyCastle.Cms.Tests
 			{
                 Assert.True(recipient.RecipientID.Match(ReciCert));
 
-                byte[] recData = recipient.GetContent(ReciKP.Private);
+                byte[] recData = Properties.WithThreadProperty(Properties.CmsAllowLenientRsaPkcs1, bool.TrueString,
+                    () => recipient.GetContent(ReciKP.Private));
 
 				Assert.IsTrue(Arrays.AreEqual(data, recData));
 			}
@@ -442,7 +663,7 @@ namespace Org.BouncyCastle.Cms.Tests
 
 			RecipientInformationStore recipients = ed.GetRecipientInfos();
 
-			Assert.AreEqual(ed.EncryptionAlgOid, OiwObjectIdentifiers.DesCbc.Id);
+			Assert.AreEqual(OiwObjectIdentifiers.DesCbc, ed.EncryptionAlgorithmID.Algorithm);
 
 			var c = recipients.GetRecipients();
 
@@ -626,13 +847,15 @@ namespace Org.BouncyCastle.Cms.Tests
 			}
 		}
 
-		[Test]
-		public void TestKeyTransCast5()
-		{
-			TryKeyTrans(CmsEnvelopedGenerator.Cast5Cbc,
-				new DerObjectIdentifier(CmsEnvelopedGenerator.Cast5Cbc),
-				typeof(Asn1Sequence));
-		}
+        [Test]
+        public void TestKeyTransCast5()
+        {
+            Properties.WithThreadProperty(Properties.CmsAllowLenientRsaPkcs1, bool.TrueString, () =>
+            {
+                TryKeyTrans(CmsEnvelopedGenerator.Cast5Cbc, new DerObjectIdentifier(CmsEnvelopedGenerator.Cast5Cbc),
+                    typeof(Asn1Sequence));
+            });
+        }
 
 		[Test]
 		public void TestKeyTransAes128()
@@ -702,11 +925,11 @@ namespace Org.BouncyCastle.Cms.Tests
 
 			RecipientInformationStore recipients = ed.GetRecipientInfos();
 
-			Assert.AreEqual(checkOID.Id, ed.EncryptionAlgOid);
+			Assert.AreEqual(checkOID, ed.EncryptionAlgorithmID.Algorithm);
 
 			if (asn1Params != null)
 			{
-				Assert.IsTrue(asn1Params.IsInstanceOfType(ed.EncryptionAlgorithmID.Parameters));
+                Assert.IsTrue(asn1Params.IsInstanceOfType(ed.EncryptionAlgorithmID.Parameters.ToAsn1Object()));
 			}
 
 			var c = recipients.GetRecipients();
@@ -761,25 +984,25 @@ namespace Org.BouncyCastle.Cms.Tests
 		[Test]
 		public void TestRC2128Kek()
 		{
-			TryKekAlgorithm(CmsTestUtil.MakeRC2128Key(), new DerObjectIdentifier("1.2.840.113549.1.9.16.3.7"));
+			TryKekAlgorithm(CmsTestUtil.MakeRC2_128Key(), new DerObjectIdentifier("1.2.840.113549.1.9.16.3.7"));
 		}
 
 		[Test]
 		public void TestAes128Kek()
 		{
-			TryKekAlgorithm(CmsTestUtil.MakeAesKey(128), NistObjectIdentifiers.IdAes128Wrap);
+			TryKekAlgorithm(CmsTestUtil.MakeAes128Key(), NistObjectIdentifiers.IdAes128Wrap);
 		}
 
 		[Test]
 		public void TestAes192Kek()
 		{
-			TryKekAlgorithm(CmsTestUtil.MakeAesKey(192), NistObjectIdentifiers.IdAes192Wrap);
+			TryKekAlgorithm(CmsTestUtil.MakeAes192Key(), NistObjectIdentifiers.IdAes192Wrap);
 		}
 
 		[Test]
 		public void TestAes256Kek()
 		{
-			TryKekAlgorithm(CmsTestUtil.MakeAesKey(256), NistObjectIdentifiers.IdAes256Wrap);
+			TryKekAlgorithm(CmsTestUtil.MakeAes256Key(), NistObjectIdentifiers.IdAes256Wrap);
 		}
 
 		[Test]
@@ -791,24 +1014,22 @@ namespace Org.BouncyCastle.Cms.Tests
 		[Test]
 		public void TestCamellia128Kek()
 		{
-			TryKekAlgorithm(CmsTestUtil.MakeCamelliaKey(128), NttObjectIdentifiers.IdCamellia128Wrap);
+			TryKekAlgorithm(CmsTestUtil.MakeCamellia128Key(), NttObjectIdentifiers.IdCamellia128Wrap);
 		}
 
 		[Test]
 		public void TestCamellia192Kek()
 		{
-			TryKekAlgorithm(CmsTestUtil.MakeCamelliaKey(192), NttObjectIdentifiers.IdCamellia192Wrap);
+			TryKekAlgorithm(CmsTestUtil.MakeCamellia192Key(), NttObjectIdentifiers.IdCamellia192Wrap);
 		}
 
 		[Test]
 		public void TestCamellia256Kek()
 		{
-			TryKekAlgorithm(CmsTestUtil.MakeCamelliaKey(256), NttObjectIdentifiers.IdCamellia256Wrap);
+			TryKekAlgorithm(CmsTestUtil.MakeCamellia256Key(), NttObjectIdentifiers.IdCamellia256Wrap);
 		}
 
-		private void TryKekAlgorithm(
-			KeyParameter		kek,
-			DerObjectIdentifier	algOid)
+		private void TryKekAlgorithm(KeyParameter kek, DerObjectIdentifier algOid)
 		{
 			byte[] data = Encoding.ASCII.GetBytes("WallaWallaWashington");
 			CmsEnvelopedDataGenerator edGen = new CmsEnvelopedDataGenerator();
@@ -977,12 +1198,28 @@ namespace Org.BouncyCastle.Cms.Tests
 		}
 
 		[Test]
+		public void TestPasswordRecipientIterationCountBound()
+		{
+			// A PasswordRecipientInfo's keyDerivationAlgorithm is attacker-supplied and unauthenticated, so the
+			// PBKDF2 iteration count must be bounded before the KEK is derived (CPU-DoS guard). Build a PBKDF2
+			// algorithm identifier with a normal count, then lower the bound below it: key construction (the
+			// chokepoint) must be rejected before any derivation runs.
+			var kdfAlg = new AlgorithmIdentifier(PkcsObjectIdentifiers.IdPbkdf2, new Pbkdf2Params(new byte[20], 2048));
+
+			Properties.WithThreadProperty(Properties.PbeMaxIterationCount, "1", () =>
+			{
+				Assert.Throws<ArgumentException>(
+					() => new Pkcs5Scheme2PbeKey("password".ToCharArray(), kdfAlg));
+				Assert.Throws<ArgumentException>(
+					() => new Pkcs5Scheme2Utf8PbeKey("password".ToCharArray(), kdfAlg));
+			});
+		}
+
+		[Test]
 		public void TestRfc4134Ex5_1()
 		{
 			byte[] data = Hex.Decode("5468697320697320736f6d652073616d706c6520636f6e74656e742e");
 
-//			KeyFactory kFact = KeyFactory.GetInstance("RSA");
-//			Key key = kFact.generatePrivate(new PKCS8EncodedKeySpec(bobPrivRsaEncrypt));
 			AsymmetricKeyParameter key = PrivateKeyFactory.CreateKey(bobPrivRsaEncrypt);
 
 			CmsEnvelopedData ed = new CmsEnvelopedData(rfc4134ex5_1);
@@ -1008,8 +1245,6 @@ namespace Org.BouncyCastle.Cms.Tests
 		{
 			byte[] data = Hex.Decode("5468697320697320736f6d652073616d706c6520636f6e74656e742e");
 
-//			KeyFactory kFact = KeyFactory.GetInstance("RSA");
-//			Key key = kFact.generatePrivate(new PKCS8EncodedKeySpec(bobPrivRsaEncrypt));
 			AsymmetricKeyParameter key = PrivateKeyFactory.CreateKey(bobPrivRsaEncrypt);
 
 			CmsEnvelopedData ed = new CmsEnvelopedData(rfc4134ex5_2);
@@ -1021,78 +1256,222 @@ namespace Org.BouncyCastle.Cms.Tests
 			var c = recipients.GetRecipients();
 			var e = c.GetEnumerator();
 
-			if (e.MoveNext())
+			if (!e.MoveNext())
 			{
-				do
+                Assert.Fail("no recipient found");
+				return;
+            }
+
+			do
+			{
+				RecipientInformation recipient = e.Current;
+
+				if (recipient is KeyTransRecipientInformation)
 				{
-					RecipientInformation recipient = e.Current;
+                    byte[] recData = Properties.WithThreadProperty(Properties.CmsAllowLenientRsaPkcs1, bool.TrueString,
+                        () => recipient.GetContent(key));
 
-					if (recipient is KeyTransRecipientInformation)
-					{
-						byte[] recData = recipient.GetContent(key);
-
-						Assert.IsTrue(Arrays.AreEqual(data, recData));
-					}
+                    Assert.IsTrue(Arrays.AreEqual(data, recData));
 				}
-				while (e.MoveNext());
 			}
-			else
-			{
-				Assert.Fail("no recipient found");
-			}
+			while (e.MoveNext());
 		}
 
-		[Test]
-		public void TestOriginatorInfo()
-		{
-			CmsEnvelopedData env = new CmsEnvelopedData(CmsSampleMessages.originatorMessage);
+        [Test]
+        public void OriginatorInfo()
+        {
+            CmsEnvelopedData env = new CmsEnvelopedData(CmsSampleMessages.originatorMessage);
 
-			RecipientInformationStore  recipients = env.GetRecipientInfos();
+            RecipientInformationStore recipients = env.GetRecipientInfos();
 
-			Assert.AreEqual(CmsEnvelopedGenerator.DesEde3Cbc, env.EncryptionAlgOid);
-		}
+            var originatorCerts = new List<X509Certificate>(
+                env.OriginatorInformation.GetCertificates().EnumerateMatches(null));
 
-		//[Test]
-		//public void TestGost3410_2012_KeyAgree()
-		//{
-  //          AsymmetricKeyParameter privKey = PrivateKeyFactory.CreateKey(gost2012_Reci_Key);
+            var expectedSubject = new X509Name("C=US,O=U.S. Government,OU=HSPD12Lab,OU=Agents,CN=user1");
+            Assert.That(expectedSubject.Equivalent(originatorCerts[0].SubjectDN));
 
-		//	CmsEnvelopedData ed = new CmsEnvelopedData(gost2012_Reci_Msg);
+            Assert.AreEqual(CmsEnvelopedGenerator.DesEde3Cbc, env.EncryptionAlgOid);
+        }
 
-		//	RecipientInformationStore recipients = ed.GetRecipientInfos();
+        //[Test]
+        //public void TestGost3410_2012_KeyAgree()
+        //{
+        //    AsymmetricKeyParameter privKey = PrivateKeyFactory.CreateKey(gost2012_Reci_Key);
 
-		//	Assert.AreEqual(ed.EncryptionAlgOid, CryptoProObjectIdentifiers.GostR28147Gcfb.Id);
+        //    CmsEnvelopedData ed = new CmsEnvelopedData(gost2012_Reci_Msg);
 
-  //          var c = recipients.GetRecipients();
+        //    RecipientInformationStore recipients = ed.GetRecipientInfos();
 
-  //          Assert.AreEqual(1, c.Count);
+        //    Assert.AreEqual(ed.EncryptionAlgOid, CryptoProObjectIdentifiers.GostR28147Gcfb.Id);
 
-		//	foreach (RecipientInformation recipient in c)
-		//	{
-		//		Assert.AreEqual(recipient.KeyEncryptionAlgOid,
-		//			RosstandartObjectIdentifiers.id_tc26_agreement_gost_3410_12_256.Id);
+        //    var c = recipients.GetRecipients();
 
-  //              byte[] recData = recipient.GetContent(privKey);
+        //    Assert.AreEqual(1, c.Count);
 
-  //              Assert.AreEqual("Hello World!", Strings.FromByteArray(recData));
-		//	}
+        //    foreach (RecipientInformation recipient in c)
+        //    {
+        //        Assert.AreEqual(recipient.KeyEncryptionAlgOid,
+        //            RosstandartObjectIdentifiers.id_tc26_agreement_gost_3410_12_256.Id);
 
-		//	var cert = new X509CertificateParser().ReadCertificate(gost2012_Reci_Cert);
-  //          //CertificateFactory certFact = CertificateFactory.getInstance("X.509", BC);
+        //        byte[] recData = recipient.GetContent(privKey);
 
-  //          //RecipientId id = new JceKeyAgreeRecipientId((X509Certificate)certFact.generateCertificate(new ByteArrayInputStream(gost2012_Reci_Cert)));
-  // //         RecipientID id = new KeyAgreeRecipentID(cert);
+        //        Assert.AreEqual("Hello World!", Strings.FromByteArray(recData));
+        //    }
 
-		//	//var collection = recipients.GetRecipients(id);
-		//	//if (collection.Count != 1)
-		//	//{
-		//	//	Assert.Fail("recipients not matched using general recipient ID.");
-		//	//}
-		//	//Assert.IsTrue(collection[0] is RecipientInformation);
-		//}
+        //    var cert = new X509CertificateParser().ReadCertificate(gost2012_Reci_Cert);
+        //    //CertificateFactory certFact = CertificateFactory.getInstance("X.509", BC);
 
-		private void PasswordTest(
-			string algorithm)
+        //    //RecipientId id = new JceKeyAgreeRecipientId((X509Certificate)certFact.generateCertificate(new ByteArrayInputStream(gost2012_Reci_Cert)));
+        //    //         RecipientID id = new KeyAgreeRecipentID(cert);
+
+        //    //var collection = recipients.GetRecipients(id);
+        //    //if (collection.Count != 1)
+        //    //{
+        //    //	Assert.Fail("recipients not matched using general recipient ID.");
+        //    //}
+        //    //Assert.IsTrue(collection[0] is RecipientInformation);
+        //}
+
+        private const string BadPaddingMessage = "bad padding in message.";
+
+        [Test]
+        public void TestKeyTransRsaPkcs1PaddingOracleClosed()
+        {
+            byte[] data = Encoding.ASCII.GetBytes("WallaWallaWashington");
+
+            CmsEnvelopedDataGenerator edGen = new CmsEnvelopedDataGenerator();
+            edGen.AddKeyTransRecipient(ReciCert_2048);
+
+            CmsEnvelopedData ed = edGen.Generate(
+                new CmsProcessableByteArray(data), CmsEnvelopedGenerator.Aes256Cbc);
+
+            // Sanity: the untampered message still decrypts to the original content.
+            Assert.IsTrue(Arrays.AreEqual(data, DecryptFirst(ed, ReciKP_2048.Private)));
+
+            // (a) A CEK ciphertext with invalid PKCS#1 v1.5 padding.
+            CmsEnvelopedData badPadding = ReplaceKeyTransEncryptedKey(ed,
+                MakeBadPaddingCiphertext(ReciCert_2048.GetPublicKey()));
+
+            // (b) A CEK ciphertext with valid PKCS#1 v1.5 padding but the wrong key.
+            var rsaEncrypt = new Org.BouncyCastle.Crypto.Encodings.Pkcs1Encoding(
+                new Org.BouncyCastle.Crypto.Engines.RsaEngine());
+            rsaEncrypt.Init(true, ReciCert_2048.GetPublicKey());
+            byte[] wrongKey = new byte[32];
+            byte[] wrongKeyCiphertext = rsaEncrypt.ProcessBlock(wrongKey, 0, wrongKey.Length);
+            CmsEnvelopedData validPaddingWrongKey = ReplaceKeyTransEncryptedKey(ed, wrongKeyCiphertext);
+
+            // The fix removes the unwrap-layer padding oracle: a bad-padding CEK must no longer be distinguishable
+            // as "bad padding in message." (which used to separate it from a well-padded but wrong CEK). With a
+            // known content-key size both tampered messages now fail identically, downstream at the content layer.
+            Assert.AreNotEqual(BadPaddingMessage, TryDecryptExpectFailure(badPadding, ReciKP_2048.Private));
+            Assert.AreNotEqual(BadPaddingMessage, TryDecryptExpectFailure(validPaddingWrongKey, ReciKP_2048.Private));
+        }
+
+        [Test]
+        public void TestKeyTransRsaPkcs1UnknownContentKeySize()
+        {
+            byte[] data = Encoding.ASCII.GetBytes("WallaWallaWashington");
+
+            CmsEnvelopedDataGenerator edGen = new CmsEnvelopedDataGenerator();
+            edGen.AddKeyTransRecipient(ReciCert_2048);
+
+            CmsEnvelopedData ed = edGen.Generate(
+                new CmsProcessableByteArray(data), CmsEnvelopedGenerator.Aes256Cbc);
+
+            // Rewrite the content-encryption algorithm to an OID with no registered key size, and give the CEK
+            // invalid PKCS#1 v1.5 padding.
+            CmsEnvelopedData tampered = ReplaceContentAlgAndEncryptedKey(
+                ed, new DerObjectIdentifier("1.2.3.4.5.6.7.8"),
+                MakeBadPaddingCiphertext(ReciCert_2048.GetPublicKey()));
+
+            // Strict default: with no known content-key length there is nothing to bound the decoding with, so the
+            // unwrap fails closed rather than falling back to the oracle-prone plain decoding.
+            string strict = TryDecryptExpectFailure(tampered, ReciKP_2048.Private);
+            Assert.AreNotEqual(BadPaddingMessage, strict);
+            StringAssert.Contains("no fixed size", strict);
+
+            // Opt in to the legacy behaviour: the plain unwrap is restored and a bad-padding CEK is once again
+            // reported as "bad padding in message." (the historical, distinguishable failure).
+            string lenient = Properties.WithThreadProperty(Properties.CmsAllowLenientRsaPkcs1, "true",
+                () => TryDecryptExpectFailure(tampered, ReciKP_2048.Private));
+            Assert.AreEqual(BadPaddingMessage, lenient);
+        }
+
+        // Raw RSA-encrypt a block that is not valid PKCS#1 v1.5 type-2 padding, producing a full modulus-length
+        // ciphertext whose decryption deterministically fails the padding check (rather than a short input that
+        // would trip the engine's block-size check before any padding logic runs).
+        private static byte[] MakeBadPaddingCiphertext(AsymmetricKeyParameter recipientPublicKey)
+        {
+            var raw = new Org.BouncyCastle.Crypto.Engines.RsaEngine();
+            raw.Init(true, recipientPublicKey);
+            byte[] block = new byte[raw.GetInputBlockSize()];
+            Arrays.Fill(block, (byte)0xFF);
+            return raw.ProcessBlock(block, 0, block.Length);
+        }
+
+        private static byte[] DecryptFirst(CmsEnvelopedData ed, ICipherParameters key)
+        {
+            foreach (RecipientInformation recipient in ed.GetRecipientInfos().GetRecipients())
+                return recipient.GetContent(key);
+
+            throw new InvalidOperationException("no recipients");
+        }
+
+        private static string TryDecryptExpectFailure(CmsEnvelopedData ed, ICipherParameters key)
+        {
+            try
+            {
+                DecryptFirst(ed, key);
+                return "<decrypted-without-error>";
+            }
+            catch (CmsException e)
+            {
+                return e.Message;
+            }
+            catch (Exception e)
+            {
+                return e.GetType().Name;
+            }
+        }
+
+        private static CmsEnvelopedData ReplaceKeyTransEncryptedKey(CmsEnvelopedData ed, byte[] newEncryptedKey) =>
+            RebuildEnvelopedData(ed, newEncryptedKey, contentEncryptionAlgorithm: null);
+
+        private static CmsEnvelopedData ReplaceContentAlgAndEncryptedKey(CmsEnvelopedData ed,
+            DerObjectIdentifier contentEncryptionOid, byte[] newEncryptedKey) =>
+            RebuildEnvelopedData(ed, newEncryptedKey, new AlgorithmIdentifier(contentEncryptionOid));
+
+        private static CmsEnvelopedData RebuildEnvelopedData(CmsEnvelopedData ed, byte[] newEncryptedKey,
+            AlgorithmIdentifier contentEncryptionAlgorithm)
+        {
+            Org.BouncyCastle.Asn1.Cms.ContentInfo contentInfo = ed.ContentInfo;
+            var envelopedData = Org.BouncyCastle.Asn1.Cms.EnvelopedData.GetInstance(contentInfo.Content);
+
+            var keyTrans = (Org.BouncyCastle.Asn1.Cms.KeyTransRecipientInfo)
+                Org.BouncyCastle.Asn1.Cms.RecipientInfo.GetInstance(envelopedData.RecipientInfos[0]).Info;
+
+            var newKeyTrans = new Org.BouncyCastle.Asn1.Cms.KeyTransRecipientInfo(
+                keyTrans.RecipientIdentifier, keyTrans.KeyEncryptionAlgorithm, new DerOctetString(newEncryptedKey));
+
+            var encryptedContentInfo = envelopedData.EncryptedContentInfo;
+            if (contentEncryptionAlgorithm != null)
+            {
+                encryptedContentInfo = new Org.BouncyCastle.Asn1.Cms.EncryptedContentInfo(
+                    encryptedContentInfo.ContentType, contentEncryptionAlgorithm,
+                    encryptedContentInfo.EncryptedContent);
+            }
+
+            var newEnvelopedData = new Org.BouncyCastle.Asn1.Cms.EnvelopedData(
+                envelopedData.OriginatorInfo,
+                new DerSet(new Org.BouncyCastle.Asn1.Cms.RecipientInfo(newKeyTrans)),
+                encryptedContentInfo,
+                envelopedData.UnprotectedAttrs);
+
+            return new CmsEnvelopedData(
+                new Org.BouncyCastle.Asn1.Cms.ContentInfo(contentInfo.ContentType, newEnvelopedData));
+        }
+
+        private void PasswordTest(string algorithm)
 		{
 			byte[] data = Hex.Decode("504b492d4320434d5320456e76656c6f706564446174612053616d706c65");
 
@@ -1122,8 +1501,7 @@ namespace Org.BouncyCastle.Cms.Tests
 			}
 		}
 
-		private void PasswordUtf8Test(
-			string algorithm)
+		private void PasswordUtf8Test(string algorithm)
 		{
 			byte[] data = Hex.Decode("504b492d4320434d5320456e76656c6f706564446174612053616d706c65");
 
@@ -1156,10 +1534,7 @@ namespace Org.BouncyCastle.Cms.Tests
 			}
 		}
 
-		private void VerifyECKeyAgreeVectors(
-			AsymmetricKeyParameter	privKey,
-			string					wrapAlg,
-			byte[]					message)
+		private void VerifyECKeyAgreeVectors(AsymmetricKeyParameter privKey, string wrapAlg, byte[] message)
 		{
 			byte[] data = Hex.Decode("504b492d4320434d5320456e76656c6f706564446174612053616d706c65");
 
@@ -1183,10 +1558,7 @@ namespace Org.BouncyCastle.Cms.Tests
 			}
 		}
 
-		private void VerifyECMqvKeyAgreeVectors(
-			AsymmetricKeyParameter	privKey,
-			string					wrapAlg,
-			byte[]					message)
+		private void VerifyECMqvKeyAgreeVectors(AsymmetricKeyParameter privKey, string wrapAlg, byte[] message)
 		{
 			byte[] data = Hex.Decode("504b492d4320434d5320456e76656c6f706564446174612053616d706c65");
 

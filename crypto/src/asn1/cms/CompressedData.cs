@@ -35,46 +35,49 @@ namespace Org.BouncyCastle.Asn1.Cms
 #pragma warning restore CS0618 // Type or member is obsolete
         }
 
-        private DerInteger			version;
-        private AlgorithmIdentifier	compressionAlgorithm;
-        private ContentInfo			encapContentInfo;
-
-		public CompressedData(
-            AlgorithmIdentifier	compressionAlgorithm,
-            ContentInfo			encapContentInfo)
+        public static CompressedData GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit)
         {
-            this.version = new DerInteger(0);
-            this.compressionAlgorithm = compressionAlgorithm;
-            this.encapContentInfo = encapContentInfo;
+#pragma warning disable CS0618 // Type or member is obsolete
+            return new CompressedData(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
+#pragma warning restore CS0618 // Type or member is obsolete
+        }
+
+        private readonly DerInteger m_version;
+        private readonly AlgorithmIdentifier m_compressionAlgorithm;
+        private readonly ContentInfo m_encapContentInfo;
+
+        public CompressedData(AlgorithmIdentifier compressionAlgorithm, ContentInfo encapContentInfo)
+        {
+            m_version = DerInteger.Zero;
+            m_compressionAlgorithm = compressionAlgorithm ?? throw new ArgumentNullException(nameof(compressionAlgorithm));
+            m_encapContentInfo = encapContentInfo ?? throw new ArgumentNullException(nameof(encapContentInfo));
         }
 
         [Obsolete("Use 'GetInstance' instead")]
-        public CompressedData(
-            Asn1Sequence seq)
+        public CompressedData(Asn1Sequence seq)
         {
-            this.version = (DerInteger) seq[0];
-            this.compressionAlgorithm = AlgorithmIdentifier.GetInstance(seq[1]);
-            this.encapContentInfo = ContentInfo.GetInstance(seq[2]);
+            if (seq == null)
+                throw new ArgumentNullException(nameof(seq));
+
+            int count = seq.Count, pos = 0;
+            if (count != 3)
+                throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
+
+            m_version = Asn1Utilities.Read(seq, ref pos, DerInteger.GetInstance);
+            m_compressionAlgorithm = Asn1Utilities.Read(seq, ref pos, AlgorithmIdentifier.GetInstance);
+            m_encapContentInfo = Asn1Utilities.Read(seq, ref pos, ContentInfo.GetInstance);
+
+            if (pos != count)
+                throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
         }
 
-        public DerInteger Version
-		{
-			get { return version; }
-		}
+        public DerInteger Version => m_version;
 
-		public AlgorithmIdentifier CompressionAlgorithmIdentifier
-		{
-			get { return compressionAlgorithm; }
-		}
+        public AlgorithmIdentifier CompressionAlgorithmIdentifier => m_compressionAlgorithm;
 
-		public ContentInfo EncapContentInfo
-		{
-			get { return encapContentInfo; }
-		}
+        public ContentInfo EncapContentInfo => m_encapContentInfo;
 
-		public override Asn1Object ToAsn1Object()
-        {
-			return new BerSequence(version, compressionAlgorithm, encapContentInfo);
-        }
+		public override Asn1Object ToAsn1Object() =>
+            new BerSequence(m_version, m_compressionAlgorithm, m_encapContentInfo);
     }
 }

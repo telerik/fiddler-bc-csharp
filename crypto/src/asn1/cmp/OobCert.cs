@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 using Org.BouncyCastle.Asn1.X509;
 
@@ -7,40 +7,44 @@ namespace Org.BouncyCastle.Asn1.Cmp
     /**
      * OOBCert ::= CMPCertificate
      */
+    // TODO[api] Remove and just use CmpCertificate
     public class OobCert
         : CmpCertificate
     {
-        public static new OobCert GetInstance(object obj)
+        public static new OobCert GetInstance(object obj) => Asn1Utilities.GetInstanceChoice(obj, GetOptional);
+
+        public static new OobCert GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            Asn1Utilities.GetInstanceChoice(taggedObject, declaredExplicit, GetInstance);
+
+        public static new OobCert GetOptional(Asn1Encodable element)
         {
-            if (obj == null)
-                return null;
-            if (obj is OobCert oobCert)
+            if (element == null)
+                throw new ArgumentNullException(nameof(element));
+
+            if (element is OobCert oobCert)
                 return oobCert;
-            if (obj is CmpCertificate cmpCertificate)
-                return new OobCert(cmpCertificate);
-            if (obj is Asn1TaggedObject taggedObject)
-                return new OobCert(taggedObject);
-            return new OobCert(X509CertificateStructure.GetInstance(obj));
+
+            X509CertificateStructure x509v3PKCert = X509CertificateStructure.GetOptional(element);
+            if (x509v3PKCert != null)
+                return new OobCert(x509v3PKCert);
+
+            Asn1TaggedObject taggedObject = Asn1TaggedObject.GetOptional(element);
+            if (taggedObject != null && taggedObject.HasContextTag() && taggedObject.IsExplicit())
+            {
+#pragma warning disable CS0618 // Type or member is obsolete
+                return new OobCert(taggedObject.TagNo, taggedObject.GetBaseObject());
+#pragma warning restore CS0618 // Type or member is obsolete
+            }
+
+            return null;
         }
 
-        public static new OobCert GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
-        {
-            return Asn1Utilities.GetInstanceFromChoice(taggedObject, declaredExplicit, GetInstance);
-        }
+        public static new OobCert GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            Asn1Utilities.GetTaggedChoice(taggedObject, declaredExplicit, GetInstance);
 
         [Obsolete("Use constructor from Asn1TaggedObject instead")]
         public OobCert(int type, Asn1Encodable otherCert)
             : base(type, otherCert)
-        {
-        }
-
-        internal OobCert(Asn1TaggedObject taggedObject)
-            : base(taggedObject)
-        {
-        }
-
-        internal OobCert(CmpCertificate other)
-            : base(other)
         {
         }
 

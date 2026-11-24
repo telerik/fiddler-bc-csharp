@@ -1,6 +1,6 @@
-﻿using System;
+using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Globalization;
 using System.IO;
 using System.Text;
 
@@ -17,11 +17,15 @@ using Org.BouncyCastle.Utilities;
 using Org.BouncyCastle.Utilities.Encoders;
 using Org.BouncyCastle.Utilities.IO.Pem;
 using Org.BouncyCastle.Utilities.Test;
+using Org.BouncyCastle.X509;
 
 namespace Org.BouncyCastle.Tls.Tests
 {
     public class TlsTestUtilities
     {
+        private static readonly ConcurrentDictionary<string, PemObject> PemObjectCache =
+            new ConcurrentDictionary<string, PemObject>();
+
         internal static readonly byte[] RsaCertData = Base64.Decode(
             "MIICUzCCAf2gAwIBAgIBATANBgkqhkiG9w0BAQQFADCBjzELMAkGA1UEBhMCQVUxKDAmBgNVBAoMH1RoZSBMZWdpb2" +
             "4gb2YgdGhlIEJvdW5jeSBDYXN0bGUxEjAQBgNVBAcMCU1lbGJvdXJuZTERMA8GA1UECAwIVmljdG9yaWExLzAtBgkq" +
@@ -44,10 +48,11 @@ namespace Org.BouncyCastle.Tls.Tests
             "0lAQH/BAgwBgYEVR0lADAcBgNVHREBAf8EEjAQgQ50ZXN0QHRlc3QudGVzdDANBgkqhkiG9w0BAQQFAANBAJg55PBS" +
             "weg6obRUKF4FF6fCrWFi6oCYSQ99LWcAeupc5BofW5MstFMhCOaEucuGVqunwT5G7/DweazzCIrSzB0=");
 
-        internal static bool EqualsIgnoreCase(string a, string b)
-        {
-            return string.Equals(a, b, StringComparison.InvariantCultureIgnoreCase);
-        }
+        internal static TlsPskIdentity CreateDefaultPskIdentity(bool badKey) =>
+            new BasicTlsPskIdentity("client", GetPskPasswordUtf8(badKey));
+
+        internal static bool EqualsIgnoreCase(string a, string b) =>
+            string.Equals(a, b, StringComparison.InvariantCultureIgnoreCase);
 
         internal static string Fingerprint(X509CertificateStructure c)
         {
@@ -74,7 +79,7 @@ namespace Org.BouncyCastle.Tls.Tests
 
         internal static string GetCACertResource(short signatureAlgorithm)
         {
-            return "x509-ca-" + GetResourceName(signatureAlgorithm) + ".pem";
+            return "x509-ca-" + GetResourceName12(signatureAlgorithm, forServer: false) + ".pem";
         }
 
         internal static string GetCACertResource(string eeCertResource)
@@ -93,58 +98,96 @@ namespace Org.BouncyCastle.Tls.Tests
             }
 
             if (EqualsIgnoreCase("dsa", eeCertResource))
-            {
                 return GetCACertResource(SignatureAlgorithm.dsa);
-            }
 
-            if (EqualsIgnoreCase("ecdh", eeCertResource)
-                || EqualsIgnoreCase("ecdsa", eeCertResource))
+            if (EqualsIgnoreCase("ecdh", eeCertResource) ||
+                EqualsIgnoreCase("ecdsa", eeCertResource))
             {
                 return GetCACertResource(SignatureAlgorithm.ecdsa);
             }
 
             if (EqualsIgnoreCase("ed25519", eeCertResource))
-            {
-                return GetCACertResource(SignatureAlgorithm.ed25519);
-            }
-
+                return GetCACertResource13(SignatureScheme.ed25519);
             if (EqualsIgnoreCase("ed448", eeCertResource))
+                return GetCACertResource13(SignatureScheme.ed448);
+
+            if (eeCertResource.StartsWith("ml_dsa_"))
             {
-                return GetCACertResource(SignatureAlgorithm.ed448);
+                if (EqualsIgnoreCase("ml_dsa_44", eeCertResource))
+                    return GetCACertResource13(SignatureScheme.mldsa44);
+                if (EqualsIgnoreCase("ml_dsa_65", eeCertResource))
+                    return GetCACertResource13(SignatureScheme.mldsa65);
+                if (EqualsIgnoreCase("ml_dsa_87", eeCertResource))
+                    return GetCACertResource13(SignatureScheme.mldsa87);
             }
 
-            if (EqualsIgnoreCase("rsa", eeCertResource)
-                || EqualsIgnoreCase("rsa-enc", eeCertResource)
-                || EqualsIgnoreCase("rsa-sign", eeCertResource))
+            if (eeCertResource.StartsWith("slh_dsa_sha2_"))
+            {
+                if (EqualsIgnoreCase("slh_dsa_sha2_128s", eeCertResource))
+                    return GetCACertResource13(SignatureScheme.DRAFT_slhdsa_sha2_128s);
+                if (EqualsIgnoreCase("slh_dsa_sha2_128f", eeCertResource))
+                    return GetCACertResource13(SignatureScheme.DRAFT_slhdsa_sha2_128f);
+                if (EqualsIgnoreCase("slh_dsa_sha2_192s", eeCertResource))
+                    return GetCACertResource13(SignatureScheme.DRAFT_slhdsa_sha2_192s);
+                if (EqualsIgnoreCase("slh_dsa_sha2_192f", eeCertResource))
+                    return GetCACertResource13(SignatureScheme.DRAFT_slhdsa_sha2_192f);
+                if (EqualsIgnoreCase("slh_dsa_sha2_256s", eeCertResource))
+                    return GetCACertResource13(SignatureScheme.DRAFT_slhdsa_sha2_256s);
+                if (EqualsIgnoreCase("slh_dsa_sha2_256f", eeCertResource))
+                    return GetCACertResource13(SignatureScheme.DRAFT_slhdsa_sha2_256f);
+            }
+            if (eeCertResource.StartsWith("slh_dsa_shake_"))
+            {
+                if (EqualsIgnoreCase("slh_dsa_shake_128s", eeCertResource))
+                    return GetCACertResource13(SignatureScheme.DRAFT_slhdsa_shake_128s);
+                if (EqualsIgnoreCase("slh_dsa_shake_128f", eeCertResource))
+                    return GetCACertResource13(SignatureScheme.DRAFT_slhdsa_shake_128f);
+                if (EqualsIgnoreCase("slh_dsa_shake_192s", eeCertResource))
+                    return GetCACertResource13(SignatureScheme.DRAFT_slhdsa_shake_192s);
+                if (EqualsIgnoreCase("slh_dsa_shake_192f", eeCertResource))
+                    return GetCACertResource13(SignatureScheme.DRAFT_slhdsa_shake_192f);
+                if (EqualsIgnoreCase("slh_dsa_shake_256s", eeCertResource))
+                    return GetCACertResource13(SignatureScheme.DRAFT_slhdsa_shake_256s);
+                if (EqualsIgnoreCase("slh_dsa_shake_256f", eeCertResource))
+                    return GetCACertResource13(SignatureScheme.DRAFT_slhdsa_shake_256f);
+            }
+
+            if (EqualsIgnoreCase("rsa", eeCertResource) ||
+                EqualsIgnoreCase("rsa-enc", eeCertResource) ||
+                EqualsIgnoreCase("rsa-sign", eeCertResource))
             {
                 return GetCACertResource(SignatureAlgorithm.rsa);
             }
 
             if (EqualsIgnoreCase("rsa_pss_256", eeCertResource))
-            {
                 return GetCACertResource(SignatureAlgorithm.rsa_pss_pss_sha256);
-            }
             if (EqualsIgnoreCase("rsa_pss_384", eeCertResource))
-            {
                 return GetCACertResource(SignatureAlgorithm.rsa_pss_pss_sha384);
-            }
             if (EqualsIgnoreCase("rsa_pss_512", eeCertResource))
-            {
                 return GetCACertResource(SignatureAlgorithm.rsa_pss_pss_sha512);
-            }
 
             throw new TlsFatalAlert(AlertDescription.internal_error);
         }
 
-        internal static string GetResourceName(short signatureAlgorithm)
+        internal static string GetCACertResource13(int signatureScheme)
+        {
+            return "x509-ca-" + GetResourceName13(signatureScheme, forServer: false) + ".pem";
+        }
+
+        internal static string GetPskPassword(bool badKey) => badKey ? "TLS_TEST_PSK_BAD" : "TLS_TEST_PSK";
+
+        internal static byte[] GetPskPasswordUtf8(bool badKey) => Strings.ToUtf8ByteArray(GetPskPassword(badKey));
+
+        internal static string GetResourceName12(short signatureAlgorithm, bool forServer) =>
+            FindResourceName12(signatureAlgorithm, forServer) ?? throw new TlsFatalAlert(AlertDescription.internal_error);
+
+        internal static string GetResourceName13(int signatureScheme, bool forServer) =>
+            FindResourceName13(signatureScheme, forServer) ?? throw new TlsFatalAlert(AlertDescription.internal_error);
+
+        internal static string FindResourceName12(short signatureAlgorithm, bool forServer)
         {
             switch (signatureAlgorithm)
             {
-            case SignatureAlgorithm.rsa:
-            case SignatureAlgorithm.rsa_pss_rsae_sha256:
-            case SignatureAlgorithm.rsa_pss_rsae_sha384:
-            case SignatureAlgorithm.rsa_pss_rsae_sha512:
-                return "rsa";
             case SignatureAlgorithm.dsa:
                 return "dsa";
             case SignatureAlgorithm.ecdsa:
@@ -159,13 +202,78 @@ namespace Org.BouncyCastle.Tls.Tests
                 return "rsa_pss_384";
             case SignatureAlgorithm.rsa_pss_pss_sha512:
                 return "rsa_pss_512";
+            case SignatureAlgorithm.rsa:
+            case SignatureAlgorithm.rsa_pss_rsae_sha256:
+            case SignatureAlgorithm.rsa_pss_rsae_sha384:
+            case SignatureAlgorithm.rsa_pss_rsae_sha512:
+                return forServer ? "rsa-sign" : "rsa";
 
             // TODO[RFC 9189] Choose names here and apply reverse mappings in GetCACertResource(String)
             case SignatureAlgorithm.gostr34102012_256:
             case SignatureAlgorithm.gostr34102012_512:
 
             default:
-                throw new TlsFatalAlert(AlertDescription.internal_error);
+                return null;
+            }
+        }
+
+        internal static string FindResourceName13(int signatureScheme, bool forServer)
+        {
+            // TODO[tls-slhdsa] Move into switch statement once constants available
+            if (SignatureScheme.IsSlhDsa(signatureScheme))
+            {
+                return SignatureScheme.DRAFT_slhdsa_sha2_128s == signatureScheme ? "slh_dsa_sha2_128s"
+                    :  SignatureScheme.DRAFT_slhdsa_sha2_128f == signatureScheme ? "slh_dsa_sha2_128f"
+                    :  SignatureScheme.DRAFT_slhdsa_sha2_192s == signatureScheme ? "slh_dsa_sha2_192s"
+                    :  SignatureScheme.DRAFT_slhdsa_sha2_192f == signatureScheme ? "slh_dsa_sha2_192f"
+                    :  SignatureScheme.DRAFT_slhdsa_sha2_256s == signatureScheme ? "slh_dsa_sha2_256s"
+                    :  SignatureScheme.DRAFT_slhdsa_sha2_256f == signatureScheme ? "slh_dsa_sha2_256f"
+                    :  SignatureScheme.DRAFT_slhdsa_shake_128s == signatureScheme ? "slh_dsa_shake_128s"
+                    :  SignatureScheme.DRAFT_slhdsa_shake_128f == signatureScheme ? "slh_dsa_shake_128f"
+                    :  SignatureScheme.DRAFT_slhdsa_shake_192s == signatureScheme ? "slh_dsa_shake_192s"
+                    :  SignatureScheme.DRAFT_slhdsa_shake_192f == signatureScheme ? "slh_dsa_shake_192f"
+                    :  SignatureScheme.DRAFT_slhdsa_shake_256s == signatureScheme ? "slh_dsa_shake_256s"
+                    :  SignatureScheme.DRAFT_slhdsa_shake_256f == signatureScheme ? "slh_dsa_shake_256f"
+                    :  throw new InvalidOperationException();
+            }
+
+            switch (signatureScheme)
+            {
+            case SignatureScheme.ecdsa_secp256r1_sha256:
+                return "ecdsa";
+            case SignatureScheme.ed25519:
+                return "ed25519";
+            case SignatureScheme.ed448:
+                return "ed448";
+            case SignatureScheme.rsa_pss_pss_sha256:
+                return "rsa_pss_256";
+            case SignatureScheme.rsa_pss_pss_sha384:
+                return "rsa_pss_384";
+            case SignatureScheme.rsa_pss_pss_sha512:
+                return "rsa_pss_512";
+            case SignatureScheme.rsa_pss_rsae_sha256:
+            case SignatureScheme.rsa_pss_rsae_sha384:
+            case SignatureScheme.rsa_pss_rsae_sha512:
+                return forServer ? "rsa-sign" : "rsa";
+            case SignatureScheme.mldsa44:
+                return "ml_dsa_44";
+            case SignatureScheme.mldsa65:
+                return "ml_dsa_65";
+            case SignatureScheme.mldsa87:
+                return "ml_dsa_87";
+
+            // TODO[tls] Add test resources for these
+            case SignatureScheme.ecdsa_brainpoolP256r1tls13_sha256:
+            case SignatureScheme.ecdsa_brainpoolP384r1tls13_sha384:
+            case SignatureScheme.ecdsa_brainpoolP512r1tls13_sha512:
+            case SignatureScheme.ecdsa_secp384r1_sha384:
+            case SignatureScheme.ecdsa_secp521r1_sha512:
+
+            // TODO[RFC 8998]
+            case SignatureScheme.sm2sig_sm3:
+
+            default:
+                return null;
             }
         }
 
@@ -265,23 +373,40 @@ namespace Org.BouncyCastle.Tls.Tests
         internal static TlsCredentialedSigner LoadSignerCredentialsServer(TlsContext context,
             IList<SignatureAndHashAlgorithm> supportedSignatureAlgorithms, short signatureAlgorithm)
         {
-            string sigName = GetResourceName(signatureAlgorithm);
-
-            switch (signatureAlgorithm)
-            {
-            case SignatureAlgorithm.rsa:
-            case SignatureAlgorithm.rsa_pss_rsae_sha256:
-            case SignatureAlgorithm.rsa_pss_rsae_sha384:
-            case SignatureAlgorithm.rsa_pss_rsae_sha512:
-                sigName += "-sign";
-                break;
-            }
+            string sigName = GetResourceName12(signatureAlgorithm, forServer: true);
 
             string certResource = "x509-server-" + sigName + ".pem";
             string keyResource = "x509-server-key-" + sigName + ".pem";
 
             return LoadSignerCredentials(context, supportedSignatureAlgorithms, signatureAlgorithm, certResource,
                 keyResource);
+        }
+
+        /// <summary>
+        /// Build a fresh Ed25519 raw public key (RFC 7250) signer credential for the connection's crypto backend.
+        /// </summary>
+        /// <exception cref="IOException"/>
+        internal static TlsCredentialedSigner CreateRawKeyEd25519Credentials(TlsContext context)
+        {
+            TlsCrypto crypto = context.Crypto;
+            byte[] certificateRequestContext = TlsUtilities.IsTlsV13(context) ? TlsUtilities.EmptyBytes : null;
+
+            if (crypto is BcTlsCrypto bcCrypto)
+            {
+                Ed25519PrivateKeyParameters privateKey = new Ed25519PrivateKeyParameters(bcCrypto.SecureRandom);
+                TlsCertificate rawKeyCert = new BcTlsRawKeyCertificate(bcCrypto,
+                    SubjectPublicKeyInfoFactory.CreateSubjectPublicKeyInfo(privateKey.GeneratePublicKey()));
+                Certificate certificate = new Certificate(CertificateType.RawPublicKey, certificateRequestContext,
+                    new CertificateEntry[]{ new CertificateEntry(rawKeyCert, null) });
+
+                return new BcDefaultTlsCredentialedSigner(new TlsCryptoParameters(context), bcCrypto, privateKey,
+                    certificate, SignatureAndHashAlgorithm.ed25519);
+            }
+            else
+            {
+                // bc-java supports also JcaTlsCrypto here
+                throw new InvalidOperationException();
+            }
         }
 
         internal static Certificate LoadCertificateChain(ProtocolVersion protocolVersion, TlsCrypto crypto,
@@ -362,8 +487,7 @@ namespace Org.BouncyCastle.Tls.Tests
             if (pem.Type.Equals("EC PRIVATE KEY"))
             {
                 ECPrivateKeyStructure pKey = ECPrivateKeyStructure.GetInstance(pem.Content);
-                AlgorithmIdentifier algId = new AlgorithmIdentifier(X9ObjectIdentifiers.IdECPublicKey,
-                    pKey.GetParameters());
+                AlgorithmIdentifier algId = new AlgorithmIdentifier(X9ObjectIdentifiers.IdECPublicKey, pKey.Parameters);
                 PrivateKeyInfo privInfo = new PrivateKeyInfo(algId, pKey);
                 return PrivateKeyFactory.CreateKey(privInfo);
             }
@@ -372,11 +496,13 @@ namespace Org.BouncyCastle.Tls.Tests
 
         internal static PemObject LoadPemResource(string resource)
         {
-            Stream s = SimpleTest.GetTestDataAsStream("tls." + resource);
-            using (var p = new PemReader(new StreamReader(s)))
+            return PemObjectCache.GetOrAdd(resource, key =>
             {
-                return p.ReadPemObject();
-            }
+                using (var p = new PemReader(new StreamReader(SimpleTest.FindTestResource("tls", "credentials", key))))
+                {
+                    return p.ReadPemObject();
+                }
+            });
         }
 
         internal static bool AreSameCertificate(TlsCrypto crypto, TlsCertificate cert, string resource)

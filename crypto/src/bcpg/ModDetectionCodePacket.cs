@@ -1,41 +1,44 @@
 using System;
-using System.IO;
+
+using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Bcpg
 {
-	/// <remarks>Basic packet for a modification detection code packet.</remarks>
+    /// <summary>Basic packet for a modification detection code packet.</summary>
     public class ModDetectionCodePacket
         : ContainedPacket
     {
-        private readonly byte[] digest;
+        private readonly byte[] m_digest;
 
-		internal ModDetectionCodePacket(
-            BcpgInputStream bcpgIn)
+        internal ModDetectionCodePacket(BcpgInputStream bcpgIn)
+            : this(bcpgIn, newPacketFormat: false)
         {
-			if (bcpgIn == null)
-				throw new ArgumentNullException("bcpgIn");
-
-			this.digest = new byte[20];
-            bcpgIn.ReadFully(this.digest);
         }
 
-		public ModDetectionCodePacket(
-            byte[] digest)
+        internal ModDetectionCodePacket(BcpgInputStream bcpgIn, bool newPacketFormat)
+            : base(PacketTag.ModificationDetectionCode, newPacketFormat)
         {
-			if (digest == null)
-				throw new ArgumentNullException("digest");
+            if (bcpgIn == null)
+                throw new ArgumentNullException(nameof(bcpgIn));
 
-			this.digest = (byte[]) digest.Clone();
+            m_digest = new byte[20];
+            bcpgIn.ReadFully(m_digest);
         }
 
-		public byte[] GetDigest()
+        public ModDetectionCodePacket(byte[] digest)
+            : base(PacketTag.ModificationDetectionCode)
         {
-			return (byte[]) digest.Clone();
+            if (digest == null)
+                throw new ArgumentNullException(nameof(digest));
+
+            m_digest = Arrays.Clone(digest);
         }
 
-		public override void Encode(BcpgOutputStream bcpgOut)
-        {
-            bcpgOut.WritePacket(PacketTag.ModificationDetectionCode, digest);
-        }
+        internal byte[] Digest => m_digest;
+
+        public byte[] GetDigest() => Arrays.Clone(m_digest);
+
+        public override void Encode(BcpgOutputStream bcpgOut) =>
+            bcpgOut.WritePacket(HasNewPacketFormat, PacketTag.ModificationDetectionCode, m_digest);
     }
 }

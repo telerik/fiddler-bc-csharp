@@ -2,71 +2,73 @@ using System;
 
 using Org.BouncyCastle.Asn1.X509;
 using Org.BouncyCastle.Math;
-using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Asn1.Pkcs
 {
     public class IssuerAndSerialNumber
         : Asn1Encodable
     {
-        private readonly X509Name name;
-        private readonly DerInteger certSerialNumber;
-
-		public static IssuerAndSerialNumber GetInstance(
-            object obj)
+		public static IssuerAndSerialNumber GetInstance(object obj)
         {
-            if (obj is IssuerAndSerialNumber)
-            {
-                return (IssuerAndSerialNumber) obj;
-            }
-
-			if (obj is Asn1Sequence)
-            {
-                return new IssuerAndSerialNumber((Asn1Sequence) obj);
-            }
-
-			throw new ArgumentException("Unknown object in factory: " + Platform.GetTypeName(obj), "obj");
+            if (obj == null)
+                return null;
+            if (obj is IssuerAndSerialNumber issuerAndSerialNumber)
+                return issuerAndSerialNumber;
+            return new IssuerAndSerialNumber(Asn1Sequence.GetInstance(obj));
 		}
 
-		private IssuerAndSerialNumber(
-            Asn1Sequence seq)
-        {
-			if (seq.Count != 2)
-				throw new ArgumentException("Wrong number of elements in sequence", "seq");
+        public static IssuerAndSerialNumber GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new IssuerAndSerialNumber(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
 
-			this.name = X509Name.GetInstance(seq[0]);
-            this.certSerialNumber = DerInteger.GetInstance(seq[1]);
+        public static IssuerAndSerialNumber GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new IssuerAndSerialNumber(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
+
+        private readonly X509Name m_issuer;
+        private readonly DerInteger m_serialNumber;
+
+        private IssuerAndSerialNumber(Asn1Sequence seq)
+        {
+            int count = seq.Count, pos = 0;
+			if (count != 2)
+                throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
+
+            m_issuer = Asn1Utilities.Read(seq, ref pos, X509Name.GetInstance);
+            m_serialNumber = Asn1Utilities.Read(seq, ref pos, DerInteger.GetInstance);
+
+            if (pos != count)
+                throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
         }
 
-		public IssuerAndSerialNumber(
-            X509Name	name,
-            BigInteger	certSerialNumber)
+        // TODO[api] 'name' => 'issuer', 'certSerialNumber' => 'serialNumber'
+        public IssuerAndSerialNumber(X509Name name, BigInteger certSerialNumber)
         {
-            this.name = name;
-            this.certSerialNumber = new DerInteger(certSerialNumber);
+            m_issuer = name ?? throw new ArgumentNullException(nameof(name));
+            m_serialNumber = new DerInteger(certSerialNumber);
         }
 
-		public IssuerAndSerialNumber(
-            X509Name	name,
-            DerInteger	certSerialNumber)
+        // TODO[api] 'name' => 'issuer', 'certSerialNumber' => 'serialNumber'
+        public IssuerAndSerialNumber(X509Name name, DerInteger certSerialNumber)
         {
-            this.name = name;
-            this.certSerialNumber = certSerialNumber;
+            m_issuer = name ?? throw new ArgumentNullException(nameof(name));
+            m_serialNumber = certSerialNumber ?? throw new ArgumentNullException(nameof(certSerialNumber));
         }
 
-		public X509Name Name
-		{
-			get { return name; }
-		}
-
-		public DerInteger CertificateSerialNumber
-		{
-			get { return certSerialNumber; }
-		}
-
-		public override Asn1Object ToAsn1Object()
+        public IssuerAndSerialNumber(X509CertificateStructure x509CertificateStructure)
         {
-			return new DerSequence(name, certSerialNumber);
+            m_issuer = x509CertificateStructure.Issuer;
+            m_serialNumber = x509CertificateStructure.SerialNumber;
         }
+
+        public X509Name Issuer => m_issuer;
+
+        [Obsolete("Use 'Issuer' property instead")]
+        public X509Name Name => m_issuer;
+
+        [Obsolete("Use 'SerialNumber' property instead")]
+        public DerInteger CertificateSerialNumber => m_serialNumber;
+
+        public DerInteger SerialNumber => m_serialNumber;
+
+        public override Asn1Object ToAsn1Object() => new DerSequence(m_issuer, m_serialNumber);
     }
 }

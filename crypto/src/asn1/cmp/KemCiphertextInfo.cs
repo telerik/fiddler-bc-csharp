@@ -27,22 +27,29 @@ namespace Org.BouncyCastle.Asn1.Cmp
         public static KemCiphertextInfo GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
             new KemCiphertextInfo(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
 
+        public static KemCiphertextInfo GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new KemCiphertextInfo(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
+
         private readonly AlgorithmIdentifier m_kem;
         private readonly Asn1OctetString m_ct;
 
         private KemCiphertextInfo(Asn1Sequence seq)
         {
-            if (seq.Count != 2)
-                throw new ArgumentException("sequence size should 2", nameof(seq));
+            int count = seq.Count, pos = 0;
+            if (count != 2)
+                throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
 
-            m_kem = AlgorithmIdentifier.GetInstance(seq[0]);
-            m_ct = Asn1OctetString.GetInstance(seq[1]);
+            m_kem = Asn1Utilities.Read(seq, ref pos, AlgorithmIdentifier.GetInstance);
+            m_ct = Asn1Utilities.Read(seq, ref pos, Asn1OctetString.GetInstance);
+
+            if (pos != count)
+                throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
         }
 
         public KemCiphertextInfo(AlgorithmIdentifier kem, Asn1OctetString ct)
         {
-            m_kem = kem;
-            m_ct = ct;
+            m_kem = kem ?? throw new ArgumentNullException(nameof(kem));
+            m_ct = ct ?? throw new ArgumentNullException(nameof(ct));
         }
 
         public virtual AlgorithmIdentifier Kem => m_kem;

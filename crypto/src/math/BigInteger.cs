@@ -133,8 +133,8 @@ namespace Org.BouncyCastle.Math
         private const long IMASK = 0xFFFFFFFFL;
         private const ulong UIMASK = 0xFFFFFFFFUL;
 
-        private static readonly uint[] ZeroMagnitude = new uint[0];
-        private static readonly byte[] ZeroEncoding = new byte[0];
+        private static readonly uint[] ZeroMagnitude = Array.Empty<uint>();
+        private static readonly byte[] ZeroEncoding = Array.Empty<byte>();
 
         private static readonly BigInteger[] SMALL_CONSTANTS = new BigInteger[17];
         public static readonly BigInteger Zero;
@@ -144,6 +144,9 @@ namespace Org.BouncyCastle.Math
         public static readonly BigInteger Four;
         public static readonly BigInteger Five;
         public static readonly BigInteger Six;
+        public static readonly BigInteger Seven;
+        public static readonly BigInteger Eight;
+        public static readonly BigInteger Nine;
         public static readonly BigInteger Ten;
 
 #if !NETCOREAPP3_0_OR_GREATER
@@ -205,18 +208,21 @@ namespace Org.BouncyCastle.Math
             Four = SMALL_CONSTANTS[4];
             Five = SMALL_CONSTANTS[5];
             Six = SMALL_CONSTANTS[6];
+            Seven = SMALL_CONSTANTS[7];
+            Eight = SMALL_CONSTANTS[8];
+            Nine = SMALL_CONSTANTS[9];
             Ten = SMALL_CONSTANTS[10];
 
             radix2 = Two;
             radix2E = radix2.Pow(chunk2);
 
-            radix8 = ValueOf(8);
+            radix8 = Eight;
             radix8E = radix8.Pow(chunk8);
 
             radix10 = Ten;
             radix10E = radix10.Pow(chunk10);
 
-            radix16 = ValueOf(16);
+            radix16 = SMALL_CONSTANTS[16];
             radix16E = radix16.Pow(chunk16);
 
             primeProducts = new int[primeLists.Length];
@@ -235,7 +241,7 @@ namespace Org.BouncyCastle.Math
 
         private readonly uint[] magnitude; // array of uints with [0] being the most significant
         private readonly int sign; // -1 means -ve; +1 means +ve; 0 means 0;
-
+ 
         [NonSerialized]
         private int nBits = -1; // cache BitCount() value
         [NonSerialized]
@@ -487,27 +493,31 @@ namespace Org.BouncyCastle.Math
         }
 
         public BigInteger(byte[] bytes)
+            : this(bytes, bigEndian: true)
         {
-            this.magnitude = InitBE(bytes, 0, bytes.Length, out this.sign);
         }
 
         public BigInteger(byte[] bytes, bool bigEndian)
         {
+            Arrays.ValidateBuffer(bytes);
+
+            if (bytes.Length < 1)
+                throw new FormatException("Zero length BigInteger");
+
             this.magnitude = bigEndian
                 ? InitBE(bytes, 0, bytes.Length, out this.sign)
                 : InitLE(bytes, 0, bytes.Length, out this.sign);
         }
 
         public BigInteger(byte[] bytes, int offset, int length)
+            : this(bytes, offset, length, bigEndian: true)
         {
-            if (length == 0)
-                throw new FormatException("Zero length BigInteger");
-
-            this.magnitude = InitBE(bytes, offset, length, out this.sign);
         }
 
         public BigInteger(byte[] bytes, int offset, int length, bool bigEndian)
         {
+            Arrays.ValidateSegment(bytes, offset, length);
+
             if (length <= 0)
                 throw new FormatException("Zero length BigInteger");
 
@@ -538,6 +548,11 @@ namespace Org.BouncyCastle.Math
 
             if (iBval >= end)
                 return One.magnitude;
+
+            if (bytes[iBval] == byte.MinValue)
+            {
+                --iBval;
+            }
 
             int numBytes = end - iBval;
 
@@ -589,6 +604,11 @@ namespace Org.BouncyCastle.Math
 
             if (last < 0)
                 return One.magnitude;
+
+            if (bytes[offset + last] == byte.MinValue)
+            {
+                ++last;
+            }
 
             int numBytes = last + 1;
 
@@ -753,27 +773,52 @@ namespace Org.BouncyCastle.Math
 #endif
 
         public BigInteger(int sign, byte[] bytes)
-            : this(sign, bytes, 0, bytes.Length, true)
+            : this(sign, bytes, bigEndian: true)
         {
         }
 
         public BigInteger(int sign, byte[] bytes, bool bigEndian)
-            : this(sign, bytes, 0, bytes.Length, bigEndian)
         {
-        }
+            Arrays.ValidateBuffer(bytes);
 
-        public BigInteger(int sign, byte[] bytes, int offset, int length)
-            : this(sign, bytes, offset, length, true)
-        {
-        }
-
-        public BigInteger(int sign, byte[] bytes, int offset, int length, bool bigEndian)
-        {
             if (sign < -1 || sign > 1)
                 throw new FormatException("Invalid sign value");
 
             if (sign == 0)
             {
+                if (!Arrays.AreAllZeroes(bytes, 0, bytes.Length))
+                    throw new FormatException("sign/bytes mismatch");
+
+                this.magnitude = ZeroMagnitude;
+                this.sign = 0;
+            }
+            else
+            {
+                // copy bytes
+                this.magnitude = bigEndian
+                    ? MakeMagnitudeBE(bytes, 0, bytes.Length)
+                    : MakeMagnitudeLE(bytes, 0, bytes.Length);
+                this.sign = this.magnitude.Length < 1 ? 0 : sign;
+            }
+        }
+
+        public BigInteger(int sign, byte[] bytes, int offset, int length)
+            : this(sign, bytes, offset, length, bigEndian: true)
+        {
+        }
+
+        public BigInteger(int sign, byte[] bytes, int offset, int length, bool bigEndian)
+        {
+            Arrays.ValidateSegment(bytes, offset, length);
+
+            if (sign < -1 || sign > 1)
+                throw new FormatException("Invalid sign value");
+
+            if (sign == 0)
+            {
+                if (!Arrays.AreAllZeroes(bytes, offset, length))
+                    throw new FormatException("sign/bytes mismatch");
+
                 this.sign = 0;
                 this.magnitude = ZeroMagnitude;
             }
@@ -1132,7 +1177,7 @@ namespace Org.BouncyCastle.Math
         private static int BitLen(byte b)
         {
 #if NETCOREAPP3_0_OR_GREATER
-            return 32 - BitOperations.LeadingZeroCount((uint)b);
+            return Integers.BitLength(b);
 #else
             return BitLengthTable[b];
 #endif
@@ -1141,7 +1186,7 @@ namespace Org.BouncyCastle.Math
         private static int BitLen(uint v)
         {
 #if NETCOREAPP3_0_OR_GREATER
-            return 32 - BitOperations.LeadingZeroCount(v);
+            return Integers.BitLength(v);
 #else
             uint t = v >> 24;
             if (t != 0)
@@ -1230,7 +1275,7 @@ namespace Org.BouncyCastle.Math
          * return z = x / y - done in place (z value preserved, x contains the
          * remainder)
          */
-        private uint[] Divide(uint[] x, uint[] y)
+        private static uint[] Divide(uint[] x, uint[] y)
         {
             int xStart = 0;
             while (xStart < x.Length && x[xStart] == 0U)
@@ -1781,8 +1826,7 @@ namespace Org.BouncyCastle.Math
             }
 
             BigInteger d = this.Remainder(m);
-            BigInteger x;
-            BigInteger gcd = ExtEuclid(d, m, out x);
+            BigInteger gcd = ExtEuclid(d, m, out BigInteger x);
 
             if (!gcd.Equals(One))
                 throw new ArithmeticException("Numbers not relatively prime.");

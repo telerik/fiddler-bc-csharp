@@ -28,29 +28,36 @@ namespace Org.BouncyCastle.Asn1.Cmp
         public static KemBMParameter GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
             new KemBMParameter(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
 
+        public static KemBMParameter GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new KemBMParameter(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
+
         private readonly AlgorithmIdentifier m_kdf;
         private readonly DerInteger m_len;
         private readonly AlgorithmIdentifier m_mac;
 
         private KemBMParameter(Asn1Sequence seq)
         {
-            if (seq.Count != 3)
-                throw new ArgumentException("sequence size should 3", nameof(seq));
+            int count = seq.Count, pos = 0;
+            if (count != 3)
+                throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
 
-            m_kdf = AlgorithmIdentifier.GetInstance(seq[0]);
-            m_len = DerInteger.GetInstance(seq[1]);
-            m_mac = AlgorithmIdentifier.GetInstance(seq[2]);
+            m_kdf = Asn1Utilities.Read(seq, ref pos, AlgorithmIdentifier.GetInstance);
+            m_len = Asn1Utilities.Read(seq, ref pos, DerInteger.GetInstance);
+            m_mac = Asn1Utilities.Read(seq, ref pos, AlgorithmIdentifier.GetInstance);
+
+            if (pos != count)
+                throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
         }
 
         public KemBMParameter(AlgorithmIdentifier kdf, DerInteger len, AlgorithmIdentifier mac)
         {
-            m_kdf = kdf;
-            m_len = len;
-            m_mac = mac;
+            m_kdf = kdf ?? throw new ArgumentNullException(nameof(kdf));
+            m_len = len ?? throw new ArgumentNullException(nameof(len));
+            m_mac = mac ?? throw new ArgumentNullException(nameof(mac));
         }
 
         public KemBMParameter(AlgorithmIdentifier kdf, long len, AlgorithmIdentifier mac)
-            : this(kdf, new DerInteger(len), mac)
+            : this(kdf, DerInteger.ValueOf(len), mac)
         {
         }
 

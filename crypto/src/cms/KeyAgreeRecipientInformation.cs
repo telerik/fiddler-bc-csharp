@@ -32,31 +32,26 @@ namespace Org.BouncyCastle.Cms
         {
             try
             {
-                foreach (Asn1Encodable rek in info.RecipientEncryptedKeys)
+                foreach (Asn1Encodable element in info.RecipientEncryptedKeys)
                 {
-                    RecipientEncryptedKey id = RecipientEncryptedKey.GetInstance(rek.ToAsn1Object());
+                    RecipientEncryptedKey id = RecipientEncryptedKey.GetInstance(element);
+                    Asn1.Cms.KeyAgreeRecipientIdentifier karid = id.Identifier;
+                    Asn1.Cms.IssuerAndSerialNumber iAndSN = karid.IssuerAndSerialNumber;
 
                     RecipientID rid = new RecipientID();
-
-                    Asn1.Cms.KeyAgreeRecipientIdentifier karid = id.Identifier;
-
-                    Asn1.Cms.IssuerAndSerialNumber iAndSN = karid.IssuerAndSerialNumber;
                     if (iAndSN != null)
                     {
-                        rid.Issuer = iAndSN.Name;
+                        rid.Issuer = iAndSN.Issuer;
                         rid.SerialNumber = iAndSN.SerialNumber.Value;
                     }
                     else
                     {
-                        Asn1.Cms.RecipientKeyIdentifier rKeyID = karid.RKeyID;
+                        // Note: 'date' and 'other' fields of RecipientKeyIdentifier appear to be only informational
 
-                        // Note: 'date' and 'other' fields of RecipientKeyIdentifier appear to be only informational 
-
-                        rid.SubjectKeyIdentifier = rKeyID.SubjectKeyIdentifier.GetEncoded(Asn1Encodable.Der);
+                        rid.SubjectKeyIdentifier = karid.RKeyID.SubjectKeyIdentifier.GetEncoded(Asn1Encodable.Der);
                     }
 
-                    infos.Add(new KeyAgreeRecipientInformation(info, rid, id.EncryptedKey,
-                        secureReadable));
+                    infos.Add(new KeyAgreeRecipientInformation(info, rid, id.EncryptedKey, secureReadable));
                 }
             }
             catch (IOException e)
@@ -77,29 +72,27 @@ namespace Org.BouncyCastle.Cms
         private AsymmetricKeyParameter GetSenderPublicKey(AsymmetricKeyParameter receiverPrivateKey,
             OriginatorIdentifierOrKey originator)
         {
-            OriginatorPublicKey opk = originator.OriginatorPublicKey;
-            if (opk != null)
-                return GetPublicKeyFromOriginatorPublicKey(receiverPrivateKey, opk);
+            OriginatorPublicKey originatorKey = originator.OriginatorKey;
+            if (originatorKey != null)
+                return GetPublicKeyFromOriginatorPublicKey(receiverPrivateKey, originatorKey);
 
             OriginatorID origID = new OriginatorID();
 
-            Asn1.Cms.IssuerAndSerialNumber iAndSN = originator.IssuerAndSerialNumber;
-            if (iAndSN != null)
+            Asn1.Cms.IssuerAndSerialNumber issuerAndSerialNumber = originator.IssuerAndSerialNumber;
+            if (issuerAndSerialNumber != null)
             {
-                origID.Issuer = iAndSN.Name;
-                origID.SerialNumber = iAndSN.SerialNumber.Value;
+                origID.Issuer = issuerAndSerialNumber.Issuer;
+                origID.SerialNumber = issuerAndSerialNumber.SerialNumber.Value;
             }
             else
             {
-                SubjectKeyIdentifier ski = originator.SubjectKeyIdentifier;
-
-                origID.SubjectKeyIdentifier = ski.GetEncoded(Asn1Encodable.Der);
+                origID.SubjectKeyIdentifier = originator.SubjectKeyIdentifier.GetEncoded(Asn1Encodable.Der);
             }
 
             return GetPublicKeyFromOriginatorID(origID);
         }
 
-        private AsymmetricKeyParameter GetPublicKeyFromOriginatorPublicKey(AsymmetricKeyParameter receiverPrivateKey,
+        private static AsymmetricKeyParameter GetPublicKeyFromOriginatorPublicKey(AsymmetricKeyParameter receiverPrivateKey,
             OriginatorPublicKey originatorPublicKey)
         {
             PrivateKeyInfo privInfo = PrivateKeyInfoFactory.CreatePrivateKeyInfo(receiverPrivateKey);
@@ -116,19 +109,18 @@ namespace Org.BouncyCastle.Cms
             throw new CmsException("No support for 'originator' as IssuerAndSerialNumber or SubjectKeyIdentifier");
         }
 
-        private KeyParameter CalculateAgreedWrapKey(DerObjectIdentifier wrapAlgOid,
-            AsymmetricKeyParameter senderPublicKey, AsymmetricKeyParameter receiverPrivateKey)
+        private static KeyParameter CalculateAgreedWrapKey(AlgorithmIdentifier agreeAlgID,
+            AlgorithmIdentifier wrapAlgID, AsymmetricKeyParameter senderPublicKey, Asn1OctetString userKeyingMaterial,
+            AsymmetricKeyParameter receiverPrivateKey)
         {
-            DerObjectIdentifier agreeAlgID = keyEncAlg.Algorithm;
+            DerObjectIdentifier agreeAlgOid = agreeAlgID.Algorithm;
 
             ICipherParameters senderPublicParams = senderPublicKey;
             ICipherParameters receiverPrivateParams = receiverPrivateKey;
 
-            if (agreeAlgID.Id.Equals(CmsEnvelopedGenerator.ECMqvSha1Kdf))
+            if (CmsUtilities.IsMqv(agreeAlgOid))
             {
-                byte[] ukmEncoding = m_info.UserKeyingMaterial.GetOctets();
-                MQVuserKeyingMaterial ukm = MQVuserKeyingMaterial.GetInstance(
-                    Asn1Object.FromByteArray(ukmEncoding));
+                MQVuserKeyingMaterial ukm = MQVuserKeyingMaterial.GetInstance(userKeyingMaterial.GetOctets());
 
                 AsymmetricKeyParameter ephemeralKey = GetPublicKeyFromOriginatorPublicKey(
                     receiverPrivateKey, ukm.EphemeralPublicKey);
@@ -140,8 +132,19 @@ namespace Org.BouncyCastle.Cms
                     (ECPrivateKeyParameters)receiverPrivateParams,
                     (ECPrivateKeyParameters)receiverPrivateParams);
             }
+            else
+            {
+                // TODO[cms] bc-java has other consumers of userKeyingMaterial in EC, GOST, RFC2631 branches
+            }
 
-            IBasicAgreement agreement = AgreementUtilities.GetBasicAgreementWithKdf(agreeAlgID, wrapAlgOid);
+            /*
+             * TODO[cms] This seems like the place where the original wrapAlgID.Parameters gets lost so that
+             * ECDHKekGenerator ultimately has to rebuild the AlgorithmIdentifier that it gives to ECC_CMS_SharedInfo.
+             * This leads to broken signatures (especially for AES, since it always rebuilds with ASN.1 NULL).
+             * Instead, the full wrapAlgID needs to propagate throughout.
+             */
+            DerObjectIdentifier wrapAlgOid = wrapAlgID.Algorithm;
+            IBasicAgreement agreement = AgreementUtilities.GetBasicAgreementWithKdf(agreeAlgOid, wrapAlgOid);
             agreement.Init(receiverPrivateParams);
             BigInteger agreedValue = agreement.CalculateAgreement(senderPublicParams);
 
@@ -164,12 +167,14 @@ namespace Org.BouncyCastle.Cms
         {
             try
             {
-                var wrapAlgOid = DerObjectIdentifier.GetInstance(Asn1Sequence.GetInstance(keyEncAlg.Parameters)[0]);
+                AlgorithmIdentifier wrapAlgID = AlgorithmIdentifier.GetInstance(keyEncAlg.Parameters);
 
                 AsymmetricKeyParameter senderPublicKey = GetSenderPublicKey(receiverPrivateKey, m_info.Originator);
 
-                KeyParameter agreedWrapKey = CalculateAgreedWrapKey(wrapAlgOid, senderPublicKey, receiverPrivateKey);
+                KeyParameter agreedWrapKey = CalculateAgreedWrapKey(keyEncAlg, wrapAlgID, senderPublicKey,
+                    m_info.UserKeyingMaterial, receiverPrivateKey);
 
+                DerObjectIdentifier wrapAlgOid = wrapAlgID.Algorithm;
                 if (CryptoProObjectIdentifiers.id_Gost28147_89_None_KeyWrap.Equals(wrapAlgOid) ||
                     CryptoProObjectIdentifiers.id_Gost28147_89_CryptoPro_KeyWrap.Equals(wrapAlgOid))
                 {

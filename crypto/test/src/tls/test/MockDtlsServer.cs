@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 
@@ -49,7 +49,7 @@ namespace Org.BouncyCastle.Tls.Tests
         {
             ProtocolVersion serverVersion = base.GetServerVersion();
 
-            Console.WriteLine("DTLS server negotiated " + serverVersion);
+            Console.WriteLine("DTLS server negotiated version " + serverVersion);
 
             return serverVersion;
         }
@@ -96,6 +96,7 @@ namespace Org.BouncyCastle.Tls.Tests
 
             string[] trustedCertResources = new string[]{ "x509-client-dsa.pem", "x509-client-ecdh.pem",
                 "x509-client-ecdsa.pem", "x509-client-ed25519.pem", "x509-client-ed448.pem",
+                "x509-client-ml_dsa_44.pem", "x509-client-ml_dsa_65.pem", "x509-client-ml_dsa_87.pem",
                 "x509-client-rsa_pss_256.pem", "x509-client-rsa_pss_384.pem", "x509-client-rsa_pss_512.pem",
                 "x509-client-rsa.pem" };
 

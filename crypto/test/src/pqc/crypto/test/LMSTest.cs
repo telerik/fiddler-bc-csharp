@@ -3,6 +3,7 @@ using System;
 using NUnit.Framework;
 
 using Org.BouncyCastle.Asn1.Pkcs;
+using Org.BouncyCastle.Asn1.X509;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Pqc.Crypto.Lms;
 using Org.BouncyCastle.Pqc.Crypto.Utilities;
@@ -97,6 +98,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Tests
             LmsSigner signer = new LmsSigner();
 
             Assert.AreEqual(2, privKey.GetUsagesRemaining());
+            Assert.AreEqual(2, privKey.IndexLimit);
             Assert.AreEqual(0, privKey.GetIndex());
 
             signer.Init(true, privKey);
@@ -119,6 +121,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.Tests
 
             Assert.True(signer.VerifySignature(msg2, sig));
 
+            signer.Init(true, privKey);
             try
             {
                 sig = signer.GenerateSignature(msg2);
@@ -141,10 +144,17 @@ namespace Org.BouncyCastle.Pqc.Crypto.Tests
 
             Assert.True(signer.VerifySignature(msg1, sig1));
 
-            PrivateKeyInfo pInfo = PqcPrivateKeyInfoFactory.CreatePrivateKeyInfo(kp.Private);//TODO
+            PrivateKeyInfo pInfo = PqcPrivateKeyInfoFactory.CreatePrivateKeyInfo(kp.Private);
             AsymmetricKeyParameter pKey = PqcPrivateKeyFactory.CreateKey(pInfo.GetEncoded());
 
             signer.Init(false, ((LmsPrivateKeyParameters)pKey).GetPublicKey());
+
+            Assert.True(signer.VerifySignature(msg1, sig1));
+
+            SubjectPublicKeyInfo spki = PqcSubjectPublicKeyInfoFactory.CreateSubjectPublicKeyInfo(kp.Public);
+            AsymmetricKeyParameter publicKeyRT = PqcPublicKeyFactory.CreateKey(spki.GetEncoded());
+
+            signer.Init(false, publicKeyRT);
 
             Assert.True(signer.VerifySignature(msg1, sig1));
         }
@@ -163,6 +173,53 @@ namespace Org.BouncyCastle.Pqc.Crypto.Tests
             lmsSigner.Init(false, pup);
 
             Assert.IsFalse(lmsSigner.VerifySignature(msg, sig));
+        }
+
+        // a valid LMS/HSS signature with appended trailing bytes must not verify (signature malleability)
+        [Test]
+        public void ShouldRejectTrailingBytesAndMalformedSignature()
+        {
+            SecureRandom rnd = new SecureRandom();
+            byte[] msg = Strings.ToByteArray("the message that was signed");
+
+            LmsKeyPairGenerator lmsKpg = new LmsKeyPairGenerator();
+            lmsKpg.Init(new LmsKeyGenerationParameters(
+                new LmsParameters(LMSigParameters.lms_sha256_n32_h5, LMOtsParameters.sha256_n32_w4), rnd));
+            AsymmetricCipherKeyPair lmsKp = lmsKpg.GenerateKeyPair();
+
+            LmsSigner lmsSigner = new LmsSigner();
+            lmsSigner.Init(true, lmsKp.Private);
+            byte[] lmsSig = lmsSigner.GenerateSignature(msg);
+
+            LmsSigner lmsVerifier = new LmsSigner();
+            lmsVerifier.Init(false, lmsKp.Public);
+            Assert.True(lmsVerifier.VerifySignature(msg, lmsSig), "pristine LMS signature should verify");
+
+            Assert.False(lmsVerifier.VerifySignature(msg, Arrays.CopyOf(lmsSig, lmsSig.Length + 16)),
+                "LMS signature with trailing bytes must be rejected (malleability)");
+            Assert.False(lmsVerifier.VerifySignature(msg, Arrays.CopyOf(lmsSig, lmsSig.Length + 1)),
+                "LMS signature with a single trailing byte must be rejected");
+            Assert.False(lmsVerifier.VerifySignature(msg, new byte[0]), "empty signature must be rejected");
+            Assert.False(lmsVerifier.VerifySignature(msg, Arrays.CopyOf(lmsSig, lmsSig.Length / 2)),
+                "truncated signature must be rejected");
+            Assert.False(lmsVerifier.VerifySignature(msg, new byte[lmsSig.Length]),
+                "all-zero signature must be rejected");
+
+            HssKeyPairGenerator hssKpg = new HssKeyPairGenerator();
+            hssKpg.Init(new HssKeyGenerationParameters(new LmsParameters[]{
+                new LmsParameters(LMSigParameters.lms_sha256_n32_h5, LMOtsParameters.sha256_n32_w4),
+                new LmsParameters(LMSigParameters.lms_sha256_n32_h5, LMOtsParameters.sha256_n32_w4) }, rnd));
+            AsymmetricCipherKeyPair hssKp = hssKpg.GenerateKeyPair();
+
+            HssSigner hssSigner = new HssSigner();
+            hssSigner.Init(true, hssKp.Private);
+            byte[] hssSig = hssSigner.GenerateSignature(msg);
+
+            HssSigner hssVerifier = new HssSigner();
+            hssVerifier.Init(false, hssKp.Public);
+            Assert.True(hssVerifier.VerifySignature(msg, hssSig), "pristine HSS signature should verify");
+            Assert.False(hssVerifier.VerifySignature(msg, Arrays.CopyOf(hssSig, hssSig.Length + 16)),
+                "HSS signature with trailing bytes must be rejected");
         }
 
         [Test]

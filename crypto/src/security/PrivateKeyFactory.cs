@@ -13,7 +13,7 @@ using Org.BouncyCastle.Asn1.Sec;
 using Org.BouncyCastle.Asn1.X509;
 using Org.BouncyCastle.Asn1.X9;
 using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Crypto.Generators;
+using Org.BouncyCastle.Crypto.Kems.MLKem;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Math;
 using Org.BouncyCastle.Pkcs;
@@ -23,24 +23,13 @@ namespace Org.BouncyCastle.Security
 {
     public static class PrivateKeyFactory
     {
-        public static AsymmetricKeyParameter CreateKey(
-            byte[] privateKeyInfoData)
-        {
-            return CreateKey(
-                PrivateKeyInfo.GetInstance(
-                    Asn1Object.FromByteArray(privateKeyInfoData)));
-        }
+        public static AsymmetricKeyParameter CreateKey(byte[] privateKeyInfoData) =>
+            CreateKey(PrivateKeyInfo.GetInstance(privateKeyInfoData));
 
-        public static AsymmetricKeyParameter CreateKey(
-            Stream inStr)
-        {
-            return CreateKey(
-                PrivateKeyInfo.GetInstance(
-                    Asn1Object.FromStream(inStr)));
-        }
+        public static AsymmetricKeyParameter CreateKey(Stream inStr) =>
+            CreateKey(PrivateKeyInfo.GetInstance(Asn1Object.FromStream(inStr)));
 
-        public static AsymmetricKeyParameter CreateKey(
-            PrivateKeyInfo keyInfo)
+        public static AsymmetricKeyParameter CreateKey(PrivateKeyInfo keyInfo)
         {
             AlgorithmIdentifier algID = keyInfo.PrivateKeyAlgorithm;
             DerObjectIdentifier algOid = algID.Algorithm;
@@ -67,8 +56,7 @@ namespace Org.BouncyCastle.Security
             //			else if (algOid.Equals(X9ObjectIdentifiers.DHPublicNumber))
             else if (algOid.Equals(PkcsObjectIdentifiers.DhKeyAgreement))
             {
-                DHParameter para = new DHParameter(
-                    Asn1Sequence.GetInstance(algID.Parameters.ToAsn1Object()));
+                DHParameter para = DHParameter.GetInstance(algID.Parameters);
                 DerInteger derX = (DerInteger)keyInfo.ParsePrivateKey();
 
                 BigInteger lVal = para.L;
@@ -79,8 +67,7 @@ namespace Org.BouncyCastle.Security
             }
             else if (algOid.Equals(OiwObjectIdentifiers.ElGamalAlgorithm))
             {
-                ElGamalParameter para = new ElGamalParameter(
-                    Asn1Sequence.GetInstance(algID.Parameters.ToAsn1Object()));
+                ElGamalParameter para = ElGamalParameter.GetInstance(algID.Parameters);
                 DerInteger derX = (DerInteger)keyInfo.ParsePrivateKey();
 
                 return new ElGamalPrivateKeyParameters(
@@ -101,30 +88,20 @@ namespace Org.BouncyCastle.Security
 
                 return new DsaPrivateKeyParameters(derX.Value, parameters);
             }
+            /*
+             * TODO id-ecDH (SecObjectIdentifiers.ecdh) and/or id-ecMQV (SecObjectIdentifiers.ecmqv) could be supported
+             * if we could properly restrict usage of the resulting key.
+             */
             else if (algOid.Equals(X9ObjectIdentifiers.IdECPublicKey))
             {
-                X962Parameters para = X962Parameters.GetInstance(algID.Parameters.ToAsn1Object());
-
-                X9ECParameters x9;
-                if (para.IsNamedCurve)
-                {
-                    x9 = ECKeyPairGenerator.FindECCurveByOid((DerObjectIdentifier)para.Parameters);
-                }
-                else
-                {
-                    x9 = new X9ECParameters((Asn1Sequence)para.Parameters);
-                }
-
-                ECPrivateKeyStructure ec = ECPrivateKeyStructure.GetInstance(keyInfo.ParsePrivateKey());
-                BigInteger d = ec.GetKey();
-
-                if (para.IsNamedCurve)
-                {
-                    return new ECPrivateKeyParameters("EC", d, (DerObjectIdentifier)para.Parameters);
-                }
-
-                ECDomainParameters dParams = new ECDomainParameters(x9.Curve, x9.G, x9.N, x9.H, x9.GetSeed());
-                return new ECPrivateKeyParameters(d, dParams);
+                /*
+                 * TODO Consistency checks in case parameters and/or public key are specified at both the
+                 * PrivateKeyInfo and ECPrivateKey levels?
+                 */
+                ECPrivateKeyStructure ecPrivateKey = ECPrivateKeyStructure.GetInstance(keyInfo.ParsePrivateKey());
+                X962Parameters parameters = X962Parameters.GetInstance(algID.Parameters);
+                ECDomainParameters domainParameters = ECDomainParameters.FromX962Parameters(parameters);
+                return new ECPrivateKeyParameters("EC", ecPrivateKey.GetKey(), domainParameters);
             }
             else if (algOid.Equals(CryptoProObjectIdentifiers.GostR3410x2001) ||
                      algOid.Equals(RosstandartObjectIdentifiers.id_tc26_gost_3410_12_512) ||
@@ -133,7 +110,7 @@ namespace Org.BouncyCastle.Security
                 Asn1Object p = algID.Parameters.ToAsn1Object();
                 Gost3410PublicKeyAlgParameters gostParams = Gost3410PublicKeyAlgParameters.GetInstance(p);
 
-                ECGost3410Parameters ecSpec;
+                ECGost3410Parameters ecSpec = null;
                 BigInteger d;
 
                 if (p is Asn1Sequence seq && (seq.Count == 2 || seq.Count == 3))
@@ -170,31 +147,12 @@ namespace Org.BouncyCastle.Security
                 }
                 else
                 {
-                    X962Parameters x962Parameters = X962Parameters.GetInstance(p);
-
-                    if (x962Parameters.IsNamedCurve)
+                    X962Parameters parameters = X962Parameters.GetInstance(p);
+                    if (!parameters.IsImplicitlyCA)
                     {
-                        DerObjectIdentifier oid = DerObjectIdentifier.GetInstance(x962Parameters.Parameters);
-                        X9ECParameters ecP = ECNamedCurveTable.GetByOid(oid);
-                        if (ecP == null)
-                            throw new ArgumentException("Unrecognized curve OID for GostR3410x2001 private key");
-
+                        ECDomainParameters domainParameters = ECDomainParameters.FromX962Parameters(parameters);
                         ecSpec = new ECGost3410Parameters(
-                            new ECNamedDomainParameters(oid, ecP),
-                            gostParams.PublicKeyParamSet,
-                            gostParams.DigestParamSet,
-                            gostParams.EncryptionParamSet);
-                    }
-                    else if (x962Parameters.IsImplicitlyCA)
-                    {
-                        ecSpec = null;
-                    }
-                    else
-                    {
-                        X9ECParameters ecP = X9ECParameters.GetInstance(x962Parameters.Parameters);
-
-                        ecSpec = new ECGost3410Parameters(
-                            new ECNamedDomainParameters(algOid, ecP),
+                            domainParameters,
                             gostParams.PublicKeyParamSet,
                             gostParams.DigestParamSet,
                             gostParams.EncryptionParamSet);
@@ -214,6 +172,7 @@ namespace Org.BouncyCastle.Security
                 }
 
                 return new ECPrivateKeyParameters(
+                    "ECGOST3410",
                     d,
                     new ECGost3410Parameters(
                         ecSpec,
@@ -272,7 +231,7 @@ namespace Org.BouncyCastle.Security
             {
                 Gost3410PublicKeyAlgParameters gostParams = Gost3410PublicKeyAlgParameters.GetInstance(
                     keyInfo.PrivateKeyAlgorithm.Parameters);
-                ECGost3410Parameters ecSpec;
+                ECGost3410Parameters ecSpec = null;
                 BigInteger d;
                 Asn1Object p = keyInfo.PrivateKeyAlgorithm.Parameters.ToAsn1Object();
                 if (p is Asn1Sequence && (Asn1Sequence.GetInstance(p).Count == 2 || Asn1Sequence.GetInstance(p).Count == 3))
@@ -295,9 +254,10 @@ namespace Org.BouncyCastle.Security
                     else
                     {
                         Asn1Encodable privKey = keyInfo.ParsePrivateKey();
-                        if (privKey is DerInteger)
+                        DerInteger derInteger = DerInteger.GetOptional(privKey);
+                        if (derInteger != null)
                         {
-                            d = DerInteger.GetInstance(privKey).PositiveValue;
+                            d = derInteger.PositiveValue;
                         }
                         else
                         {
@@ -309,33 +269,18 @@ namespace Org.BouncyCastle.Security
                 else
                 {
                     X962Parameters parameters = X962Parameters.GetInstance(keyInfo.PrivateKeyAlgorithm.Parameters);
-
-                    if (parameters.IsNamedCurve)
+                    if (!parameters.IsImplicitlyCA)
                     {
-                        DerObjectIdentifier oid = DerObjectIdentifier.GetInstance(parameters.Parameters);
-                        X9ECParameters ecP = ECKeyPairGenerator.FindECCurveByOid(oid);
-
-                        ecSpec = new ECGost3410Parameters(new ECNamedDomainParameters(oid, ecP),
-                            gostParams.PublicKeyParamSet, gostParams.DigestParamSet,
-                            gostParams.EncryptionParamSet);
-                    }
-                    else if (parameters.IsImplicitlyCA)
-                    {
-                        ecSpec = null;
-                    }
-                    else
-                    {
-                        X9ECParameters ecP = X9ECParameters.GetInstance(parameters.Parameters);
-                        ecSpec = new ECGost3410Parameters(new ECNamedDomainParameters(algOid, ecP),
-                            gostParams.PublicKeyParamSet, gostParams.DigestParamSet,
-                            gostParams.EncryptionParamSet);
+                        ECDomainParameters domainParameters = ECDomainParameters.FromX962Parameters(parameters);
+                        ecSpec = new ECGost3410Parameters(domainParameters, gostParams.PublicKeyParamSet,
+                            gostParams.DigestParamSet, gostParams.EncryptionParamSet);
                     }
 
                     Asn1Encodable privKey = keyInfo.ParsePrivateKey();
-                    if (privKey is DerInteger)
+                    DerInteger derInteger = DerInteger.GetOptional(privKey);
+                    if (derInteger != null)
                     {
-                        DerInteger derD = DerInteger.GetInstance(privKey);
-                        d = derD.Value;
+                        d = derInteger.Value;
                     }
                     else
                     {
@@ -351,7 +296,170 @@ namespace Org.BouncyCastle.Security
                         gostParams.PublicKeyParamSet,
                         gostParams.DigestParamSet,
                         gostParams.EncryptionParamSet));
+            }
+            else if (MLDsaParameters.ByOid.TryGetValue(algOid, out MLDsaParameters mlDsaParameters))
+            {
+                // NOTE: We ignore the publicKey field since the private key already includes the public key
+                // TODO[pqc] Validate the public key if it is included?
 
+                var privateKey = keyInfo.PrivateKey;
+                int length = privateKey.GetOctetsLength();
+
+                // TODO[api] Eventually remove legacy support for raw octets
+                {
+                    var parameterSet = mlDsaParameters.ParameterSet;
+
+                    if (length == parameterSet.SeedLength)
+                        return MLDsaPrivateKeyParameters.FromSeed(mlDsaParameters, seed: privateKey.GetOctets());
+
+                    if (length == parameterSet.PrivateKeyLength)
+                        return MLDsaPrivateKeyParameters.FromEncoding(mlDsaParameters, encoding: privateKey.GetOctets());
+                }
+
+                try
+                {
+                    var asn1Object = Asn1Object.FromByteArray(privateKey.GetOctets());
+
+                    if (asn1Object is Asn1TaggedObject taggedSeedOnly)
+                    {
+                        // SeedOnly is a [CONTEXT 0] IMPLICIT OCTET STRING
+                        if (taggedSeedOnly.HasContextTag(0))
+                        {
+                            var seed = Asn1OctetString.GetTagged(taggedSeedOnly, declaredExplicit: false).GetOctets();
+                            return MLDsaPrivateKeyParameters.FromSeed(mlDsaParameters, seed);
+                        }
+                    }
+                    else if (asn1Object is Asn1OctetString encodingOnly)
+                    {
+                        // EncodingOnly is an OCTET STRING
+                        var encoding = encodingOnly.GetOctets();
+                        return MLDsaPrivateKeyParameters.FromEncoding(mlDsaParameters, encoding);
+                    }
+                    else if (asn1Object is Asn1Sequence sequence)
+                    {
+                        // SeedAndEncoding is a SEQUENCE containing a seed OCTET STRING and an encoding OCTET STRING
+                        if (sequence.Count == 2)
+                        {
+                            var seed = Asn1OctetString.GetInstance(sequence[0]).GetOctets();
+                            var encoding = Asn1OctetString.GetInstance(sequence[1]).GetOctets();
+
+                            var fromSeed = MLDsaPrivateKeyParameters.FromSeed(mlDsaParameters, seed,
+                                preferredFormat: MLDsaPrivateKeyParameters.Format.SeedAndEncoding);
+
+                            /*
+                             * RFC 9881 8.2. When receiving a private key that contains both the seed and the
+                             * expandedKey, the recipient SHOULD perform a seed consistency check to ensure that the
+                             * sender properly generated the private key. [..] If the check is done and the seed and the
+                             * expandedKey are not consistent, the recipient MUST reject the private key as malformed.
+                             */
+                            if (!Arrays.FixedTimeEquals(fromSeed.GetEncoded(), encoding))
+                                throw new ArgumentException("inconsistent " + mlDsaParameters.Name + " private key");
+
+                            return fromSeed;
+                        }
+                    }
+                }
+                catch (Exception)
+                {
+                    // Ignore
+                }
+
+                throw new ArgumentException("invalid " + mlDsaParameters.Name + " private key");
+            }
+            else if (MLKemParameters.ByOid.TryGetValue(algOid, out MLKemParameters mlKemParameters))
+            {
+                // NOTE: We ignore the publicKey field since the private key already includes the public key
+                // TODO[pqc] Validate the public key if it is included?
+
+                var privateKey = keyInfo.PrivateKey;
+                int length = privateKey.GetOctetsLength();
+
+                // TODO[api] Eventually remove legacy support for raw octets
+                {
+                    if (length == MLKemEngine.SeedBytes)
+                        return MLKemPrivateKeyParameters.FromSeed(mlKemParameters, seed: privateKey.GetOctets());
+
+                    if (length == mlKemParameters.ParameterSet.Engine.SecretKeyBytes)
+                        return MLKemPrivateKeyParameters.FromEncoding(mlKemParameters, encoding: privateKey.GetOctets());
+                }
+
+                try
+                {
+                    var asn1Object = Asn1Object.FromByteArray(privateKey.GetOctets());
+
+                    if (asn1Object is Asn1TaggedObject taggedSeedOnly)
+                    {
+                        // SeedOnly is a [CONTEXT 0] IMPLICIT OCTET STRING
+                        if (taggedSeedOnly.HasContextTag(0))
+                        {
+                            var seed = Asn1OctetString.GetTagged(taggedSeedOnly, declaredExplicit: false).GetOctets();
+                            return MLKemPrivateKeyParameters.FromSeed(mlKemParameters, seed);
+                        }
+                    }
+                    else if (asn1Object is Asn1OctetString encodingOnly)
+                    {
+                        // EncodingOnly is an OCTET STRING
+                        var encoding = encodingOnly.GetOctets();
+                        return MLKemPrivateKeyParameters.FromEncoding(mlKemParameters, encoding);
+                    }
+                    else if (asn1Object is Asn1Sequence sequence)
+                    {
+                        // SeedAndEncoding is a SEQUENCE containing a seed OCTET STRING and an encoding OCTET STRING
+                        if (sequence.Count == 2)
+                        {
+                            var seed = Asn1OctetString.GetInstance(sequence[0]).GetOctets();
+                            var encoding = Asn1OctetString.GetInstance(sequence[1]).GetOctets();
+
+                            var fromSeed = MLKemPrivateKeyParameters.FromSeed(mlKemParameters, seed,
+                                preferredFormat: MLKemPrivateKeyParameters.Format.SeedAndEncoding);
+
+                            if (!Arrays.FixedTimeEquals(fromSeed.GetEncoded(), encoding))
+                                throw new ArgumentException("inconsistent " + mlKemParameters.Name + " private key");
+
+                            return fromSeed;
+                        }
+                    }
+                }
+                catch (Exception)
+                {
+                    // Ignore
+                }
+
+                throw new ArgumentException("invalid " + mlKemParameters.Name + " private key");
+            }
+            else if (SlhDsaParameters.ByOid.TryGetValue(algOid, out SlhDsaParameters slhDsaParameters))
+            {
+                // NOTE: We ignore the publicKey field since the private key already includes the public key
+                // TODO[pqc] Validate the public key if it is included?
+
+                int privateKeyLength = slhDsaParameters.ParameterSet.PrivateKeyLength;
+
+                var privateKey = keyInfo.PrivateKey;
+                int octetsLength = privateKey.GetOctetsLength();
+
+                if (octetsLength == privateKeyLength)
+                    return SlhDsaPrivateKeyParameters.FromEncoding(slhDsaParameters, encoding: privateKey.GetOctets());
+
+                // TODO[api] Eventually remove legacy support for OCTET STRING encoding
+                if (octetsLength > privateKeyLength)
+                {
+                    try
+                    {
+                        var asn1Object = Asn1Object.FromByteArray(privateKey.GetOctets());
+
+                        if (asn1Object is Asn1OctetString octetString)
+                        {
+                            var encoding = octetString.GetOctets();
+                            return MLKemPrivateKeyParameters.FromEncoding(mlKemParameters, encoding);
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        // Ignore
+                    }
+                }
+
+                throw new ArgumentException("invalid " + slhDsaParameters.Name + " private key");
             }
             else
             {
@@ -371,32 +479,16 @@ namespace Org.BouncyCastle.Security
         }
 #endif
 
-        public static AsymmetricKeyParameter DecryptKey(
-            char[] passPhrase,
-            EncryptedPrivateKeyInfo encInfo)
-        {
-            return CreateKey(PrivateKeyInfoFactory.CreatePrivateKeyInfo(passPhrase, encInfo));
-        }
+        public static AsymmetricKeyParameter DecryptKey(char[] passPhrase, EncryptedPrivateKeyInfo encInfo) =>
+            CreateKey(PrivateKeyInfoFactory.CreatePrivateKeyInfo(passPhrase, encInfo));
 
-        public static AsymmetricKeyParameter DecryptKey(
-            char[] passPhrase,
-            byte[] encryptedPrivateKeyInfoData)
-        {
-            return DecryptKey(passPhrase, Asn1Object.FromByteArray(encryptedPrivateKeyInfoData));
-        }
+        public static AsymmetricKeyParameter DecryptKey(char[] passPhrase, byte[] encryptedPrivateKeyInfoData) =>
+            DecryptKey(passPhrase, EncryptedPrivateKeyInfo.GetInstance(encryptedPrivateKeyInfoData));
 
-        public static AsymmetricKeyParameter DecryptKey(
-            char[] passPhrase,
-            Stream encryptedPrivateKeyInfoStream)
+        public static AsymmetricKeyParameter DecryptKey(char[] passPhrase, Stream encryptedPrivateKeyInfoStream)
         {
-            return DecryptKey(passPhrase, Asn1Object.FromStream(encryptedPrivateKeyInfoStream));
-        }
-
-        private static AsymmetricKeyParameter DecryptKey(
-            char[] passPhrase,
-            Asn1Object asn1Object)
-        {
-            return DecryptKey(passPhrase, EncryptedPrivateKeyInfo.GetInstance(asn1Object));
+            return DecryptKey(passPhrase,
+                EncryptedPrivateKeyInfo.GetInstance(Asn1Object.FromStream(encryptedPrivateKeyInfoStream)));
         }
 
         public static byte[] EncryptKey(

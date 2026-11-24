@@ -4,6 +4,7 @@ using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Pqc.Crypto.SphincsPlus
 {
+    [Obsolete("Use SLH-DSA instead")]
     public sealed class SphincsPlusPublicKeyParameters
         : SphincsPlusKeyParameters
     {
@@ -39,5 +40,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.SphincsPlus
         {
             return Arrays.Clone(m_pk.seed);
         }
+
+        internal PK PK => m_pk;
     }
 }

@@ -23,26 +23,26 @@ namespace Org.BouncyCastle.Asn1.Esf
             return new OcspResponsesID(Asn1Sequence.GetInstance(obj));
         }
 
-        public static OcspResponsesID GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
-        {
-            return new OcspResponsesID(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
-        }
+        public static OcspResponsesID GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new OcspResponsesID(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
+
+        public static OcspResponsesID GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new OcspResponsesID(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
         private readonly OcspIdentifier m_ocspIdentifier;
         private readonly OtherHash m_ocspRepHash;
 
         private OcspResponsesID(Asn1Sequence seq)
 		{
-			int count = seq.Count;
+			int count = seq.Count, pos = 0;
 			if (count < 1 || count > 2)
 				throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
 
-			m_ocspIdentifier = OcspIdentifier.GetInstance(seq[0]);
+			m_ocspIdentifier = Asn1Utilities.Read(seq, ref pos, OcspIdentifier.GetInstance);
+			m_ocspRepHash = Asn1Utilities.ReadOptional(seq, ref pos, OtherHash.GetOptional);
 
-			if (seq.Count > 1)
-			{
-				m_ocspRepHash = OtherHash.GetInstance(seq[1]);
-			}
+			if (pos != count)
+				throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
 		}
 
         public OcspResponsesID(OcspIdentifier ocspIdentifier)

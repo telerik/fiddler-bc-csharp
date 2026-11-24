@@ -1,452 +1,375 @@
-﻿using System;
+using System;
+
+using Org.BouncyCastle.Crypto.Digests;
 using Org.BouncyCastle.Crypto.Utilities;
+using Org.BouncyCastle.Math.Raw;
+using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Pqc.Crypto.Hqc
 {
     internal class HqcEngine
     {
-        private int n;
-        private int n1;
-        private int n2;
-        private int k;
-        private int delta;
-        private int w;
-        private int wr;
-        private int we;
-        private int g;
-        private int rejectionThreshold;
-        private int fft;
-        private int mulParam;
+        internal const int SharedSecretBytes = 32;
+        private const int SaltBytes = 16;
+        private const int SeedBytes = 32;
 
-        private int SEED_SIZE = 40;
-        private byte G_FCT_DOMAIN = 3;
-        private byte H_FCT_DOMAIN = 4;
-        private byte K_FCT_DOMAIN = 5;
+        private readonly int m_n;
+        private readonly int m_n1;
+        private readonly int m_k;
+        private readonly int m_delta;
+        private readonly int m_w;
+        private readonly int m_wr;
+        private readonly int m_fft;
+        private readonly int m_mulParam;
+        private readonly int N_BYTE;
+        private readonly int N1N2_BYTE_64;
+        private readonly int N1N2_BYTE;
+        private readonly int[] m_generatorPoly;
+        private readonly int m_nMu;
+        private readonly int m_pkSize;
+        private readonly GF2x m_gf2x;
+        private readonly int m_rejectionThreshold;
+        private readonly int m_cipherTextBytes;
 
-        private int N_BYTE;
-        private int n1n2;
-        private int N_BYTE_64;
-        private int K_BYTE;
-        private int K_BYTE_64;
-        private int N1_BYTE_64;
-        private int N1N2_BYTE_64;
-        private int N1N2_BYTE;
-        private int N1_BYTE;
-        
-        //private int GF_POLY_WT  = 5;
-        //private int GF_POLY_M2 = 4;
-        private int SALT_SIZE_BYTES = 16;
-        //private int SALT_SIZE_64 = 2;
-
-        private int[] generatorPoly;
-        private int SHA512_BYTES = 512 / 8;
-
-        private ulong RED_MASK;
-        private GF2PolynomialCalculator gfCalculator;
-
-        public HqcEngine(int n, int n1, int n2, int k, int g, int delta, int w, int wr, int we, int rejectionThreshold, int fft, int[] generatorPoly)
+        internal HqcEngine(int n, int n1, int n2, int k, int delta, int w, int wr, int fft, int nMu, int pkSize,
+            int[] generatorPoly)
         {
-            this.n = n;
-            this.k = k;
-            this.delta = delta;
-            this.w = w;
-            this.wr = wr;
-            this.we = we;
-            this.n1 = n1;
-            this.n2 = n2;
-            n1n2 = n1 * n2;
-            this.generatorPoly = generatorPoly;
-            this.g = g;
-            this.rejectionThreshold = rejectionThreshold;
-            this.fft = fft;
-
-            mulParam = (n2 + 127) / 128;
-            N_BYTE = Utils.GetByteSizeFromBitSize(n);
-            K_BYTE = k;
-            N_BYTE_64 = Utils.GetByte64SizeFromBitSize(n);
-            K_BYTE_64 = Utils.GetByteSizeFromBitSize(k);
-            N1_BYTE_64 = Utils.GetByteSizeFromBitSize(n1);
-            N1N2_BYTE_64 = Utils.GetByte64SizeFromBitSize(n1 * n2);
-            N1N2_BYTE = Utils.GetByteSizeFromBitSize(n1 * n2);
-            N1_BYTE = Utils.GetByteSizeFromBitSize(n1);
-            
-            RED_MASK = ((1UL << (n % 64)) - 1);
-
-            gfCalculator = new GF2PolynomialCalculator(N_BYTE_64, n, RED_MASK);
+            m_n = n;
+            m_k = k;
+            m_delta = delta;
+            m_w = w;
+            m_wr = wr;
+            m_n1 = n1;
+            m_generatorPoly = generatorPoly;
+            m_fft = fft;
+            m_nMu = nMu;
+            m_pkSize = pkSize;
+            m_mulParam = n2 >> 7;
+            this.N_BYTE = Utils.GetByteSizeFromBitSize(n);
+            this.N1N2_BYTE_64 = Utils.GetByte64SizeFromBitSize(n1 * n2);
+            this.N1N2_BYTE = Utils.GetByteSizeFromBitSize(n1 * n2);
+            m_gf2x = new GF2x(n);
+            m_rejectionThreshold = ((1 << 24) / n) * n;
+            m_cipherTextBytes = N_BYTE + N1N2_BYTE + 16;
         }
 
+        internal int CipherTextBytes => m_cipherTextBytes;
+
         /**
-         * Generate key pairs
-         * - Secret key : (x,y)
-         * - Public key: (h,s)
-         *  @param pk     output pk = (publicSeed||s)
+         * Generate key pairs - Secret key : (x,y) - Public key: (h,s)
          *
+         * @param pk output pk = (publicSeed||s)
          **/
-        public void GenKeyPair(byte[] pk, byte[] sk, byte[] seed)
+        internal void GenKeyPair(byte[] pk, byte[] sk, SecureRandom secureRandom)
         {
             // Randomly generate seeds for secret keys and public keys
-            byte[] secretKeySeed = new byte[SEED_SIZE];
+            byte[] seedKem = new byte[SeedBytes];
+            byte[] keyPairSeed = new byte[SeedBytes << 1];
+            ulong[] yLongBytes = m_gf2x.Create();
+            ulong[] h = m_gf2x.Create(); // s
 
-            HqcKeccakRandomGenerator randomGenerator = new HqcKeccakRandomGenerator(256);
-            randomGenerator.RandomGeneratorInit(seed, null, seed.Length, 0);
-            randomGenerator.Squeeze(secretKeySeed, 40);
+            secureRandom.NextBytes(seedKem);
+            Shake256RandomGenerator ctxKem = new Shake256RandomGenerator(seedKem, 0x01);
+            Array.Copy(seedKem, 0, sk, m_pkSize + SeedBytes + m_k, SeedBytes);
 
-            // 1. Randomly generate secret keys x, y
-            HqcKeccakRandomGenerator secretKeySeedExpander = new HqcKeccakRandomGenerator(256);
-            secretKeySeedExpander.SeedExpanderInit(secretKeySeed, secretKeySeed.Length);
+            ctxKem.NextBytes(seedKem);
+            ctxKem.NextBytes(sk, m_pkSize + SeedBytes, m_k);
 
-            long[] xLongBytes = new long[N_BYTE_64];
-            long[] yLongBytes = new long[N_BYTE_64];
+            HashHI(keyPairSeed, 512, seedKem, seedKem.Length, 0x02);
+            ctxKem.Init(keyPairSeed, 0, SeedBytes, 0x01);
 
-            GenerateRandomFixedWeight(xLongBytes, secretKeySeedExpander, w);
-            GenerateRandomFixedWeight(yLongBytes, secretKeySeedExpander, w);
-
-            // 2. Randomly generate h
-            byte[] publicKeySeed = new byte[SEED_SIZE];
-            randomGenerator.Squeeze(publicKeySeed, 40);
-
-            HqcKeccakRandomGenerator randomPublic = new HqcKeccakRandomGenerator(256);
-            randomPublic.SeedExpanderInit(publicKeySeed, publicKeySeed.Length);
-
-            long[] hLongBytes = new long[N_BYTE_64];
-            GeneratePublicKeyH(hLongBytes, randomPublic);
-
-            // 3. Compute s
-            long[] s = new long[N_BYTE_64];
-            gfCalculator.MultLongs(s, yLongBytes, hLongBytes);
-            GF2PolynomialCalculator.AddLongs(s, s, xLongBytes);
-            byte[] sBytes = new byte[N_BYTE];
-            Utils.FromLongArrayToByteArray(sBytes, s);
-
-            byte[] tmpPk = Arrays.Concatenate(publicKeySeed, sBytes);
-            byte[] tmpSk = Arrays.Concatenate(secretKeySeed, tmpPk);
-
-            Array.Copy(tmpPk, 0, pk, 0, tmpPk.Length);
-            Array.Copy(tmpSk, 0, sk, 0, tmpSk.Length);
+            uint[] ySupport = SampleSupport1(ctxKem, m_w);
+            WriteSupportToVector(yLongBytes, ySupport, m_w);
+            uint[] xSupport = SampleSupport1(ctxKem, m_w);
+            Array.Copy(keyPairSeed, SeedBytes, pk, 0, SeedBytes);
+            ctxKem.Init(keyPairSeed, SeedBytes, SeedBytes, 0x01);
+            m_gf2x.Random(ctxKem, h);
+            m_gf2x.Mul(h, yLongBytes, h); // h is s as the output
+            AddSupportTo(h, xSupport, m_w); // h ^= x
+            Utils.FromUInt64ArrayToByteArray(pk, SeedBytes, pk.Length - SeedBytes, h);
+            Array.Copy(keyPairSeed, 0, sk, m_pkSize, SeedBytes);
+            Array.Copy(pk, 0, sk, 0, m_pkSize);
+            Arrays.Clear(keyPairSeed);
+            Array.Clear(ySupport, 0, ySupport.Length);
+            Array.Clear(xSupport, 0, xSupport.Length);
+            m_gf2x.Clear(yLongBytes);
+            m_gf2x.Clear(h);
         }
 
         /**
-         * HQC Encapsulation
-         * - Input: pk, seed
-         * - Output: c = (u,v,d), K
+         * HQC Encapsulation - Input: pk, seed - Output: c = (u,v,d), K
          *
-         * @param u    u
-         * @param v    v
-         * @param d    d
-         * @param K    session key
-         * @param pk   public key
-         * @param seed seed
+         * @param u u
+         * @param v v
+         * @param kTheta session key
+         * @param pk public key
          **/
-        public void Encaps(byte[] u, byte[] v, byte[] K, byte[] d, byte[] pk, byte[] seed, byte[] salt)
+        internal void Encaps(byte[] u, byte[] v, byte[] kTheta, byte[] pk, byte[] salt, SecureRandom secureRandom)
         {
             // 1. Randomly generate m
-            byte[] m = new byte[K_BYTE];
+            byte[] m = new byte[m_k];
+            byte[] hashEkKem = new byte[SeedBytes];
+            ulong[] u64 = m_gf2x.Create();
+            ulong[] v64 = new ulong[N1N2_BYTE_64];
 
-            // TODO: no way to gen m without seed and gen skseed, pkseed. In reference implementation they use the same
-            byte[] secretKeySeed = new byte[SEED_SIZE];
-            HqcKeccakRandomGenerator randomGenerator = new HqcKeccakRandomGenerator(256);
-            randomGenerator.RandomGeneratorInit(seed, null, seed.Length, 0);
-            randomGenerator.Squeeze(secretKeySeed, 40);
+            secureRandom.NextBytes(m);
+            secureRandom.NextBytes(salt);
 
-            byte[] publicKeySeed = new byte[SEED_SIZE];
-            randomGenerator.Squeeze(publicKeySeed, 40);
-
-            // gen m
-            randomGenerator.Squeeze(m, K_BYTE);
-
-            // 2. Generate theta
-            byte[] theta = new byte[SHA512_BYTES];
-            byte[] tmp = new byte[K_BYTE + SEED_SIZE + SALT_SIZE_BYTES];
-            randomGenerator.Squeeze(salt, SALT_SIZE_BYTES);
-
-            Array.Copy(m, 0, tmp, 0, m.Length);
-            Array.Copy(pk, 0, tmp, K_BYTE, SEED_SIZE);
-            Array.Copy(salt, 0, tmp, K_BYTE + SEED_SIZE, SALT_SIZE_BYTES);
-            HqcKeccakRandomGenerator shakeDigest = new HqcKeccakRandomGenerator(256);
-            shakeDigest.SHAKE256_512_ds(theta, tmp, tmp.Length, new[] { G_FCT_DOMAIN });
-
-            // 3. Generate ciphertext c = (u,v)
-            // Extract public keys
-            long[] h = new long[N_BYTE_64];
-            byte[] s = new byte[N_BYTE];
-            ExtractPublicKeys(h, s, pk);
-
-            long[] vTmp = new long[N1N2_BYTE_64];
-            Encrypt(u, vTmp, h, s, m, theta);
-            Utils.FromLongArrayToByteArray(v, vTmp);
-
-            // 4. Compute d
-            shakeDigest.SHAKE256_512_ds(d, m, m.Length, new[] { H_FCT_DOMAIN });
-
-            // 5. Compute session key K
-            byte[] hashInputK = new byte[K_BYTE + N_BYTE + N1N2_BYTE];
-            hashInputK = Arrays.Concatenate(m, u);
-            hashInputK = Arrays.Concatenate(hashInputK, v);
-            shakeDigest.SHAKE256_512_ds(K, hashInputK, hashInputK.Length, new[] { K_FCT_DOMAIN });
+            HashHI(hashEkKem, 256, pk, pk.Length, 0x01);
+            HashGJ(kTheta, 512, hashEkKem, m, 0, m.Length, salt, 0, SaltBytes, 0x00);
+            PkeEncrypt(u64, v64, pk, m, kTheta, SeedBytes);
+            Utils.FromUInt64ArrayToByteArray(u, 0, u.Length, u64);
+            Utils.FromUInt64ArrayToByteArray(v, 0, v.Length, v64);
+            m_gf2x.Clear(u64);
+            Nat.Zero64(v64.Length, v64);
+            Arrays.Clear(m);
+            Arrays.Clear(hashEkKem);
         }
 
         /**
-         * HQC Decapsulation
-         * - Input: ct, sk
-         * - Output: ss
+         * HQC Decapsulation - Input: ct, sk - Output: ss
          *
          * @param ss session key
          * @param ct ciphertext
          * @param sk secret key
+         * @return 0 if decapsulation is successful, -1 otherwise
          **/
-        public void Decaps(byte[] ss, byte[] ct, byte[] sk)
+        internal int Decaps(byte[] ss, byte[] ct, byte[] sk)
         {
-            //Extract Y and Public Keys from sk
-            long[] x = new long[N_BYTE_64];
-            long[] y = new long[N_BYTE_64];
-            byte[] pk = new byte[40 + N_BYTE];
-            ExtractKeysFromSecretKeys(x, y, pk, sk);
+            // Extract Y and Public Keys from sk
+            ulong[] u64 = m_gf2x.Create();
+            ulong[] v64 = new ulong[N1N2_BYTE_64]; // ciphertext v: an n1*n2-bit codeword, not a ring element
+            ulong[] cKemPrimeU64 = m_gf2x.Create(); // tmpLong
+            ulong[] cKemPrimeV64 = m_gf2x.Create(); // re-encryption v scratch
+            byte[] hashEkKem = new byte[SeedBytes];
+            byte[] kThetaPrime = new byte[32 + SeedBytes];
+            byte[] mPrime = new byte[m_k];
+            byte[] kBar = new byte[32];
+            byte[] tmp = new byte[m_n1];
+
+            Shake256RandomGenerator generator = new Shake256RandomGenerator(sk, m_pkSize, SeedBytes, 0x01);
+            uint[] ySupport = SampleSupport1(generator, m_w);
+            WriteSupportToVector(cKemPrimeV64, ySupport, m_w); // cKemPrimeV64 holds dense y for the multiply
 
             // Extract u, v, d from ciphertext
-            byte[] u = new byte[N_BYTE];
-            byte[] v = new byte[N1N2_BYTE];
-            byte[] d = new byte[SHA512_BYTES];
-            byte[] salt = new byte[SALT_SIZE_BYTES];
-            ExtractCiphertexts(u, v, d, salt, ct);
+            Utils.FromByteArrayToUInt64Array(u64, ct, 0, N_BYTE);
+            Utils.FromByteArrayToUInt64Array(v64, ct, N_BYTE, N1N2_BYTE);
 
-            // 1. Decrypt -> m'
-            byte[] mPrimeBytes = new byte[k];
-            Decrypt(mPrimeBytes, mPrimeBytes, u, v, y);
+            // cKemPrimeU64 is tmpLong
+            m_gf2x.Mul(cKemPrimeV64, u64, cKemPrimeU64);
+            VectTruncate(cKemPrimeU64);
+            Nat.XorTo64(N1N2_BYTE_64, v64, cKemPrimeU64); // cKemPrimeU64 ^= v over the codeword limbs
 
-            // 2. Compute theta'
-            byte[] theta = new byte[SHA512_BYTES];
-            byte[] tmp = new byte[K_BYTE + SALT_SIZE_BYTES + SEED_SIZE];
-            Array.Copy(mPrimeBytes, 0, tmp, 0, mPrimeBytes.Length);
-            Array.Copy(pk, 0, tmp, K_BYTE, SEED_SIZE);
-            Array.Copy(salt, 0, tmp, K_BYTE + SEED_SIZE, SALT_SIZE_BYTES);
-            HqcKeccakRandomGenerator shakeDigest = new HqcKeccakRandomGenerator(256);
-            shakeDigest.SHAKE256_512_ds(theta, tmp, tmp.Length, new[] { G_FCT_DOMAIN });
+            ReedMuller.Decode(tmp, cKemPrimeU64, m_n1, m_mulParam);
+            ReedSolomon.Decode(mPrime, tmp, m_n1, m_fft, m_delta, m_k, m_generatorPoly.Length);
 
-            // 3. Compute c' = Enc(pk, m', theta')
-            // Extract public keys
-            long[] h = new long[N_BYTE_64];
-            byte[] s = new byte[N_BYTE];
-            ExtractPublicKeys(h, s, pk);
+            // Compute shared key K_prime and ciphertext cKemPrime
+            HashHI(hashEkKem, 256, sk, m_pkSize, 0x01);
+            HashGJ(kThetaPrime, 512, hashEkKem, mPrime, 0, mPrime.Length, ct, N_BYTE + N1N2_BYTE, SaltBytes, 0x00);
+            Array.Copy(kThetaPrime, 0, ss, 0, 32);
+            m_gf2x.Clear(cKemPrimeV64); // clear y before reusing cKemPrimeV64 for the re-encryption v
+            PkeEncrypt(cKemPrimeU64, cKemPrimeV64, sk, mPrime, kThetaPrime, 32);
+            HashGJ(kBar, 256, hashEkKem, sk, m_pkSize + SeedBytes, m_k, ct, 0, ct.Length, 0x03);
 
-            byte[] u2Bytes = new byte[N_BYTE];
-            byte[] v2Bytes = new byte[N1N2_BYTE];
-            long[] vTmp = new long[N1N2_BYTE_64];
-            Encrypt(u2Bytes, vTmp, h, s, mPrimeBytes, theta);
-            Utils.FromLongArrayToByteArray(v2Bytes, vTmp);
+            // u is a full ring element; v is an n1*n2-bit codeword, so compare it over just the codeword
+            // limbs (cKemPrimeV64's higher limbs are unused re-encryption scratch).
+            int result = (int)(m_gf2x.EqualTo(u64, cKemPrimeU64) & Nat.EqualTo64(N1N2_BYTE_64, v64, cKemPrimeV64));
 
-            // 4. Compute d' = H(m')
-            byte[] dPrime = new byte[SHA512_BYTES];
-            shakeDigest.SHAKE256_512_ds(dPrime, mPrimeBytes, mPrimeBytes.Length, new[] { H_FCT_DOMAIN });
-
-            // 5. Compute session key KPrime
-            byte[] hashInputK = new byte[K_BYTE + N_BYTE + N1N2_BYTE];
-            hashInputK = Arrays.Concatenate(mPrimeBytes, u);
-            hashInputK = Arrays.Concatenate(hashInputK, v);
-            shakeDigest.SHAKE256_512_ds(ss, hashInputK, hashInputK.Length, new[] { K_FCT_DOMAIN });
-
-            int result = 1;
-            // Compare u, v, d
-            if (!Arrays.AreEqual(u, u2Bytes))
+            // On re-encryption failure the implicit-rejection secret kBar must replace the *entire*
+            // shared secret. Bounding this by m_k would leave ss[m_k..] holding K' = G(H(pk)||m'||salt),
+            // which depends on the decrypted m' - an FO/IND-CCA break for the parameter sets with
+            // m_k < SharedSecretBytes (HQC-128: 16, HQC-192: 24).
+            for (int i = 0; i < SharedSecretBytes; i++)
             {
-                result = 0;
+                ss[i] = (byte)((ss[i] & result) ^ (kBar[i] & ~result));
             }
 
-            if (!Arrays.AreEqual(v, v2Bytes))
-            {
-                result = 0;
-            }
-
-            if (!Arrays.AreEqual(d, dPrime))
-            {
-                result = 0;
-            }
-
-            if (result == 0)
-            { //abort
-                for (int i = 0; i < GetSessionKeySize(); i++)
-                {
-                    ss[i] = 0;
-                }
-            }
+            m_gf2x.Clear(u64);
+            Nat.Zero64(v64.Length, v64);
+            m_gf2x.Clear(cKemPrimeU64);
+            m_gf2x.Clear(cKemPrimeV64);
+            Array.Clear(ySupport, 0, ySupport.Length);
+            Arrays.Clear(hashEkKem);
+            Arrays.Clear(kThetaPrime);
+            Arrays.Clear(mPrime);
+            Arrays.Clear(kBar);
+            Arrays.Clear(tmp);
+            return -result;
         }
 
-        internal int GetSessionKeySize()
+        private void PkeEncrypt(ulong[] u, ulong[] v, byte[] ekPke, byte[] m, byte[] theta, int thetaOff)
         {
-            return SHA512_BYTES;
+            ulong[] r2Dense = m_gf2x.Create();
+            ulong[] tmp = m_gf2x.Create(); // s, h1, h
+            byte[] res = new byte[m_n1];
+
+            ReedSolomon.Encode(res, m, m_n1, m_k, m_generatorPoly);
+            ReedMuller.Encode(v, res, m_n1, m_mulParam);
+
+            var randomGenerator = new Shake256RandomGenerator(ekPke, 0, SeedBytes, 0x01);
+            m_gf2x.Random(randomGenerator, tmp);
+
+            randomGenerator.Init(theta, thetaOff, SeedBytes, 0x01);
+            uint[] r2Support = SampleSupport2(randomGenerator, m_wr);
+            WriteSupportToVector(r2Dense, r2Support, m_wr);
+            m_gf2x.Mul(tmp, r2Dense, u);
+            Utils.FromByteArrayToUInt64Array(tmp, ekPke, SeedBytes, m_pkSize - SeedBytes);
+            m_gf2x.Mul(tmp, r2Dense, tmp);
+            uint[] eSupport = SampleSupport2(randomGenerator, m_wr);
+            AddSupportTo(tmp, eSupport, m_wr); // tmp ^= e
+            VectTruncate(tmp);
+            Nat.XorTo64(N1N2_BYTE_64, tmp, v);
+
+            uint[] r1Support = SampleSupport2(randomGenerator, m_wr);
+            AddSupportTo(u, r1Support, m_wr); // u ^= r1
+            Array.Clear(r2Support, 0, r2Support.Length);
+            Array.Clear(eSupport, 0, eSupport.Length);
+            Array.Clear(r1Support, 0, r1Support.Length);
+            m_gf2x.Clear(r2Dense);
+            m_gf2x.Clear(tmp);
+            Arrays.Clear(res);
+        }
+
+        private int BarrettReduce(int x)
+        {
+            int q = (int)((ulong)((long)x * m_nMu) >> 32);
+            int r = x - m_n - q * m_n;
+            return r + ((r >> 31) & m_n);
+        }
+
+        private void GenerateRandomSupport(uint[] support, int weight, Shake256RandomGenerator random)
+        {
+            int randomBytesSize = 3 * weight;
+            byte[] randBytes = new byte[randomBytesSize];
+            int j = randomBytesSize;
+
+            int count = 0;
+            while (count < weight)
+            {
+                if (j == randomBytesSize)
+                {
+                    random.XofGetBytes(randBytes, randomBytesSize);
+                    j = 0;
+                }
+
+                int candidate = ((int)randBytes[j++] << 16) | ((int)randBytes[j++] << 8) | (int)randBytes[j++];
+                if (candidate >= m_rejectionThreshold)
+                    continue;
+
+                candidate = BarrettReduce(candidate);
+                if (Array.IndexOf(support, (uint)candidate, 0, count) >= 0)
+                    continue;
+
+                support[count++] = (uint)candidate;
+            }
         }
 
         /**
-         * HQC Encryption
-         * - Input: (h,s, m)
-         * - Output: (u,v) = c
-         *
-         * @param h public key
-         * @param s public key
-         * @param m message
-         * @param u ciphertext
-         * @param v ciphertext
-         **/
-        private void Encrypt(byte[] u, long[] v, long[] h, byte[] s, byte[] m, byte[] theta)
+         * Constant-time materialisation of a fixed-weight sparse vector (given as its support
+         * indices) into a freshly-zeroed dense long[] target. Branchless mask-OR over every
+         * (i, j) pair, so neither timing nor cache-access patterns leak the secret support.
+         */
+        private void WriteSupportToVector(ulong[] v, uint[] support, int weight)
         {
-            // Randomly generate e, r1, r2
-            HqcKeccakRandomGenerator randomGenerator = new HqcKeccakRandomGenerator(256);
-            randomGenerator.SeedExpanderInit(theta, SEED_SIZE);
-            long[] e = new long[N_BYTE_64];
-            long[] r1 = new long[N_BYTE_64];
-            long[] r2 = new long[N_BYTE_64];
-            GenerateRandomFixedWeight(r1, randomGenerator, wr);
-            GenerateRandomFixedWeight(r2, randomGenerator, wr);
-            GenerateRandomFixedWeight(e, randomGenerator, we);
-
-            // Calculate u
-            long[] uLong = new long[N_BYTE_64];
-            gfCalculator.MultLongs(uLong, r2, h);
-            GF2PolynomialCalculator.AddLongs(uLong, uLong, r1);
-            Utils.FromLongArrayToByteArray(u, uLong);
-
-            // Calculate v
-            // encode m
-            byte[] res = new byte[n1];
-            long[] vLong = new long[N1N2_BYTE_64];
-            long[] tmpVLong = new long[N_BYTE_64];
-            ReedSolomon.Encode(res, m, K_BYTE * 8, n1, k, g, generatorPoly);
-            ReedMuller.Encode(vLong, res, n1, mulParam);
-            Array.Copy(vLong, 0, tmpVLong, 0, vLong.Length);
-
-            //Compute v
-            long[] sLong = new long[N_BYTE_64];
-            Utils.FromByteArrayToLongArray(sLong, s);
-
-            long[] tmpLong = new long[N_BYTE_64];
-            gfCalculator.MultLongs(tmpLong, r2, sLong);
-            GF2PolynomialCalculator.AddLongs(tmpLong, tmpLong, tmpVLong);
-            GF2PolynomialCalculator.AddLongs(tmpLong, tmpLong, e);
-
-            Utils.ResizeArray(v, n1n2, tmpLong, n, N1N2_BYTE_64, N1N2_BYTE_64);
-        }
-
-        private void Decrypt(byte[] output, byte[] m, byte[] u, byte[] v, long[] y)
-        {
-            long[] uLongs = new long[N_BYTE_64];
-            Utils.FromByteArrayToLongArray(uLongs, u);
-
-            long[] vLongs = new long[N1N2_BYTE_64];
-            Utils.FromByteArrayToLongArray(vLongs, v);
-
-            long[] tmpV = new long[N_BYTE_64];
-            Array.Copy(vLongs, 0, tmpV, 0, vLongs.Length);
-
-            long[] tmpLong = new long[N_BYTE_64];
-            gfCalculator.MultLongs(tmpLong, y, uLongs);
-            GF2PolynomialCalculator.AddLongs(tmpLong, tmpLong, tmpV);
-
-            // Decode res
-            byte[] tmp = new byte[n1];
-            ReedMuller.Decode(tmp, tmpLong, n1, mulParam);
-            ReedSolomon.Decode(m, tmp, n1, fft, delta, k, g);
-
-            Array.Copy(m, 0, output, 0, output.Length);
-        }
-
-        private void GenerateRandomFixedWeight(long[] output, HqcKeccakRandomGenerator random, int weight)
-        {
-            uint[] rand_u32 = new uint[wr];
-            byte[] rand_bytes = new byte[wr * 4];
-            int[] support = new int[wr];
-            int[] index_tab = new int[wr];
-            long[] bit_tab = new long[wr];
-
-            random.ExpandSeed(rand_bytes, 4 * weight);
-            Pack.LE_To_UInt32(rand_bytes, 0, rand_u32, 0, rand_u32.Length);
-
+            int[] indexTab = new int[m_wr];
+            long[] bitTab = new long[m_wr];
             for (int i = 0; i < weight; i++)
             {
-                support[i] = (int) (i + ((rand_u32[i]&0xFFFFFFFFL) % (n - i)));
+                indexTab[i] = (int)(support[i] >> 6);
+                bitTab[i] = 1L << ((int)support[i] & 0x3F);
             }
-
-            for (int i = (weight - 1); i >= 0; i--)
+            for (int i = 0; i < v.Length; i++)
             {
-                int found = 0;
-                for (int j = i + 1; j < weight; j++)
-                {
-                    if (support[j] == support[i])
-                    {
-                        found |= 1;
-                    }
-                }
-
-                int mask = -found;
-                support[i] = (mask & i) ^ (~mask & support[i]);
-            }
-
-            for (int i = 0; i < weight; i++)
-            {
-                index_tab[i] = (int)((uint)support[i] >> 6);
-                int pos = support[i] & 0x3f;
-                bit_tab[i] = (1L) << pos;
-            }
-            long val = 0;
-            for (int i = 0; i < N_BYTE_64; i++)
-            {
-                val = 0;
+                long val = 0;
                 for (int j = 0; j < weight; j++)
                 {
-                    int tmp = i - index_tab[j];
-                    int val1 = 1 ^ ((int)((uint)(tmp | -tmp) >> 31));
-                    long mask = -val1;
-                    val |= (bit_tab[j] & mask);
+                    int tmp = i - indexTab[j];
+                    val |= bitTab[j] & ~((tmp | -tmp) >> 31);
                 }
-                output[i] |= val;
+                v[i] = (ulong)val;
             }
         }
-        
-        void GeneratePublicKeyH(long[] output, HqcKeccakRandomGenerator random)
+
+        /**
+         * Constant-time XOR of a fixed-weight sparse vector (given as its support indices) into a
+         * dense long[] target. Equivalent to materialising the sparse vector to a dense long[] and
+         * then XORing it into {@code out}, but in a single pass without the dense intermediate.
+         * The (i, j) iteration pattern matches {@link #writeSupportToVector}'s constant-time
+         * branchless mask-OR, so timing and cache-access do not leak the secret support indices.
+         */
+        private void AddSupportTo(ulong[] v, uint[] support, int weight)
         {
-            byte[] randBytes = new byte[N_BYTE];
-            random.ExpandSeed(randBytes, N_BYTE);
-            long[] tmp = new long[N_BYTE_64];
-            Utils.FromByteArrayToLongArray(tmp, randBytes);
-            tmp[N_BYTE_64 - 1] &= Utils.BitMask((ulong)n, 64);
-            Array.Copy(tmp, 0, output, 0, output.Length);
+            int[] indexTab = new int[m_wr];
+            long[] bitTab = new long[m_wr];
+            for (int i = 0; i < weight; i++)
+            {
+                indexTab[i] = (int)(support[i] >> 6);
+                bitTab[i] = 1L << ((int)support[i] & 0x3F);
+            }
+            for (int i = 0; i < v.Length; i++)
+            {
+                long val = (long)v[i];
+                for (int j = 0; j < weight; j++)
+                {
+                    int tmp = i - indexTab[j];
+                    //val |= bitTab[j] & ~((tmp | -tmp) >> 31);
+                    val ^= bitTab[j] & ~((tmp | -tmp) >> 31);
+                }
+                v[i] = (ulong)val;
+            }
         }
 
-        private void ExtractPublicKeys(long[] h, byte[] s, byte[] pk)
+        private uint[] SampleSupport1(Shake256RandomGenerator random, int weight)
         {
-            byte[] publicKeySeed = new byte[SEED_SIZE];
-            Array.Copy(pk, 0, publicKeySeed, 0, publicKeySeed.Length);
-
-            HqcKeccakRandomGenerator randomPublic = new HqcKeccakRandomGenerator(256);
-            randomPublic.SeedExpanderInit(publicKeySeed, publicKeySeed.Length);
-
-            long[] hLongBytes = new long[N_BYTE_64];
-            GeneratePublicKeyH(hLongBytes, randomPublic);
-
-            Array.Copy(hLongBytes, 0, h, 0, h.Length);
-            Array.Copy(pk, 40, s, 0, s.Length);
+            uint[] support = new uint[m_wr];
+            GenerateRandomSupport(support, weight, random);
+            return support;
         }
 
-        private void ExtractKeysFromSecretKeys(long[] x, long[] y, byte[] pk, byte[] sk)
+        private uint[] SampleSupport2(Shake256RandomGenerator generator, int weight)
         {
-            byte[] secretKeySeed = new byte[SEED_SIZE];
-            Array.Copy(sk, 0, secretKeySeed, 0, secretKeySeed.Length);
+            byte[] rand = new byte[m_wr << 2];
+            generator.XofGetBytes(rand, rand.Length);
 
-            // Randomly generate secret keys x, y
-            HqcKeccakRandomGenerator secretKeySeedExpander = new HqcKeccakRandomGenerator(256);
-            secretKeySeedExpander.SeedExpanderInit(secretKeySeed, secretKeySeed.Length);
-            
-            GenerateRandomFixedWeight(x, secretKeySeedExpander, w);
-            GenerateRandomFixedWeight(y, secretKeySeedExpander, w);
+            uint[] support = new uint[m_wr];
+            Pack.LE_To_UInt32(rand, 0, support);
 
-            Array.Copy(sk, SEED_SIZE, pk, 0, pk.Length);
+            int i = weight;
+            while (--i >= 0)
+            {
+                int support_i = i + (int)(((long)support[i] * (m_n - i)) >> 32);
+                int notFound = -1;
+                for (int j = i + 1; j < weight; ++j)
+                {
+                    notFound &= CDiff(support_i, (int)support[j]);
+                }
+                support[i] = (uint)((~notFound & i) ^ (notFound & support_i));
+            }
+            return support;
         }
 
-        private static void ExtractCiphertexts(byte[] u, byte[] v, byte[] d, byte[] salt, byte[] ct)
+        private void VectTruncate(ulong[] v) => Arrays.Fill(v, N1N2_BYTE_64, (m_n + 63) >> 6, 0UL);
+
+        private static int CDiff(int v1, int v2) => ((v1 - v2) | (v2 - v1)) >> 31;
+
+        private static void HashGJ(byte[] output, int bitLength, byte[] hashEkKem, byte[] mOrSigma, int mOrSigmaOff,
+            int mOrSigmaLen, byte[] saltOrCt, int saltOrCtOff, int saltOrCtOffLen, byte domain)
         {
-            Array.Copy(ct, 0, u, 0, u.Length);
-            Array.Copy(ct, u.Length, v, 0, v.Length);
-            Array.Copy(ct, u.Length + v.Length, d, 0, d.Length);
-            Array.Copy(ct, u.Length + v.Length + d.Length, salt, 0, salt.Length);
+            Sha3Digest digest = new Sha3Digest(bitLength);
+            digest.BlockUpdate(hashEkKem, 0, hashEkKem.Length);
+            digest.BlockUpdate(mOrSigma, mOrSigmaOff, mOrSigmaLen);
+            digest.BlockUpdate(saltOrCt, saltOrCtOff, saltOrCtOffLen);
+            digest.Update(domain);
+            digest.DoFinal(output, 0);
+        }
+
+        private static void HashHI(byte[] output, int bitLength, byte[] input, int inLen, byte domain)
+        {
+            Sha3Digest digest = new Sha3Digest(bitLength);
+            digest.BlockUpdate(input, 0, inLen);
+            digest.Update(domain);
+            digest.DoFinal(output, 0);
         }
     }
 }

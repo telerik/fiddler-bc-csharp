@@ -1,9 +1,9 @@
 using System;
+using System.Diagnostics;
 
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Security;
-using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Pqc.Crypto.SphincsPlus
 {
@@ -17,6 +17,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.SphincsPlus
      *     for further details.
      * </p>
      */
+    [Obsolete("Use SLH-DSA instead")]
     public sealed class SphincsPlusSigner
         : IMessageSigner
     {
@@ -63,7 +64,7 @@ namespace Org.BouncyCastle.Pqc.Crypto.SphincsPlus
             // init
 
             SphincsPlusEngine engine = m_privKey.Parameters.GetEngine();
-            engine.Init(m_privKey.GetPublicSeed());
+            engine.Init(m_privKey.PK.seed);
             // generate randomizer
             byte[] optRand = new byte[engine.N];
             if (m_random != null)
@@ -75,44 +76,46 @@ namespace Org.BouncyCastle.Pqc.Crypto.SphincsPlus
                 Array.Copy(m_privKey.m_pk.seed, 0, optRand, 0, optRand.Length);
             }
 
-            Fors fors = new Fors(engine);
-            byte[] R = engine.PRF_msg(m_privKey.m_sk.prf, optRand, message);
+            byte[] signature = new byte[engine.SignatureLength];
+
+            engine.PRF_msg(m_privKey.m_sk.prf, optRand, message, 0, message.Length, signature, 0);
+            int pos = engine.N;
+
             // compute message digest and index
-            IndexedDigest idxDigest = engine.H_msg(R, m_privKey.m_pk.seed, m_privKey.m_pk.root, message);
+            IndexedDigest idxDigest = engine.H_msg(signature, 0, m_privKey.m_pk.seed, m_privKey.m_pk.root, message, 0, message.Length);
             byte[] mHash = idxDigest.digest;
             ulong idx_tree = idxDigest.idx_tree;
             uint idx_leaf = idxDigest.idx_leaf;
             // FORS sign
             Adrs adrs = new Adrs();
-            adrs.SetAdrsType(Adrs.FORS_TREE);
-            adrs.SetTreeAddress(idx_tree);
-            adrs.SetKeyPairAddress(idx_leaf);
-            SIG_FORS[] sig_fors = fors.Sign(mHash, m_privKey.m_sk.seed, m_privKey.m_pk.seed, adrs);
-            // get FORS public key - spec shows M?
-            adrs = new Adrs();
-            adrs.SetAdrsType(Adrs.FORS_TREE);
+            adrs.SetTypeAndClear(Adrs.FORS_TREE);
             adrs.SetTreeAddress(idx_tree);
             adrs.SetKeyPairAddress(idx_leaf);
 
-            byte[] PK_FORS = fors.PKFromSig(sig_fors, mHash, m_privKey.m_pk.seed, adrs);
+            SIG_FORS[] sig_fors = Fors.Sign(engine, mHash, m_privKey.m_sk.seed, m_privKey.m_pk.seed, adrs, legacy: true);
+
+            // get FORS public key - spec shows M?
+            adrs = new Adrs();
+            adrs.SetTypeAndClear(Adrs.FORS_TREE);
+            adrs.SetTreeAddress(idx_tree);
+            adrs.SetKeyPairAddress(idx_leaf);
+
+            byte[] PK_FORS = Fors.PKFromSig(engine, sig_fors, mHash, m_privKey.m_pk.seed, adrs, legacy: true);
 
             // sign FORS public key with HT
             Adrs treeAdrs = new Adrs();
-            treeAdrs.SetAdrsType(Adrs.TREE);
+            treeAdrs.SetTypeAndClear(Adrs.TREE);
 
-            HT ht = new HT(engine, m_privKey.GetSeed(), m_privKey.GetPublicSeed());
-            byte[] SIG_HT = ht.Sign(PK_FORS, idx_tree, idx_leaf);
-            byte[][] sigComponents = new byte[sig_fors.Length + 2][];
-            sigComponents[0] = R;
+            HT ht = new HT(engine, m_privKey.SK.seed, m_privKey.PK.seed);
 
-            for (int i = 0; i != sig_fors.Length; i++)
+            for (int i = 0; i < sig_fors.Length; ++i)
             {
-                sigComponents[1 + i] = Arrays.Concatenate(sig_fors[i].sk, Arrays.ConcatenateAll(sig_fors[i].authPath));
+                sig_fors[i].CopyToSignature(signature, ref pos);
             }
 
-            sigComponents[sigComponents.Length - 1] = SIG_HT;
-
-            return Arrays.ConcatenateAll(sigComponents);
+            ht.Sign(PK_FORS, idx_tree, idx_leaf, signature, ref pos);
+            Debug.Assert(pos == engine.SignatureLength);
+            return signature;
         }
 
         public bool VerifySignature(byte[] message, byte[] signature)
@@ -120,31 +123,38 @@ namespace Org.BouncyCastle.Pqc.Crypto.SphincsPlus
             //# Input: Message M, signature SIG, public key PK
             //# Output: bool
 
-            // init
             SphincsPlusEngine engine = m_pubKey.Parameters.GetEngine();
-            engine.Init(m_pubKey.GetSeed());
+
+            if (engine.SignatureLength != signature.Length)
+                return false;
+
+            // init
+            engine.Init(m_pubKey.PK.seed);
 
             Adrs adrs = new Adrs();
-            SIG sig = new SIG(engine.N, engine.K, engine.A, engine.D, engine.H_PRIME, engine.WOTS_LEN, signature);
+            SIG sig = new SIG(engine, signature);
 
             byte[] R = sig.R;
             SIG_FORS[] sig_fors = sig.SIG_FORS;
             SIG_XMSS[] SIG_HT = sig.SIG_HT;
 
             // compute message digest and index
-            IndexedDigest idxDigest = engine.H_msg(R, m_pubKey.GetSeed(), m_pubKey.GetRoot(), message);
+            IndexedDigest idxDigest = engine.H_msg(R, 0, m_pubKey.GetSeed(), m_pubKey.GetRoot(), message, 0,
+                message.Length);
             byte[] mHash = idxDigest.digest;
             ulong idx_tree = idxDigest.idx_tree;
             uint idx_leaf = idxDigest.idx_leaf;
 
             // compute FORS public key
-            adrs.SetAdrsType(Adrs.FORS_TREE);
+            adrs.SetTypeAndClear(Adrs.FORS_TREE);
             adrs.SetLayerAddress(0);
             adrs.SetTreeAddress(idx_tree);
             adrs.SetKeyPairAddress(idx_leaf);
-            byte[] PK_FORS = new Fors(engine).PKFromSig(sig_fors, mHash, m_pubKey.GetSeed(), adrs);
+
+            byte[] PK_FORS = Fors.PKFromSig(engine, sig_fors, mHash, m_pubKey.GetSeed(), adrs, legacy: true);
+
             // verify HT signature
-            adrs.SetAdrsType(Adrs.TREE);
+            adrs.SetTypeAndClear(Adrs.TREE);
             adrs.SetLayerAddress(0);
             adrs.SetTreeAddress(idx_tree);
             adrs.SetKeyPairAddress(idx_leaf);

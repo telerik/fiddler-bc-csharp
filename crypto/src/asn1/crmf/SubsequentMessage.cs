@@ -9,11 +9,13 @@ namespace Org.BouncyCastle.Asn1.Crmf
         public static readonly SubsequentMessage challengeResp = new SubsequentMessage(1);
     
         private SubsequentMessage(int value)
+#pragma warning disable CS0618 // Type or member is obsolete
             : base(value)
+#pragma warning restore CS0618 // Type or member is obsolete
         {
         }
 
-        public static SubsequentMessage ValueOf(int value)
+        public static new SubsequentMessage ValueOf(int value)
         {
             if (value == 0)
                 return encrCert;

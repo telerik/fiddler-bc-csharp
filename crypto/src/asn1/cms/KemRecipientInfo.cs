@@ -4,18 +4,20 @@ using Org.BouncyCastle.Asn1.X509;
 
 namespace Org.BouncyCastle.Asn1.Cms
 {
-    /**
-     *   KEMRecipientInfo ::= SEQUENCE {
-     *     version CMSVersion,  -- always set to 0
-     *     rid RecipientIdentifier,
-     *     kem KEMAlgorithmIdentifier,
-     *     kemct OCTET STRING,
-     *     kdf KeyDerivationAlgorithmIdentifier,
-     *     kekLength INTEGER (1..MAX),
-     *     ukm [0] EXPLICIT UserKeyingMaterial OPTIONAL,
-     *     wrap KeyEncryptionAlgorithmIdentifier,
-     *     encryptedKey EncryptedKey }
-     */
+    /// <remarks>
+    /// <code>
+    /// KEMRecipientInfo ::= SEQUENCE {
+    ///     version         CMSVersion,  -- always set to 0
+    ///     rid             RecipientIdentifier,
+    ///     kem             KEMAlgorithmIdentifier,
+    ///     kemct           OCTET STRING,
+    ///     kdf             KeyDerivationAlgorithmIdentifier,
+    ///     kekLength       INTEGER(1..MAX),
+    ///     ukm             [0] EXPLICIT UserKeyingMaterial OPTIONAL,
+    ///     wrap            KeyEncryptionAlgorithmIdentifier,
+    ///     encryptedKey    EncryptedKey }
+    /// </code>
+    /// </remarks>
     public sealed class KemRecipientInfo
         : Asn1Encodable
     {
@@ -28,12 +30,13 @@ namespace Org.BouncyCastle.Asn1.Cms
             return new KemRecipientInfo(Asn1Sequence.GetInstance(obj));
         }
 
-        public static KemRecipientInfo GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
-        {
-            return new KemRecipientInfo(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
-        }
+        public static KemRecipientInfo GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new KemRecipientInfo(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
 
-        private static readonly DerInteger V1 = new DerInteger(0);
+        public static KemRecipientInfo GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new KemRecipientInfo(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
+
+        private static readonly DerInteger V1 = DerInteger.Zero;
 
         private readonly DerInteger m_cmsVersion;
         private readonly RecipientIdentifier m_rid;
@@ -54,7 +57,7 @@ namespace Org.BouncyCastle.Asn1.Cms
             m_kem = kem ?? throw new ArgumentNullException(nameof(kem));
             m_kemct = kemct ?? throw new ArgumentNullException(nameof(kemct));
             m_kdf = kdf ?? throw new ArgumentNullException(nameof(kdf));
-            m_kekLength = kekLength ?? throw new ArgumentNullException(nameof(kekLength));
+            m_kekLength = ValidateKekLength(kekLength ?? throw new ArgumentNullException(nameof(kekLength)));
             m_ukm = ukm;
             m_wrap = wrap ?? throw new ArgumentNullException(nameof(wrap));
             m_encryptedKey = encryptedKey ?? throw new ArgumentNullException(nameof(encryptedKey));
@@ -62,27 +65,27 @@ namespace Org.BouncyCastle.Asn1.Cms
 
         private KemRecipientInfo(Asn1Sequence seq)
         {
-            int count = seq.Count;
+            int count = seq.Count, pos = 0;
             if (count < 8 || count > 9)
                 throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
 
-            int index = 0;
+            m_cmsVersion = Asn1Utilities.Read(seq, ref pos, DerInteger.GetInstance);
+            m_rid = Asn1Utilities.Read(seq, ref pos, RecipientIdentifier.GetInstance);
+            m_kem = Asn1Utilities.Read(seq, ref pos, AlgorithmIdentifier.GetInstance);
+            m_kemct = Asn1Utilities.Read(seq, ref pos, Asn1OctetString.GetInstance);
+            m_kdf = Asn1Utilities.Read(seq, ref pos, AlgorithmIdentifier.GetInstance);
+            DerInteger kekLength = Asn1Utilities.Read(seq, ref pos, DerInteger.GetInstance);
+            m_ukm = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 0, true, Asn1OctetString.GetTagged);
+            m_wrap = Asn1Utilities.Read(seq, ref pos, AlgorithmIdentifier.GetInstance);
+            m_encryptedKey = Asn1Utilities.Read(seq, ref pos, Asn1OctetString.GetInstance);
 
-            m_cmsVersion = DerInteger.GetInstance(seq[index++]);
+            if (pos != count)
+                throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
+
             if (!m_cmsVersion.HasValue(0))
                 throw new ArgumentException("Unsupported version (hex): " + m_cmsVersion.Value.ToString(16));
 
-            m_rid = RecipientIdentifier.GetInstance(seq[index++]);
-            m_kem = AlgorithmIdentifier.GetInstance(seq[index++]);
-            m_kemct = Asn1OctetString.GetInstance(seq[index++]);
-            m_kdf = AlgorithmIdentifier.GetInstance(seq[index++]);
-            m_kekLength = DerInteger.GetInstance(seq[index++]);
-            m_ukm = Asn1Utilities.ReadOptionalContextTagged(seq, ref index, 0, true, Asn1OctetString.GetInstance);
-            m_wrap = AlgorithmIdentifier.GetInstance(seq[index++]);
-            m_encryptedKey = Asn1OctetString.GetInstance(seq[index++]);
-
-            if (index != count)
-                throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
+            m_kekLength = ValidateKekLength(kekLength);
         }
 
         public RecipientIdentifier RecipientIdentifier => m_rid;
@@ -106,6 +109,17 @@ namespace Org.BouncyCastle.Asn1.Cms
             v.AddOptionalTagged(true, 0, m_ukm);
             v.Add(m_wrap, m_encryptedKey);
             return new DerSequence(v);
+        }
+
+        private static DerInteger ValidateKekLength(DerInteger kekLength)
+        {
+            if (!kekLength.TryGetIntValueExact(out int kekLengthValue))
+                throw new ArgumentException("Invalid 'kekLength' (outside Int32 range)");
+
+            if (kekLengthValue < 1 || kekLengthValue > 65535)
+                throw new ArgumentException("Invalid 'kekLength': " + kekLengthValue);
+
+            return kekLength;
         }
     }
 }

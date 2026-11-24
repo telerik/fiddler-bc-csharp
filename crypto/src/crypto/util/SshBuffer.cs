@@ -31,7 +31,7 @@ namespace Org.BouncyCastle.Crypto.Utilities
         public int ReadU32()
         {
             if (pos > buffer.Length - 4)
-                throw new ArgumentOutOfRangeException("4 bytes for U32 exceeds buffer.");
+                throw new InvalidOperationException("4 bytes for U32 exceeds buffer.");
 
             int i = (int)Pack.BE_To_UInt32(buffer, pos);
             pos += 4;
@@ -50,9 +50,9 @@ namespace Org.BouncyCastle.Crypto.Utilities
         public string ReadStringUtf8()
         {
 #if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
-            return Encoding.UTF8.GetString(ReadBlockSpan());
+            return Strings.FromUtf8ByteArray(ReadBlockSpan());
 #else
-            return Encoding.UTF8.GetString(ReadBlock());
+            return Strings.FromUtf8ByteArray(ReadBlock());
 #endif
         }
 

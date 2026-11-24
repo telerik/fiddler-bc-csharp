@@ -29,7 +29,7 @@ namespace Org.BouncyCastle.Tls.Tests
                     Console.WriteLine("--------------------------------------------------------------------------------");
                     Console.WriteLine("Accepted " + s);
                     ServerTask serverTask = new ServerTask(s, stdout);
-                    Thread t = new Thread(new ThreadStart(serverTask.Run));
+                    Thread t = new Thread(serverTask.Run);
                     t.Start();
                 }
             }
@@ -57,9 +57,14 @@ namespace Org.BouncyCastle.Tls.Tests
                     MockPskTls13Server server = new MockPskTls13Server();
                     TlsServerProtocol serverProtocol = new TlsServerProtocol(s.GetStream());
                     serverProtocol.Accept(server);
-                    Stream log = new TeeOutputStream(serverProtocol.Stream, stdout);
-                    Streams.PipeAll(serverProtocol.Stream, log);
-                    serverProtocol.Close();
+
+                    using (var stream = serverProtocol.Stream)
+                    {
+                        // NB: We don't dispose this directly to avoid disposing stdout
+                        Stream log = new TeeOutputStream(stream, stdout);
+
+                        Streams.PipeAll(stream, log);
+                    }
                 }
                 finally
                 {

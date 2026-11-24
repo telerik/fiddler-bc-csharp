@@ -2,8 +2,12 @@
 
 using NUnit.Framework;
 
+using Org.BouncyCastle.Asn1;
+using Org.BouncyCastle.Asn1.Cmp;
 using Org.BouncyCastle.Asn1.Crmf;
+using Org.BouncyCastle.Asn1.Iana;
 using Org.BouncyCastle.Asn1.Nist;
+using Org.BouncyCastle.Asn1.Oiw;
 using Org.BouncyCastle.Asn1.Pkcs;
 using Org.BouncyCastle.Asn1.X509;
 using Org.BouncyCastle.Cmp.Tests;
@@ -18,29 +22,15 @@ using Org.BouncyCastle.Pkcs;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Utilities;
 using Org.BouncyCastle.Utilities.Encoders;
-using Org.BouncyCastle.Utilities.Test;
 using Org.BouncyCastle.X509;
 
 namespace Org.BouncyCastle.Crmf.Tests
 {
     [TestFixture]
-    public class CrmfTest : SimpleTest
+    public class CrmfTest
     {
-        public override string Name
-        {
-            get { return "CRMF"; }
-        }
-
-        public override void PerformTest()
-        {
-            TestFromJVM();
-            TestBasicMessage();
-            TestBasicMessageWithArchiveControl();
-            TestBasicMessageWithArchiveControlJVMGenerated();
-        }
-        
         [Test]
-        public void TestFromJVM()
+        public void MessageFromJVM()
         {
             AsymmetricKeyParameter pubKey = PublicKeyFactory.CreateKey(Hex.Decode(
                 "305c300d06092a864886f70d0101010500034b003048024100bbb3f6a5031fbb1feedbfed7584a4f6321ccdc16b9526b0f6e31859328db35a6ec420a98e14fb3bcf192004b1aa6fc9269410204785cc01317232feb545a7b410203010001"));
@@ -49,7 +39,7 @@ namespace Org.BouncyCastle.Crmf.Tests
             byte[] rawMsg = Hex.Decode("3081cc30760201013071a511300f310d300b0603550403130454657374a65c300d06092a864886f70d0101010500034b003048024100bbb3f6a5031fbb1feedbfed7584a4f6321ccdc16b9526b0f6e31859328db35a6ec420a98e14fb3bcf192004b1aa6fc9269410204785cc01317232feb545a7b410203010001a152300d06092a864886f70d01010505000341003120cdb58edfef4a2e1a4bfe96b972007c1d1c949221d266efe28b45ba036b9d534f5dca261dce8f21e134d97e55c3bd76d1460781fd9703f8f9907d1f036c20");
 
             CertificateRequestMessage msg = new CertificateRequestMessage(rawMsg);
-            IsTrue("Pop Valid", msg.IsValidSigningKeyPop(new Asn1VerifierFactoryProvider(pubKey)));
+            Assert.That(msg.IsValidSigningKeyPop(new Asn1VerifierFactoryProvider(pubKey)), "Pop Valid");
 
             //
             // Vandalize message to check for failure.
@@ -58,11 +48,80 @@ namespace Org.BouncyCastle.Crmf.Tests
             rawMsg[7] ^= 1;
             msg = new CertificateRequestMessage(rawMsg);
 
-            IsTrue("Pop Verified Vandalized Message!", !msg.IsValidSigningKeyPop(new Asn1VerifierFactoryProvider(pubKey)));
+            Assert.That(!msg.IsValidSigningKeyPop(new Asn1VerifierFactoryProvider(pubKey)), "Pop Verified Vandalized Message!");
         }
 
         [Test]
-        public void TestBasicMessage()
+        public void PKMacIterationCountCeiling()
+        {
+            AlgorithmIdentifier owf = new AlgorithmIdentifier(OiwObjectIdentifiers.IdSha1);
+            AlgorithmIdentifier mac = new AlgorithmIdentifier(IanaObjectIdentifiers.HmacSha1, DerNull.Instance);
+            byte[] salt = new byte[20];
+
+            // A PKMACBuilder with no explicit ceiling must still reject an attacker-declared iteration
+            // count (from an untrusted CMP PBMParameter) before the iterated hash runs.
+            PbmParameter hostile = new PbmParameter(salt, owf, int.MaxValue, mac);
+            try
+            {
+                new PKMacBuilder().SetParameters(hostile);
+                Assert.Fail("no exception on oversized iteration count");
+            }
+            catch (ArgumentException e)
+            {
+                Assert.That(e.Message.StartsWith("iteration count exceeds limit"));
+            }
+
+            // A legitimate count is still accepted.
+            PbmParameter benign = new PbmParameter(salt, owf, 1000, mac);
+            new PKMacBuilder().SetParameters(benign);
+        }
+
+        [Test]
+        public void PKMacIterationCountNegative()
+        {
+            AlgorithmIdentifier owf = new AlgorithmIdentifier(OiwObjectIdentifiers.IdSha1);
+            AlgorithmIdentifier mac = new AlgorithmIdentifier(IanaObjectIdentifiers.HmacSha1, DerNull.Instance);
+            byte[] salt = new byte[20];
+
+            // A negative iteration count must be rejected rather than silently accepted (a single OWF pass) or crashing
+            // IntValueExact when out of int range.
+            PbmParameter negative = new PbmParameter(new DerOctetString(salt), owf, DerInteger.ValueOf(-1), mac);
+            try
+            {
+                new PKMacBuilder().SetParameters(negative);
+                Assert.Fail("no exception on negative iteration count");
+            }
+            catch (ArgumentException e)
+            {
+                Assert.That(e.Message.StartsWith("iteration count less than 1"));
+            }
+        }
+
+        [Test]
+        public void PKMacIterationCountOutsideInt32()
+        {
+            AlgorithmIdentifier owf = new AlgorithmIdentifier(OiwObjectIdentifiers.IdSha1);
+            AlgorithmIdentifier mac = new AlgorithmIdentifier(IanaObjectIdentifiers.HmacSha1, DerNull.Instance);
+            byte[] salt = new byte[20];
+
+            // An attacker-declared iteration count larger than int.MaxValue (encoded directly as a DerInteger in an
+            // untrusted CMP PBMParameter) must be rejected with the same typed ArgumentException as an in-range
+            // oversized count - not leak an ArithmeticException from IntValueExact past the verifier's throws contract.
+            PbmParameter beyondInt = new PbmParameter(new DerOctetString(salt), owf,
+                new DerInteger(BigInteger.ValueOf(int.MaxValue).Add(BigInteger.One)), mac);
+            try
+            {
+                new PKMacBuilder().SetParameters(beyondInt);
+                Assert.Fail("no exception on out-of-int-range iteration count");
+            }
+            catch (ArgumentException e)
+            {
+                Assert.That(e.Message.StartsWith("iteration count outside Int32 range"));
+            }
+        }
+
+        [Test]
+        public void BasicMessage()
         {
             RsaKeyPairGenerator rsaKeyPairGenerator = new RsaKeyPairGenerator();
             rsaKeyPairGenerator.Init(new RsaKeyGenerationParameters(BigInteger.ValueOf(65537), new SecureRandom(), 2048, 100));
@@ -71,18 +130,21 @@ namespace Org.BouncyCastle.Crmf.Tests
             CertificateRequestMessageBuilder certReqBuild = new CertificateRequestMessageBuilder(BigInteger.One);
 
             certReqBuild.SetSubject(new X509Name("CN=Test"))
-                .SetPublicKey(SubjectPublicKeyInfoFactory.CreateSubjectPublicKeyInfo(rsaKeyPair.Public))                
+                .SetPublicKey(rsaKeyPair.Public)
                 .SetProofOfPossessionSignKeySigner(new Asn1SignatureFactory("SHA1WithRSA", rsaKeyPair.Private));
 
             CertificateRequestMessage certificateRequestMessage = certReqBuild.Build();
 
-            IsTrue("Signing Key Pop Valid",certificateRequestMessage.IsValidSigningKeyPop(new Asn1VerifierFactoryProvider(rsaKeyPair.Public)));
-            IsTrue(certificateRequestMessage.GetCertTemplate().Subject.Equivalent(new X509Name("CN=Test")));
-            IsTrue(certificateRequestMessage.GetCertTemplate().PublicKey.Equals(SubjectPublicKeyInfoFactory.CreateSubjectPublicKeyInfo(rsaKeyPair.Public)));
+            Assert.That(certificateRequestMessage.IsValidSigningKeyPop(new Asn1VerifierFactoryProvider(rsaKeyPair.Public)),
+                "Signing Key Pop Valid");
+
+            var certTemplate = certificateRequestMessage.GetCertTemplate();
+            Assert.That(certTemplate.Subject.Equivalent(new X509Name("CN=Test")));
+            Assert.That(certTemplate.PublicKey.Equals(SubjectPublicKeyInfoFactory.CreateSubjectPublicKeyInfo(rsaKeyPair.Public)));
         }
 
         [Test]
-        public void TestBasicMessageWithArchiveControl()
+        public void BasicMessageWithArchiveControl()
         {
             RsaKeyPairGenerator rsaKeyPairGenerator = new RsaKeyPairGenerator();
             rsaKeyPairGenerator.Init(new RsaKeyGenerationParameters(BigInteger.ValueOf(65537), new SecureRandom(), 2048, 100));
@@ -103,8 +165,8 @@ namespace Org.BouncyCastle.Crmf.Tests
 
             CertificateRequestMessageBuilder certificateRequestMessageBuilder = new CertificateRequestMessageBuilder(BigInteger.One);
             certificateRequestMessageBuilder.SetSubject(new X509Name("CN=Test"));
-            certificateRequestMessageBuilder.SetPublicKey(publicKeyInfo);
-           
+            certificateRequestMessageBuilder.SetSubjectPublicKeyInfo(publicKeyInfo);
+
             certificateRequestMessageBuilder.AddControl(
                 new PkiArchiveControlBuilder(privateInfo, new GeneralName(new X509Name("CN=Test")))
                     .AddRecipientGenerator(new KeyTransRecipientInfoGenerator(cert, new Asn1KeyWrapper("RSA/None/OAEPwithSHA256andMGF1Padding", cert)))
@@ -113,15 +175,15 @@ namespace Org.BouncyCastle.Crmf.Tests
 
             CertificateRequestMessage msg = certificateRequestMessageBuilder.Build();
 
-            IsTrue(Arrays.AreEqual(msg.GetCertTemplate().Subject.GetEncoded(), new X509Name("CN=Test").GetEncoded()));
-            IsTrue(Arrays.AreEqual(msg.GetCertTemplate().PublicKey.GetEncoded(),publicKeyInfo.GetEncoded()));
+            Assert.That(Arrays.AreEqual(msg.GetCertTemplate().Subject.GetEncoded(), new X509Name("CN=Test").GetEncoded()));
+            Assert.That(Arrays.AreEqual(msg.GetCertTemplate().PublicKey.GetEncoded(),publicKeyInfo.GetEncoded()));
 
             CheckCertReqMsgWithArchiveControl(rsaKeyPair,msg);
             CheckCertReqMsgWithArchiveControl(rsaKeyPair, new CertificateRequestMessage(msg.GetEncoded()));
         }
 
         [Test]
-        public void TestBasicMessageWithArchiveControlJVMGenerated()
+        public void BasicMessageWithArchiveControlJVMGenerated()
         {
             AsymmetricKeyParameter publicKey = PublicKeyFactory.CreateKey(
                 Hex.Decode("305c300d06092a864886f70d0101010500034b003048024100a9a94b7b98dc3daf8cac032a14bd4510832b0e007edbdafc065e328645a35828b8185cdbf73ed495c88436b11a9322965595d2e4c1dd63c3c4d41812f876b3070203010001"));
@@ -135,12 +197,13 @@ namespace Org.BouncyCastle.Crmf.Tests
 
             SubjectPublicKeyInfo publicKeyInfo = SubjectPublicKeyInfoFactory.CreateSubjectPublicKeyInfo(publicKey);
 
-            IsTrue(msg.GetCertTemplate().Subject.Equivalent(new X509Name("CN=Test")));
-            IsTrue(Arrays.AreEqual(msg.GetCertTemplate().PublicKey.GetEncoded(), publicKeyInfo.GetEncoded()));
+            var certTemplate = msg.GetCertTemplate();
+            Assert.That(certTemplate.Subject.Equivalent(new X509Name("CN=Test")));
+            Assert.That(Arrays.AreEqual(certTemplate.PublicKey.GetEncoded(), publicKeyInfo.GetEncoded()));
 
             CheckCertReqMsgWithArchiveControl(rsaKeyPair, msg);
             CheckCertReqMsgWithArchiveControl(rsaKeyPair, new CertificateRequestMessage(msg.GetEncoded()));
-        
+
             CheckCertReqMsgWithArchiveControl(rsaKeyPair,msg);
         }
 
@@ -148,25 +211,25 @@ namespace Org.BouncyCastle.Crmf.Tests
         {
             PkiArchiveControl archiveControl = (PkiArchiveControl)certReqMessage.GetControl(
                 CrmfObjectIdentifiers.id_regCtrl_pkiArchiveOptions);
-            IsEquals("Archive type", PkiArchiveControl.encryptedPrivKey, archiveControl.ArchiveType);
+            Assert.AreEqual(PkiArchiveControl.encryptedPrivKey, archiveControl.ArchiveType, "Archive type");
 
-            IsTrue(archiveControl.IsEnvelopedData());
+            Assert.True(archiveControl.IsEnvelopedData());
             RecipientInformationStore recips = archiveControl.GetEnvelopedData().GetRecipientInfos();
 
             var collection = recips.GetRecipients();
 
-            IsTrue(collection.Count == 1);
+            Assert.AreEqual(1, collection.Count);
             KeyTransRecipientInformation info = (KeyTransRecipientInformation)collection[0];
 
             EncKeyWithID encKeyWithId = EncKeyWithID.GetInstance(info.GetContent(kp.Private));
 
-            IsTrue(encKeyWithId.HasIdentifier);
-            IsTrue(!encKeyWithId.IsIdentifierUtf8String); // GeneralName at this point.
-            
-            IsTrue("Name", X509Name.GetInstance(GeneralName.GetInstance(encKeyWithId.Identifier).Name).Equivalent(new X509Name("CN=Test")));
-          
+            Assert.True(encKeyWithId.HasIdentifier);
+            Assert.True(!encKeyWithId.IsIdentifierUtf8String); // GeneralName at this point.
+
+            Assert.True(X509Name.GetInstance(GeneralName.GetInstance(encKeyWithId.Identifier).Name).Equivalent(new X509Name("CN=Test")), "Name");
+
             PrivateKeyInfo privateKeyInfo = PrivateKeyInfoFactory.CreatePrivateKeyInfo(kp.Private);
-            IsTrue("Private Key", Arrays.AreEqual(privateKeyInfo.GetEncoded(), encKeyWithId.PrivateKey.GetEncoded()));
+            Assert.That(Arrays.AreEqual(privateKeyInfo.GetEncoded(), encKeyWithId.PrivateKey.GetEncoded()), "Private Key");
         }
     }
 }

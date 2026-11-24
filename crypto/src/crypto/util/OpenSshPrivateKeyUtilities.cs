@@ -39,9 +39,9 @@ namespace Org.BouncyCastle.Crypto.Utilities
             {
                 DsaParameters dsaparameters = dsaPrivateKey.Parameters;
 
-                Asn1EncodableVector vec = new Asn1EncodableVector
+                Asn1EncodableVector vec = new Asn1EncodableVector(6)
                 {
-                    new DerInteger(0),
+                    DerInteger.Zero,
                     new DerInteger(dsaparameters.P),
                     new DerInteger(dsaparameters.Q),
                     new DerInteger(dsaparameters.G)
@@ -57,7 +57,7 @@ namespace Org.BouncyCastle.Crypto.Utilities
                 }
                 catch (Exception ex)
                 {
-                    throw new InvalidOperationException("unable to encode DSAPrivateKeyParameters " + ex.Message);
+                    throw new InvalidOperationException("unable to encode DSAPrivateKeyParameters", ex);
                 }
             }
             else if (parameters is Ed25519PrivateKeyParameters ed25519PrivateKey)
@@ -162,13 +162,9 @@ namespace Org.BouncyCastle.Crypto.Utilities
                     if (sequence[3] is Asn1TaggedObject && sequence[2] is Asn1TaggedObject)
                     {
                         ECPrivateKeyStructure ecPrivateKey = ECPrivateKeyStructure.GetInstance(sequence);
-                        DerObjectIdentifier curveOID = DerObjectIdentifier.GetInstance(ecPrivateKey.GetParameters());
-                        X9ECParameters x9Params = ECNamedCurveTable.GetByOid(curveOID);
-                        result = new ECPrivateKeyParameters(
-                            ecPrivateKey.GetKey(),
-                            new ECNamedDomainParameters(
-                                curveOID,
-                                x9Params));
+                        X962Parameters parameters = X962Parameters.GetInstance(ecPrivateKey.Parameters);
+                        ECDomainParameters domainParameters = ECDomainParameters.FromX962Parameters(parameters);
+                        result = new ECPrivateKeyParameters("EC", ecPrivateKey.GetKey(), domainParameters);
                     }
                 }
             }
@@ -273,7 +269,7 @@ namespace Org.BouncyCastle.Crypto.Utilities
         }
 
         /**
-         * allIntegers returns true if the sequence holds only DerInteger types.
+         * AllIntegers returns true if the sequence holds only DerInteger types.
          **/
         private static bool AllIntegers(Asn1Sequence sequence)
         {

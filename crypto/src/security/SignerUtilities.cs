@@ -16,7 +16,9 @@ using Org.BouncyCastle.Asn1.X509;
 using Org.BouncyCastle.Asn1.X9;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Digests;
+using Org.BouncyCastle.Crypto.Encodings;
 using Org.BouncyCastle.Crypto.Engines;
+using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Crypto.Signers;
 using Org.BouncyCastle.Utilities;
 using Org.BouncyCastle.Utilities.Collections;
@@ -24,8 +26,21 @@ using Org.BouncyCastle.Utilities.Collections;
 namespace Org.BouncyCastle.Security
 {
     /// <summary>
-    ///  Signer Utility class contains methods that can not be specifically grouped into other classes.
+    /// Factory for <see cref="ISigner"/> instances and helpers for resolving signature algorithm metadata
+    /// (X.509 algorithm parameters, OID lookup) from algorithm names or OIDs.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Algorithm names follow the JCA-style <c>DIGESTwithCIPHER</c> convention (for example
+    /// <c>"SHA256withRSA"</c>, <c>"SHA1withECDSA"</c>, <c>"SHA256withRSAandMGF1"</c>) and a number of common
+    /// aliases are recognised; matching is case-insensitive.
+    /// </para>
+    /// <para>
+    /// The returned <see cref="ISigner"/> is uninitialised — the caller must invoke
+    /// <see cref="ISigner.Init"/> before processing data, or use the higher-level
+    /// <see cref="InitSigner(string, bool, AsymmetricKeyParameter, SecureRandom)"/> overloads.
+    /// </para>
+    /// </remarks>
     public static class SignerUtilities
     {
         private static readonly Dictionary<string, string> AlgorithmMap =
@@ -48,7 +63,7 @@ namespace Org.BouncyCastle.Security
             AlgorithmOidMap[OiwObjectIdentifiers.MD4WithRsa] = "MD4withRSA";
             AlgorithmOidMap[OiwObjectIdentifiers.MD4WithRsaEncryption] = "MD4withRSA";
 
-			AlgorithmMap["MD5WITHRSA"] = "MD5withRSA";
+            AlgorithmMap["MD5WITHRSA"] = "MD5withRSA";
             AlgorithmMap["MD5WITHRSAENCRYPTION"] = "MD5withRSA";
             AlgorithmOidMap[PkcsObjectIdentifiers.MD5WithRsaEncryption] = "MD5withRSA";
             AlgorithmOidMap[OiwObjectIdentifiers.MD5WithRsa] = "MD5withRSA";
@@ -216,6 +231,26 @@ namespace Org.BouncyCastle.Security
             AlgorithmMap["SHA-512WITHDSA"] = "SHA-512withDSA";
             AlgorithmOidMap[NistObjectIdentifiers.DsaWithSha512] = "SHA-512withDSA";
 
+            AlgorithmMap["DSAWITHSHA3-224"] = "SHA3-224withDSA";
+            AlgorithmMap["SHA3-224/DSA"] = "SHA3-224withDSA";
+            AlgorithmMap["SHA3-224WITHDSA"] = "SHA3-224withDSA";
+            AlgorithmOidMap[NistObjectIdentifiers.IdDsaWithSha3_224] = "SHA3-224withDSA";
+
+            AlgorithmMap["DSAWITHSHA3-256"] = "SHA3-256withDSA";
+            AlgorithmMap["SHA3-256/DSA"] = "SHA3-256withDSA";
+            AlgorithmMap["SHA3-256WITHDSA"] = "SHA3-256withDSA";
+            AlgorithmOidMap[NistObjectIdentifiers.IdDsaWithSha3_256] = "SHA3-256withDSA";
+
+            AlgorithmMap["DSAWITHSHA3-384"] = "SHA3-384withDSA";
+            AlgorithmMap["SHA3-384/DSA"] = "SHA3-384withDSA";
+            AlgorithmMap["SHA3-384WITHDSA"] = "SHA3-384withDSA";
+            AlgorithmOidMap[NistObjectIdentifiers.IdDsaWithSha3_384] = "SHA3-384withDSA";
+
+            AlgorithmMap["DSAWITHSHA3-512"] = "SHA3-512withDSA";
+            AlgorithmMap["SHA3-512/DSA"] = "SHA3-512withDSA";
+            AlgorithmMap["SHA3-512WITHDSA"] = "SHA3-512withDSA";
+            AlgorithmOidMap[NistObjectIdentifiers.IdDsaWithSha3_512] = "SHA3-512withDSA";
+
             AlgorithmMap["NONEWITHECDSA"] = "NONEwithECDSA";
             AlgorithmMap["ECDSAWITHNONE"] = "NONEwithECDSA";
 
@@ -265,6 +300,26 @@ namespace Org.BouncyCastle.Security
             AlgorithmMap["ECDSAWITHRIPEMD160"] = "RIPEMD160withECDSA";
             AlgorithmMap["RIPEMD160WITHECDSA"] = "RIPEMD160withECDSA";
             AlgorithmOidMap[TeleTrusTObjectIdentifiers.ECSignWithRipeMD160] = "RIPEMD160withECDSA";
+
+            AlgorithmMap["SHA3-224/ECDSA"] = "SHA3-224withECDSA";
+            AlgorithmMap["ECDSAWITHSHA3-224"] = "SHA3-224withECDSA";
+            AlgorithmMap["SHA3-224WITHECDSA"] = "SHA3-224withECDSA";
+            AlgorithmOidMap[NistObjectIdentifiers.IdEcdsaWithSha3_224] = "SHA3-224withECDSA";
+
+            AlgorithmMap["SHA3-256/ECDSA"] = "SHA3-256withECDSA";
+            AlgorithmMap["ECDSAWITHSHA3-256"] = "SHA3-256withECDSA";
+            AlgorithmMap["SHA3-256WITHECDSA"] = "SHA3-256withECDSA";
+            AlgorithmOidMap[NistObjectIdentifiers.IdEcdsaWithSha3_256] = "SHA3-256withECDSA";
+
+            AlgorithmMap["SHA3-384/ECDSA"] = "SHA3-384withECDSA";
+            AlgorithmMap["ECDSAWITHSHA3-384"] = "SHA3-384withECDSA";
+            AlgorithmMap["SHA3-384WITHECDSA"] = "SHA3-384withECDSA";
+            AlgorithmOidMap[NistObjectIdentifiers.IdEcdsaWithSha3_384] = "SHA3-384withECDSA";
+
+            AlgorithmMap["SHA3-512/ECDSA"] = "SHA3-512withECDSA";
+            AlgorithmMap["ECDSAWITHSHA3-512"] = "SHA3-512withECDSA";
+            AlgorithmMap["SHA3-512WITHECDSA"] = "SHA3-512withECDSA";
+            AlgorithmOidMap[NistObjectIdentifiers.IdEcdsaWithSha3_512] = "SHA3-512withECDSA";
 
             AlgorithmMap["NONEWITHCVC-ECDSA"] = "NONEwithCVC-ECDSA";
             AlgorithmMap["CVC-ECDSAWITHNONE"] = "NONEwithCVC-ECDSA";
@@ -357,6 +412,26 @@ namespace Org.BouncyCastle.Security
             AlgorithmMap["RIPEMD160WITHPLAIN-ECDSA"] = "RIPEMD160withPLAIN-ECDSA";
             AlgorithmOidMap[BsiObjectIdentifiers.ecdsa_plain_RIPEMD160] = "RIPEMD160withPLAIN-ECDSA";
 
+            AlgorithmMap["SHA3-224/PLAIN-ECDSA"] = "SHA3-224withPLAIN-ECDSA";
+            AlgorithmMap["PLAIN-ECDSAWITHSHA3-224"] = "SHA3-224withPLAIN-ECDSA";
+            AlgorithmMap["SHA3-224WITHPLAIN-ECDSA"] = "SHA3-224withPLAIN-ECDSA";
+            AlgorithmOidMap[BsiObjectIdentifiers.ecdsa_plain_SHA3_224] = "SHA3-224withPLAIN-ECDSA";
+
+            AlgorithmMap["SHA3-256/PLAIN-ECDSA"] = "SHA3-256withPLAIN-ECDSA";
+            AlgorithmMap["PLAIN-ECDSAWITHSHA3-256"] = "SHA3-256withPLAIN-ECDSA";
+            AlgorithmMap["SHA3-256WITHPLAIN-ECDSA"] = "SHA3-256withPLAIN-ECDSA";
+            AlgorithmOidMap[BsiObjectIdentifiers.ecdsa_plain_SHA3_256] = "SHA3-256withPLAIN-ECDSA";
+
+            AlgorithmMap["SHA3-384/PLAIN-ECDSA"] = "SHA3-384withPLAIN-ECDSA";
+            AlgorithmMap["PLAIN-ECDSAWITHSHA3-384"] = "SHA3-384withPLAIN-ECDSA";
+            AlgorithmMap["SHA3-384WITHPLAIN-ECDSA"] = "SHA3-384withPLAIN-ECDSA";
+            AlgorithmOidMap[BsiObjectIdentifiers.ecdsa_plain_SHA3_384] = "SHA3-384withPLAIN-ECDSA";
+
+            AlgorithmMap["SHA3-512/PLAIN-ECDSA"] = "SHA3-512withPLAIN-ECDSA";
+            AlgorithmMap["PLAIN-ECDSAWITHSHA3-512"] = "SHA3-512withPLAIN-ECDSA";
+            AlgorithmMap["SHA3-512WITHPLAIN-ECDSA"] = "SHA3-512withPLAIN-ECDSA";
+            AlgorithmOidMap[BsiObjectIdentifiers.ecdsa_plain_SHA3_512] = "SHA3-512withPLAIN-ECDSA";
+
             AlgorithmMap["SHA1WITHECNR"] = "SHA-1withECNR";
             AlgorithmMap["SHA-1WITHECNR"] = "SHA-1withECNR";
             AlgorithmMap["SHA224WITHECNR"] = "SHA-224withECNR";
@@ -398,24 +473,10 @@ namespace Org.BouncyCastle.Security
             AlgorithmOidMap[RosstandartObjectIdentifiers.id_tc26_signwithdigest_gost_3410_12_512] =
                 "ECGOST3410-2012-512";
 
-            AlgorithmMap["ED25519"] = "Ed25519";
-            AlgorithmOidMap[EdECObjectIdentifiers.id_Ed25519] = "Ed25519";
-            AlgorithmMap["ED25519CTX"] = "Ed25519ctx";
-            AlgorithmMap["ED25519PH"] = "Ed25519ph";
-            AlgorithmMap["ED448"] = "Ed448";
-            AlgorithmOidMap[EdECObjectIdentifiers.id_Ed448] = "Ed448";
-            AlgorithmMap["ED448PH"] = "Ed448ph";
-
             AlgorithmMap["SHA256WITHSM2"] = "SHA256withSM2";
             AlgorithmOidMap[GMObjectIdentifiers.sm2sign_with_sha256] = "SHA256withSM2";
             AlgorithmMap["SM3WITHSM2"] = "SM3withSM2";
             AlgorithmOidMap[GMObjectIdentifiers.sm2sign_with_sm3] = "SM3withSM2";
-
-            NoRandom.Add("Ed25519");
-            NoRandom.Add("Ed25519ctx");
-            NoRandom.Add("Ed25519ph");
-            NoRandom.Add("Ed448");
-            NoRandom.Add("Ed448ph");
 
             Oids["MD2withRSA"] = PkcsObjectIdentifiers.MD2WithRsaEncryption;
             Oids["MD4withRSA"] = PkcsObjectIdentifiers.MD4WithRsaEncryption;
@@ -445,6 +506,15 @@ namespace Org.BouncyCastle.Security
             Oids["RIPEMD256withRSA"] = TeleTrusTObjectIdentifiers.RsaSignatureWithRipeMD256;
 
             Oids["SHA-1withDSA"] = X9ObjectIdentifiers.IdDsaWithSha1;
+            Oids["SHA-224withDSA"] = NistObjectIdentifiers.DsaWithSha224;
+            Oids["SHA-256withDSA"] = NistObjectIdentifiers.DsaWithSha256;
+            Oids["SHA-384withDSA"] = NistObjectIdentifiers.DsaWithSha384;
+            Oids["SHA-512withDSA"] = NistObjectIdentifiers.DsaWithSha512;
+
+            Oids["SHA3-224withDSA"] = NistObjectIdentifiers.IdDsaWithSha3_224;
+            Oids["SHA3-256withDSA"] = NistObjectIdentifiers.IdDsaWithSha3_256;
+            Oids["SHA3-384withDSA"] = NistObjectIdentifiers.IdDsaWithSha3_384;
+            Oids["SHA3-512withDSA"] = NistObjectIdentifiers.IdDsaWithSha3_512;
 
             Oids["SHA-1withECDSA"] = X9ObjectIdentifiers.ECDsaWithSha1;
             Oids["SHA-224withECDSA"] = X9ObjectIdentifiers.ECDsaWithSha224;
@@ -452,6 +522,11 @@ namespace Org.BouncyCastle.Security
             Oids["SHA-384withECDSA"] = X9ObjectIdentifiers.ECDsaWithSha384;
             Oids["SHA-512withECDSA"] = X9ObjectIdentifiers.ECDsaWithSha512;
             Oids["RIPEMD160withECDSA"] = TeleTrusTObjectIdentifiers.ECSignWithRipeMD160;
+
+            Oids["SHA3-224withECDSA"] = NistObjectIdentifiers.IdEcdsaWithSha3_224;
+            Oids["SHA3-256withECDSA"] = NistObjectIdentifiers.IdEcdsaWithSha3_256;
+            Oids["SHA3-384withECDSA"] = NistObjectIdentifiers.IdEcdsaWithSha3_384;
+            Oids["SHA3-512withECDSA"] = NistObjectIdentifiers.IdEcdsaWithSha3_512;
 
             Oids["SHA-1withCVC-ECDSA"] = EacObjectIdentifiers.id_TA_ECDSA_SHA_1;
             Oids["SHA-224withCVC-ECDSA"] = EacObjectIdentifiers.id_TA_ECDSA_SHA_224;
@@ -466,17 +541,44 @@ namespace Org.BouncyCastle.Security
             Oids["SHA-512withPLAIN-ECDSA"] = BsiObjectIdentifiers.ecdsa_plain_SHA512;
             Oids["RIPEMD160withPLAIN-ECDSA"] = BsiObjectIdentifiers.ecdsa_plain_RIPEMD160;
 
+            Oids["SHA3-224withPLAIN-ECDSA"] = BsiObjectIdentifiers.ecdsa_plain_SHA3_224;
+            Oids["SHA3-256withPLAIN-ECDSA"] = BsiObjectIdentifiers.ecdsa_plain_SHA3_256;
+            Oids["SHA3-384withPLAIN-ECDSA"] = BsiObjectIdentifiers.ecdsa_plain_SHA3_384;
+            Oids["SHA3-512withPLAIN-ECDSA"] = BsiObjectIdentifiers.ecdsa_plain_SHA3_512;
+
             Oids["GOST3410"] = CryptoProObjectIdentifiers.GostR3411x94WithGostR3410x94;
             Oids["ECGOST3410"] = CryptoProObjectIdentifiers.GostR3411x94WithGostR3410x2001;
 
             Oids["ECGOST3410-2012-256"] = RosstandartObjectIdentifiers.id_tc26_signwithdigest_gost_3410_12_256;
             Oids["ECGOST3410-2012-512"] = RosstandartObjectIdentifiers.id_tc26_signwithdigest_gost_3410_12_512;
 
-            Oids["Ed25519"] = EdECObjectIdentifiers.id_Ed25519;
-            Oids["Ed448"] = EdECObjectIdentifiers.id_Ed448;
-
             Oids["SHA256withSM2"] = GMObjectIdentifiers.sm2sign_with_sha256;
             Oids["SM3withSM2"] = GMObjectIdentifiers.sm2sign_with_sm3;
+
+            /*
+             * EdDSA
+             */
+            AddAlgorithm("Ed25519", EdECObjectIdentifiers.id_Ed25519, isNoRandom: true);
+            AddAlgorithm("Ed25519ctx", oid: null, isNoRandom: true);
+            AddAlgorithm("Ed25519ph", oid: null, isNoRandom: true);
+            AddAlgorithm("Ed448", EdECObjectIdentifiers.id_Ed448, isNoRandom: true);
+            AddAlgorithm("Ed448ph", oid: null, isNoRandom: true);
+
+            /*
+             * ML-DSA
+             */
+            foreach (MLDsaParameters mlDsa in MLDsaParameters.ByName.Values)
+            {
+                AddAlgorithm(mlDsa.Name, mlDsa.Oid, isNoRandom: false);
+            }
+
+            /*
+             * SLH-DSA
+             */
+            foreach (SlhDsaParameters slhDsa in SlhDsaParameters.ByName.Values)
+            {
+                AddAlgorithm(slhDsa.Name, slhDsa.Oid, isNoRandom: false);
+            }
 
 #if DEBUG
             foreach (var key in AlgorithmMap.Keys)
@@ -504,8 +606,34 @@ namespace Org.BouncyCastle.Security
 #endif
         }
 
+        private static void AddAlgorithm(string name, DerObjectIdentifier oid, bool isNoRandom)
+        {
+            if (name == null)
+                throw new ArgumentNullException(nameof(name));
+
+            if (name.ToUpperInvariant() != name)
+            {
+                AlgorithmMap.Add(name, name);
+            }
+            if (oid != null)
+            {
+                AlgorithmOidMap.Add(oid, name);
+                Oids.Add(name, oid);
+            }
+            if (isNoRandom)
+            {
+                NoRandom.Add(name);
+            }
+        }
+
+        /// <summary>The set of canonical signature algorithm names recognised by this factory.</summary>
         public static ICollection<string> Algorithms => CollectionUtilities.ReadOnly(Oids.Keys);
 
+        /// <summary>
+        /// Returns the default X.509 <c>AlgorithmIdentifier</c> parameters block for the given signature
+        /// algorithm OID. For RSASSA-PSS variants this constructs a populated <c>RSASSA-PSS-params</c>
+        /// structure; for most other algorithms <see cref="DerNull.Instance"/> is returned.
+        /// </summary>
         // TODO[api] Change parameter name to 'oid'
         public static Asn1Encodable GetDefaultX509Parameters(DerObjectIdentifier id)
         {
@@ -518,6 +646,10 @@ namespace Org.BouncyCastle.Security
             return GetDefaultX509ParametersForMechanism(mechanism);
         }
 
+        /// <summary>
+        /// Returns the default X.509 <c>AlgorithmIdentifier</c> parameters block for the named signature
+        /// algorithm. See the OID overload for behaviour.
+        /// </summary>
         public static Asn1Encodable GetDefaultX509Parameters(string algorithm)
         {
             if (algorithm == null)
@@ -546,6 +678,10 @@ namespace Org.BouncyCastle.Security
             return DerNull.Instance;
         }
 
+        /// <summary>
+        /// Returns the canonical signature algorithm name registered for the given ASN.1 OID, or <c>null</c>
+        /// if the OID is not mapped.
+        /// </summary>
         public static string GetEncodingName(DerObjectIdentifier oid)
         {
             return CollectionUtilities.GetValueOrNull(AlgorithmOidMap, oid);
@@ -580,8 +716,7 @@ namespace Org.BouncyCastle.Security
             return CollectionUtilities.GetValueOrNull(Oids, mechanism);
         }
 
-        private static Asn1Encodable GetPssX509Parameters(
-            string	digestName)
+        private static Asn1Encodable GetPssX509Parameters(string digestName)
         {
             AlgorithmIdentifier hashAlgorithm = new AlgorithmIdentifier(
                 DigestUtilities.GetObjectIdentifier(digestName), DerNull.Instance);
@@ -592,9 +727,14 @@ namespace Org.BouncyCastle.Security
 
             int saltLen = DigestUtilities.GetDigest(digestName).GetDigestSize();
             return new RsassaPssParameters(hashAlgorithm, maskGenAlgorithm,
-                new DerInteger(saltLen), new DerInteger(1));
+                DerInteger.ValueOf(saltLen), RsassaPssParameters.DefaultTrailerField);
         }
 
+        /// <summary>
+        /// Resolve and instantiate an <see cref="ISigner"/> for the given ASN.1 algorithm OID.
+        /// </summary>
+        /// <exception cref="ArgumentNullException">If <paramref name="id"/> is <c>null</c>.</exception>
+        /// <exception cref="SecurityUtilityException">If the OID does not map to a known signer.</exception>
         // TODO[api] Change parameter name to 'oid'
         public static ISigner GetSigner(DerObjectIdentifier id)
         {
@@ -611,6 +751,12 @@ namespace Org.BouncyCastle.Security
             throw new SecurityUtilityException("Signer OID not recognised.");
         }
 
+        /// <summary>
+        /// Resolve and instantiate an <see cref="ISigner"/> by name (e.g. <c>"SHA256withRSA"</c>,
+        /// <c>"SHA1withECDSA"</c>, <c>"Ed25519"</c>).
+        /// </summary>
+        /// <exception cref="ArgumentNullException">If <paramref name="algorithm"/> is <c>null</c>.</exception>
+        /// <exception cref="SecurityUtilityException">If the algorithm name is not recognised.</exception>
         public static ISigner GetSigner(string algorithm)
         {
             if (algorithm == null)
@@ -653,7 +799,7 @@ namespace Org.BouncyCastle.Security
 
             if (mechanism.Equals("RSA"))
             {
-                return (new RsaDigestSigner(new NullDigest(), (AlgorithmIdentifier)null));
+                return new GenericSigner(new Pkcs1Encoding(new RsaBlindedEngine()), new NullDigest());
             }
             if (mechanism.Equals("RAWRSASSA-PSS"))
             {
@@ -773,9 +919,38 @@ namespace Org.BouncyCastle.Security
                 }
             }
 
+            if (MLDsaParameters.ByName.TryGetValue(mechanism, out MLDsaParameters mlDsaParameters))
+            {
+                var preHashOid = mlDsaParameters.PreHashOid;
+                if (preHashOid == null)
+                    return new MLDsaSigner(mlDsaParameters, deterministic: false);
+
+                return new HashMLDsaSigner(mlDsaParameters, deterministic: false);
+            }
+
+            if (SlhDsaParameters.ByName.TryGetValue(mechanism, out SlhDsaParameters slhDsaParameters))
+            {
+                var preHashOid = slhDsaParameters.PreHashOid;
+                if (preHashOid == null)
+                    return new SlhDsaSigner(slhDsaParameters, deterministic: false);
+
+                return new HashSlhDsaSigner(slhDsaParameters, deterministic: false);
+            }
+
             return null;
         }
 
+        /// <summary>
+        /// Resolve a signer for the given OID and initialise it for signing or verification.
+        /// </summary>
+        /// <param name="algorithmOid">The signature algorithm OID.</param>
+        /// <param name="forSigning"><c>true</c> to initialise for signing (private key required);
+        /// <c>false</c> for verification (public key).</param>
+        /// <param name="privateKey">The signing or verification key.</param>
+        /// <param name="random">Source of randomness, used by signers that require it; ignored
+        /// otherwise.</param>
+        /// <exception cref="ArgumentNullException">If <paramref name="algorithmOid"/> is <c>null</c>.</exception>
+        /// <exception cref="SecurityUtilityException">If the OID is not recognised.</exception>
         // TODO[api] Rename 'privateKey' to 'key'
         public static ISigner InitSigner(DerObjectIdentifier algorithmOid, bool forSigning,
             AsymmetricKeyParameter privateKey, SecureRandom random)
@@ -783,25 +958,16 @@ namespace Org.BouncyCastle.Security
             if (algorithmOid == null)
                 throw new ArgumentNullException(nameof(algorithmOid));
 
-            if (AlgorithmOidMap.TryGetValue(algorithmOid, out var mechanism))
-            {
-                var signer = GetSignerForMechanism(mechanism);
-                if (signer != null)
-                {
-                    ICipherParameters cipherParameters = privateKey;
-                    if (forSigning && !NoRandom.Contains(mechanism))
-                    {
-                        cipherParameters = ParameterUtilities.WithRandom(cipherParameters, random);
-                    }
+            if (!AlgorithmOidMap.TryGetValue(algorithmOid, out var mechanism))
+                throw new SecurityUtilityException("Signer OID not recognised.");
 
-                    signer.Init(forSigning, cipherParameters);
-                    return signer;
-                }
-            }
-
-            throw new SecurityUtilityException("Signer OID not recognised.");
+            return InitSignerForMechanism(mechanism, forSigning, privateKey, random);
         }
 
+        /// <summary>
+        /// Resolve a signer by name and initialise it for signing or verification. See the OID overload for
+        /// parameter semantics.
+        /// </summary>
         // TODO[api] Rename 'privateKey' to 'key'
         public static ISigner InitSigner(string algorithm, bool forSigning, AsymmetricKeyParameter privateKey,
             SecureRandom random)
@@ -811,20 +977,23 @@ namespace Org.BouncyCastle.Security
 
             string mechanism = GetMechanism(algorithm) ?? algorithm.ToUpperInvariant();
 
-            var signer = GetSignerForMechanism(mechanism);
-            if (signer != null)
-            {
-                ICipherParameters cipherParameters = privateKey;
-                if (forSigning && !NoRandom.Contains(mechanism))
-                {
-                    cipherParameters = ParameterUtilities.WithRandom(cipherParameters, random);
-                }
+            return InitSignerForMechanism(mechanism, forSigning, privateKey, random);
+        }
 
-                signer.Init(forSigning, cipherParameters);
-                return signer;
+        private static ISigner InitSignerForMechanism(string mechanism, bool forSigning,
+            AsymmetricKeyParameter key, SecureRandom random)
+        {
+            var signer = GetSignerForMechanism(mechanism) ??
+                throw new SecurityUtilityException("Signing mechanism " + mechanism + " not recognised.");
+
+            ICipherParameters cipherParameters = key;
+            if (forSigning && !NoRandom.Contains(mechanism))
+            {
+                cipherParameters = ParameterUtilities.WithRandom(cipherParameters, random);
             }
 
-            throw new SecurityUtilityException("Signer " + algorithm + " not recognised.");
+            signer.Init(forSigning, cipherParameters);
+            return signer;
         }
     }
 }

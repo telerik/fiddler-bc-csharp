@@ -13,15 +13,27 @@ using Org.BouncyCastle.Asn1.Oiw;
 using Org.BouncyCastle.Asn1.Pkcs;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Parameters;
+using Org.BouncyCastle.Crypto.Utilities;
 using Org.BouncyCastle.Utilities.Collections;
 
 namespace Org.BouncyCastle.Security
 {
+    /// <summary>
+    /// Helpers for building <see cref="ICipherParameters"/> values: creating algorithm-appropriate
+    /// <see cref="KeyParameter"/> instances, decoding ASN.1 algorithm parameters into IV-bearing
+    /// <see cref="ICipherParameters"/>, generating random IV/parameter blocks, and wrapping/unwrapping
+    /// <see cref="ParametersWithRandom"/> / <see cref="ParametersWithContext"/> envelopes.
+    /// </summary>
+    /// <remarks>
+    /// Algorithm names are resolved through <see cref="GetCanonicalAlgorithmName"/> and matched
+    /// case-insensitively. DES, DES-EDE and RC2 receive their dedicated parameter subclasses with parity
+    /// enforcement; other algorithms get a plain <see cref="KeyParameter"/>.
+    /// </remarks>
     public static class ParameterUtilities
     {
-        private static readonly IDictionary<string, string> Algorithms =
+        private static readonly Dictionary<string, string> Algorithms =
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        private static readonly IDictionary<string, int> BasicIVSizes =
+        private static readonly Dictionary<string, int> BasicIVSizes =
             new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
         static ParameterUtilities()
@@ -118,6 +130,8 @@ namespace Org.BouncyCastle.Security
                 "CHACHA20",
                 "CHACHA20-POLY1305",
                 PkcsObjectIdentifiers.IdAlgAeadChaCha20Poly1305);
+            AddAlgorithm("XCHACHA20",
+                "XCHACHA20-POLY1305");
             AddAlgorithm("DES",
                 OiwObjectIdentifiers.DesCbc,
                 OiwObjectIdentifiers.DesCfb,
@@ -171,6 +185,7 @@ namespace Org.BouncyCastle.Security
             AddBasicIVSizeEntries(12, "CHACHA7539");
             AddBasicIVSizeEntries(16, "AES", "AES128", "AES192", "AES256", "ARIA", "ARIA128", "ARIA192", "ARIA256",
                 "CAMELLIA", "CAMELLIA128", "CAMELLIA192", "CAMELLIA256", "NOEKEON", "SEED", "SM4");
+            AddBasicIVSizeEntries(24, "XCHACHA20");
 
             // TODO These algorithms support an IV
             // but JCE doesn't seem to provide an AlgorithmParametersGenerator for them
@@ -195,35 +210,44 @@ namespace Org.BouncyCastle.Security
             }
         }
 
+        /// <summary>
+        /// Returns the canonical algorithm name for the given alias or OID string, or <c>null</c> if the
+        /// algorithm is not recognised.
+        /// </summary>
         public static string GetCanonicalAlgorithmName(string algorithm)
         {
             return CollectionUtilities.GetValueOrNull(Algorithms, algorithm);
         }
 
+        /// <summary>
+        /// Build a <see cref="KeyParameter"/> for the algorithm identified by <paramref name="algOid"/>.
+        /// </summary>
         public static KeyParameter CreateKeyParameter(DerObjectIdentifier algOid, byte[] keyBytes)
         {
             return CreateKeyParameter(algOid.Id, keyBytes, 0, keyBytes.Length);
         }
 
+        /// <summary>Build a <see cref="KeyParameter"/> for the named algorithm.</summary>
         public static KeyParameter CreateKeyParameter(string algorithm, byte[] keyBytes)
         {
             return CreateKeyParameter(algorithm, keyBytes, 0, keyBytes.Length);
         }
 
-        public static KeyParameter CreateKeyParameter(
-            DerObjectIdentifier algOid,
-            byte[]				keyBytes,
-            int					offset,
-            int					length)
+        /// <summary>Build a <see cref="KeyParameter"/> from a slice of <paramref name="keyBytes"/>.</summary>
+        public static KeyParameter CreateKeyParameter(DerObjectIdentifier algOid, byte[] keyBytes, int offset,
+            int length)
         {
             return CreateKeyParameter(algOid.Id, keyBytes, offset, length);
         }
 
-        public static KeyParameter CreateKeyParameter(
-            string	algorithm,
-            byte[]	keyBytes,
-            int		offset,
-            int		length)
+        /// <summary>
+        /// Build a <see cref="KeyParameter"/> from a slice of <paramref name="keyBytes"/>. DES / DES-EDE / RC2
+        /// keys are returned as their dedicated parameter subclasses; all other algorithms get a plain
+        /// <see cref="KeyParameter"/>.
+        /// </summary>
+        /// <exception cref="ArgumentNullException">If <paramref name="algorithm"/> is <c>null</c>.</exception>
+        /// <exception cref="SecurityUtilityException">If the algorithm is not recognised.</exception>
+        public static KeyParameter CreateKeyParameter(string algorithm, byte[] keyBytes, int offset, int length)
         {
             if (algorithm == null)
                 throw new ArgumentNullException(nameof(algorithm));
@@ -236,7 +260,7 @@ namespace Org.BouncyCastle.Security
             if (canonical == "DES")
                 return new DesParameters(keyBytes, offset, length);
 
-            if (canonical == "DESEDE" || canonical =="DESEDE3")
+            if (canonical == "DESEDE" || canonical == "DESEDE3")
                 return new DesEdeParameters(keyBytes, offset, length);
 
             if (canonical == "RC2")
@@ -245,44 +269,58 @@ namespace Org.BouncyCastle.Security
             return new KeyParameter(keyBytes, offset, length);
         }
 
-        public static ICipherParameters GetCipherParameters(
-            DerObjectIdentifier	algOid,
-            ICipherParameters	key,
-            Asn1Object			asn1Params)
+        /// <summary>
+        /// Combine a key with ASN.1-encoded algorithm parameters, returning the appropriate
+        /// <see cref="ICipherParameters"/> envelope (e.g. <see cref="ParametersWithIV"/> or
+        /// <see cref="AeadParameters"/> for AES-GCM/CCM).
+        /// </summary>
+        public static ICipherParameters GetCipherParameters(DerObjectIdentifier algOid, ICipherParameters key,
+            Asn1Object asn1Params)
         {
             return GetCipherParameters(algOid.Id, key, asn1Params);
         }
 
-        public static ICipherParameters GetCipherParameters(
-            string				algorithm,
-            ICipherParameters	key,
-            Asn1Object			asn1Params)
+        /// <summary>
+        /// Combine a key with ASN.1-encoded algorithm parameters for the named algorithm. See the OID
+        /// overload.
+        /// </summary>
+        /// <exception cref="ArgumentException">If <paramref name="key"/> cannot supply the data required by
+        /// an AEAD mode, or the parameters block cannot be parsed.</exception>
+        /// <exception cref="SecurityUtilityException">If the algorithm is not recognised.</exception>
+        public static ICipherParameters GetCipherParameters(string algorithm, ICipherParameters key,
+            Asn1Object asn1Params)
         {
             if (algorithm == null)
-                throw new ArgumentNullException("algorithm");
+                throw new ArgumentNullException(nameof(algorithm));
 
-            if (NistObjectIdentifiers.IdAes128Gcm.Id.Equals(algorithm) ||
-                NistObjectIdentifiers.IdAes192Gcm.Id.Equals(algorithm) ||
-                NistObjectIdentifiers.IdAes256Gcm.Id.Equals(algorithm))
+            if (DerObjectIdentifier.TryFromID(algorithm, out var algOid))
             {
-                if (!(key is KeyParameter keyParameter))
-                    throw new ArgumentException("key data must be accessible for GCM operation");
+                if (algOid.On(NistObjectIdentifiers.Aes))
+                {
+                    if (NistObjectIdentifiers.IdAes128Gcm.Equals(algOid) ||
+                        NistObjectIdentifiers.IdAes192Gcm.Equals(algOid) ||
+                        NistObjectIdentifiers.IdAes256Gcm.Equals(algOid))
+                    {
+                        if (!(key is KeyParameter keyParameter))
+                            throw new ArgumentException("key data must be accessible for GCM operation");
 
-                var gcmParameters = GcmParameters.GetInstance(asn1Params);
+                        var gcmParameters = GcmParameters.GetInstance(asn1Params);
 
-                return new AeadParameters(keyParameter, gcmParameters.IcvLen * 8, gcmParameters.GetNonce());
-            }
+                        return new AeadParameters(keyParameter, gcmParameters.IcvLen * 8, gcmParameters.GetNonce());
+                    }
+ 
+                    if (NistObjectIdentifiers.IdAes128Ccm.Equals(algOid) ||
+                        NistObjectIdentifiers.IdAes192Ccm.Equals(algOid) ||
+                        NistObjectIdentifiers.IdAes256Ccm.Equals(algOid))
+                    {
+                        if (!(key is KeyParameter keyParameter))
+                            throw new ArgumentException("key data must be accessible for CCM operation");
 
-            if (NistObjectIdentifiers.IdAes128Ccm.Id.Equals(algorithm) ||
-                NistObjectIdentifiers.IdAes192Ccm.Id.Equals(algorithm) ||
-                NistObjectIdentifiers.IdAes256Ccm.Id.Equals(algorithm))
-            {
-                if (!(key is KeyParameter keyParameter))
-                    throw new ArgumentException("key data must be accessible for CCM operation");
+                        var ccmParameters = CcmParameters.GetInstance(asn1Params);
 
-                var ccmParameters = CcmParameters.GetInstance(asn1Params);
-
-                return new AeadParameters(keyParameter, ccmParameters.IcvLen * 8, ccmParameters.GetNonce());
+                        return new AeadParameters(keyParameter, ccmParameters.IcvLen * 8, ccmParameters.GetNonce());
+                    }
+                }
             }
 
             string canonical = GetCanonicalAlgorithmName(algorithm);
@@ -290,7 +328,7 @@ namespace Org.BouncyCastle.Security
             if (canonical == null)
                 throw new SecurityUtilityException("Algorithm " + algorithm + " not recognised.");
 
-            byte[] iv = null;
+            Asn1OctetString iv = null;
 
             try
             {
@@ -302,19 +340,19 @@ namespace Org.BouncyCastle.Security
                 if (basicIVKeySize != -1
                     || canonical == "RIJNDAEL" || canonical == "SKIPJACK" || canonical == "TWOFISH")
                 {
-                    iv = ((Asn1OctetString) asn1Params).GetOctets();
+                    iv = Asn1OctetString.GetInstance(asn1Params);
                 }
                 else if (canonical == "CAST5")
                 {
-                    iv = Cast5CbcParameters.GetInstance(asn1Params).GetIV();
+                    iv = Cast5CbcParameters.GetInstance(asn1Params).IV;
                 }
                 else if (canonical == "IDEA")
                 {
-                    iv = IdeaCbcPar.GetInstance(asn1Params).GetIV();
+                    iv = IdeaCbcPar.GetInstance(asn1Params).IV;
                 }
                 else if (canonical == "RC2")
                 {
-                    iv = RC2CbcParameter.GetInstance(asn1Params).GetIV();
+                    iv = RC2CbcParameter.GetInstance(asn1Params).IV;
                 }
             }
             catch (Exception e)
@@ -324,22 +362,30 @@ namespace Org.BouncyCastle.Security
 
             if (iv != null)
             {
-                return new ParametersWithIV(key, iv);
+                return new ParametersWithIV(key, iv.GetOctets());
             }
 
             throw new SecurityUtilityException("Algorithm " + algorithm + " not recognised.");
         }
 
-        public static Asn1Encodable GenerateParameters(
-            DerObjectIdentifier algID,
-            SecureRandom		random)
+        /// <summary>
+        /// Generate a fresh ASN.1-encoded algorithm parameters block (typically a random IV) for the
+        /// algorithm identified by <paramref name="algID"/>.
+        /// </summary>
+        public static Asn1Encodable GenerateParameters(DerObjectIdentifier algID, SecureRandom random)
         {
             return GenerateParameters(algID.Id, random);
         }
 
-        public static Asn1Encodable GenerateParameters(
-            string			algorithm,
-            SecureRandom	random)
+        /// <summary>
+        /// Generate a fresh ASN.1-encoded algorithm parameters block for the named algorithm. CAST5, IDEA and
+        /// RC2 receive their dedicated parameter structures; other IV-based algorithms get a plain
+        /// <see cref="Asn1OctetString"/> containing the IV.
+        /// </summary>
+        /// <exception cref="ArgumentNullException">If <paramref name="algorithm"/> is <c>null</c>.</exception>
+        /// <exception cref="SecurityUtilityException">If the algorithm is not recognised or has no
+        /// parameter generator.</exception>
+        public static Asn1Encodable GenerateParameters(string algorithm, SecureRandom random)
         {
             if (algorithm == null)
                 throw new ArgumentNullException("algorithm");
@@ -369,6 +415,83 @@ namespace Org.BouncyCastle.Security
             throw new SecurityUtilityException("Algorithm " + algorithm + " not recognised.");
         }
 
+        /// <summary>
+        /// Unwrap a <see cref="ParametersWithContext"/> envelope, returning the inner parameters and copying the
+        /// context bytes out via <paramref name="context"/>. If the envelope is absent, <paramref name="context"/>
+        /// is set to <c>null</c> and the input is returned unchanged.
+        /// </summary>
+        /// <param name="cipherParameters">Parameters to inspect.</param>
+        /// <param name="minLen">Minimum permitted context length, inclusive.</param>
+        /// <param name="maxLen">Maximum permitted context length, inclusive.</param>
+        /// <param name="context">Receives the context bytes, or <c>null</c> if no envelope is present.</param>
+        /// <exception cref="ArgumentOutOfRangeException">If the context length falls outside
+        /// [<paramref name="minLen"/>, <paramref name="maxLen"/>].</exception>
+        public static ICipherParameters GetContext(ICipherParameters cipherParameters, int minLen, int maxLen,
+            out byte[] context)
+        {
+            if (cipherParameters is ParametersWithContext withContext)
+            {
+                int len = withContext.ContextLength;
+                if (len < minLen || len > maxLen)
+                {
+                    var message = $"Context length must be in range [{minLen}, {maxLen}]";
+                    throw new ArgumentOutOfRangeException(nameof(cipherParameters), len, message);
+                }
+
+                context = withContext.GetContext();
+                return withContext.Parameters;
+            }
+
+            context = null;
+            return cipherParameters;
+        }
+
+        /// <summary>
+        /// Unwrap a <see cref="ParametersWithRandom"/> envelope, returning the inner parameters and exposing the
+        /// attached <see cref="SecureRandom"/> via <paramref name="random"/>. If the envelope is absent,
+        /// <paramref name="random"/> is set to <c>null</c> and the input is returned unchanged.
+        /// </summary>
+        public static ICipherParameters GetRandom(ICipherParameters cipherParameters, out SecureRandom random)
+        {
+            if (cipherParameters is ParametersWithRandom withRandom)
+            {
+                random = withRandom.Random;
+                return withRandom.Parameters;
+            }
+
+            random = null;
+            return cipherParameters;
+        }
+
+        /// <summary>
+        /// Strip any <see cref="ParametersWithRandom"/> envelope and return the inner parameters; otherwise return
+        /// the input unchanged.
+        /// </summary>
+        public static ICipherParameters IgnoreRandom(ICipherParameters cipherParameters)
+        {
+            if (cipherParameters is ParametersWithRandom withRandom)
+                return withRandom.Parameters;
+
+            return cipherParameters;
+        }
+
+        /// <summary>
+        /// Wrap <paramref name="cp"/> in a <see cref="ParametersWithContext"/> envelope when <paramref name="context"/>
+        /// is non-<c>null</c>; otherwise return <paramref name="cp"/> unchanged.
+        /// </summary>
+        public static ICipherParameters WithContext(ICipherParameters cp, byte[] context)
+        {
+            if (context != null)
+            {
+                cp = new ParametersWithContext(cp, context);
+            }
+            return cp;
+        }
+
+        /// <summary>
+        /// Wrap <paramref name="cp"/> in a <see cref="ParametersWithRandom"/> envelope when <paramref name="random"/>
+        /// is non-<c>null</c>; otherwise return <paramref name="cp"/> unchanged.
+        /// </summary>
         public static ICipherParameters WithRandom(ICipherParameters cp, SecureRandom random)
         {
             if (random != null)

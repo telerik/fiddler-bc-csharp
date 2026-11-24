@@ -3,7 +3,6 @@ using System.Collections.Generic;
 
 using Org.BouncyCastle.Math;
 using Org.BouncyCastle.Security;
-using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Tls.Crypto.Impl
 {
@@ -28,6 +27,8 @@ namespace Org.BouncyCastle.Tls.Crypto.Impl
 
         public abstract bool HasHkdfAlgorithm(int cryptoHashAlgorithm);
 
+        public abstract bool HasKemAgreement();
+
         public abstract bool HasMacAlgorithm(int macAlgorithm);
 
         public abstract bool HasNamedGroup(int namedGroup);
@@ -41,6 +42,8 @@ namespace Org.BouncyCastle.Tls.Crypto.Impl
         public abstract bool HasSignatureScheme(int signatureScheme);
 
         public abstract bool HasSrpAuthentication();
+
+        public abstract TlsSecret CreateHybridSecret(TlsSecret s1, TlsSecret s2);
 
         public abstract TlsSecret CreateSecret(byte[] data);
 
@@ -60,6 +63,8 @@ namespace Org.BouncyCastle.Tls.Crypto.Impl
         public abstract TlsDHDomain CreateDHDomain(TlsDHConfig dhConfig);
 
         public abstract TlsECDomain CreateECDomain(TlsECConfig ecConfig);
+
+        public abstract TlsKemDomain CreateKemDomain(TlsKemConfig kemConfig);
 
         public virtual TlsSecret AdoptSecret(TlsSecret secret)
         {

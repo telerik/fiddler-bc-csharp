@@ -31,10 +31,11 @@ namespace Org.BouncyCastle.Asn1.Tsp
             return new PartialHashtree(Asn1Sequence.GetInstance(obj));
         }
 
-        public static PartialHashtree GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
-        {
-            return new PartialHashtree(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
-        }
+        public static PartialHashtree GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new PartialHashtree(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
+
+        public static PartialHashtree GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new PartialHashtree(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
         /**
          * Hash values that constitute the hash tree, as ASN.1 Octet Strings.
@@ -53,14 +54,7 @@ namespace Org.BouncyCastle.Asn1.Tsp
 
         public PartialHashtree(params byte[][] values)
         {
-            Asn1EncodableVector v = new Asn1EncodableVector(values.Length);
-
-            for (int i = 0; i != values.Length; i++)
-            {
-                v.Add(new DerOctetString(Arrays.Clone(values[i])));
-            }
-
-            m_values = new DerSequence(v);
+            m_values = DerSequence.Map(values, DerOctetString.FromContents);
         }
 
         public virtual int ValueCount => m_values.Count;

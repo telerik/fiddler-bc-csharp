@@ -1,42 +1,40 @@
 ﻿using System;
 using System.IO;
 
-using Org.BouncyCastle.Asn1.X9;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Agreement;
 using Org.BouncyCastle.Crypto.Generators;
 using Org.BouncyCastle.Crypto.Parameters;
-using Org.BouncyCastle.Math;
 using Org.BouncyCastle.Math.EC;
-using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Tls.Crypto.Impl.BC
 {
     /**
      * EC domain class for generating key pairs and performing key agreement.
      */
+    // TODO[api] Make sealed
     public class BcTlsECDomain
         : TlsECDomain
     {
         public static BcTlsSecret CalculateECDHAgreement(BcTlsCrypto crypto, ECPrivateKeyParameters privateKey,
             ECPublicKeyParameters publicKey)
         {
-            ECDHBasicAgreement basicAgreement = new ECDHBasicAgreement();
-            basicAgreement.Init(privateKey);
-            BigInteger agreementValue = basicAgreement.CalculateAgreement(publicKey);
-
             /*
              * RFC 4492 5.10. Note that this octet string (Z in IEEE 1363 terminology) as output by
              * FE2OSP, the Field Element to Octet String Conversion Primitive, has constant length for
              * any given field; leading zeros found in this octet string MUST NOT be truncated.
              */
-            byte[] secret = BigIntegers.AsUnsignedByteArray(basicAgreement.GetFieldSize(), agreementValue);
+            var agreement = new ECDHRawAgreement();
+            agreement.Init(privateKey);
+            byte[] secret = new byte[agreement.AgreementSize];
+            agreement.CalculateAgreement(publicKey, secret, 0);
             return crypto.AdoptLocalSecret(secret);
         }
 
         public static ECDomainParameters GetDomainParameters(TlsECConfig ecConfig)
         {
-            return GetDomainParameters(ecConfig.NamedGroup);
+            return GetDomainParameters(ecConfig.NamedGroup) ??
+                throw new ArgumentException("No EC configuration provided", nameof(ecConfig));
         }
 
         public static ECDomainParameters GetDomainParameters(int namedGroup)
@@ -47,23 +45,20 @@ namespace Org.BouncyCastle.Tls.Crypto.Impl.BC
             // Parameters are lazily created the first time a particular curve is accessed
 
             string curveName = NamedGroup.GetCurveName(namedGroup);
-            X9ECParameters ecP = ECKeyPairGenerator.FindECCurveByName(curveName);
-            if (ecP == null)
-                return null;
 
-            // It's a bit inefficient to do this conversion every time
-            return new ECDomainParameters(ecP.Curve, ecP.G, ecP.N, ecP.H, ecP.GetSeed());
+            return ECDomainParameters.LookupName(curveName);
         }
 
         protected readonly BcTlsCrypto m_crypto;
+        // TODO[api] Remove
         protected readonly TlsECConfig m_config;
         protected readonly ECDomainParameters m_domainParameters;
 
         public BcTlsECDomain(BcTlsCrypto crypto, TlsECConfig ecConfig)
         {
-            this.m_crypto = crypto;
-            this.m_config = ecConfig;
-            this.m_domainParameters = GetDomainParameters(ecConfig);
+            m_crypto = crypto;
+            m_config = ecConfig;
+            m_domainParameters = GetDomainParameters(ecConfig);
         }
 
         public virtual BcTlsSecret CalculateECDHAgreement(ECPrivateKeyParameters privateKey,

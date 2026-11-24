@@ -1,9 +1,11 @@
 using System;
 
 using Org.BouncyCastle.Math;
+using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Crypto.Parameters
 {
+    /// <summary>Digital Signature Algorithm (DSA) public key parameters.</summary>
     public class DsaPublicKeyParameters
 		: DsaKeyParameters
     {
@@ -12,6 +14,12 @@ namespace Org.BouncyCastle.Crypto.Parameters
             // we can't validate without params, fortunately we can't use the key either...
             if (parameters != null)
             {
+                // Bound the modulus size before the super-linear ModPow below, so a crafted oversized
+                // p cannot turn key import into a CPU-exhaustion DoS (cf. RSA modulus cap).
+                int maxBitLength = Properties.GetInt32(Properties.DsaMaxSize, 16384);
+                if (parameters.P.BitLength > maxBitLength)
+                    throw new ArgumentException("DSA modulus out of range");
+
                 if (y.CompareTo(BigInteger.Two) < 0
                     || y.CompareTo(parameters.P.Subtract(BigInteger.Two)) > 0
                     || !y.ModPow(parameters.Q, parameters.P).Equals(BigInteger.One))
@@ -25,6 +33,9 @@ namespace Org.BouncyCastle.Crypto.Parameters
 
         private readonly BigInteger y;
 
+        /// <summary>Initializes a new instance of <see cref="DsaPublicKeyParameters"/>.</summary>
+        /// <param name="y">The public value Y.</param>
+        /// <param name="parameters">The DSA domain parameters.</param>
 		public DsaPublicKeyParameters(
             BigInteger		y,
             DsaParameters	parameters)
@@ -36,10 +47,8 @@ namespace Org.BouncyCastle.Crypto.Parameters
 			this.y = Validate(y, parameters);
         }
 
-		public BigInteger Y
-        {
-            get { return y; }
-        }
+        /// <summary>Gets the public value Y.</summary>
+		public BigInteger Y => y;
 
 		public override bool Equals(object obj)
         {

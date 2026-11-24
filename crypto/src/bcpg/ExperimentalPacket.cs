@@ -1,28 +1,32 @@
 using System;
-using System.IO;
+
+using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Bcpg
 {
-	/// <remarks>Basic packet for an experimental packet.</remarks>
+    /// <remarks>Basic packet for an experimental packet.</remarks>
     public class ExperimentalPacket
         : ContainedPacket
     {
-        private readonly PacketTag m_tag;
         private readonly byte[] m_contents;
 
-		internal ExperimentalPacket(PacketTag tag, BcpgInputStream bcpgIn)
+        internal ExperimentalPacket(PacketTag tag, BcpgInputStream bcpgIn)
+            : this(tag, bcpgIn, newPacketFormat: false)
         {
-            m_tag = tag;
-			m_contents = bcpgIn.ReadAll();
         }
 
-		public PacketTag Tag => m_tag;
-
-		public byte[] GetContents() => (byte[])m_contents.Clone();
-
-		public override void Encode(BcpgOutputStream bcpgOut)
+        internal ExperimentalPacket(PacketTag tag, BcpgInputStream bcpgIn, bool newPacketFormat)
+            : base(tag, newPacketFormat)
         {
-            bcpgOut.WritePacket(m_tag, m_contents);
+            m_contents = bcpgIn.ReadAll();
         }
+
+        [Obsolete("Use 'PacketTag' instead")]
+        public PacketTag Tag => PacketTag;
+
+        public byte[] GetContents() => Arrays.Clone(m_contents);
+
+        public override void Encode(BcpgOutputStream bcpgOut) =>
+            bcpgOut.WritePacket(HasNewPacketFormat, PacketTag, m_contents);
     }
 }

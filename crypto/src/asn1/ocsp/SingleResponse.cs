@@ -25,6 +25,13 @@ namespace Org.BouncyCastle.Asn1.Ocsp
 #pragma warning restore CS0618 // Type or member is obsolete
         }
 
+        public static SingleResponse GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit)
+        {
+#pragma warning disable CS0618 // Type or member is obsolete
+            return new SingleResponse(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
+#pragma warning restore CS0618 // Type or member is obsolete
+        }
+
         private readonly CertID m_certID;
         private readonly CertStatus m_certStatus;
         private readonly Asn1GeneralizedTime m_thisUpdate;
@@ -44,17 +51,20 @@ namespace Org.BouncyCastle.Asn1.Ocsp
         [Obsolete("Use 'GetInstance' instead")]
         public SingleResponse(Asn1Sequence seq)
         {
+            if (seq == null)
+                throw new ArgumentNullException(nameof(seq));
+
             int count = seq.Count;
             if (count < 3 || count > 5)
                 throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
 
             int pos = 0;
 
-            m_certID = CertID.GetInstance(seq[pos++]);
-            m_certStatus = CertStatus.GetInstance(seq[pos++]);
-            m_thisUpdate = Asn1GeneralizedTime.GetInstance(seq[pos++]);
-            m_nextUpdate = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 0, true, Asn1GeneralizedTime.GetInstance);
-            m_singleExtensions = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 1, true, X509Extensions.GetInstance);
+            m_certID = Asn1Utilities.Read(seq, ref pos, CertID.GetInstance);
+            m_certStatus = Asn1Utilities.Read(seq, ref pos, CertStatus.GetInstance);
+            m_thisUpdate = Asn1Utilities.Read(seq, ref pos, Asn1GeneralizedTime.GetInstance);
+            m_nextUpdate = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 0, true, Asn1GeneralizedTime.GetTagged);
+            m_singleExtensions = Asn1Utilities.ReadOptionalContextTagged(seq, ref pos, 1, true, X509Extensions.GetTagged);
 
             if (pos != count)
                 throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
@@ -70,7 +80,7 @@ namespace Org.BouncyCastle.Asn1.Ocsp
 
         public X509Extensions SingleExtensions => m_singleExtensions;
 
-		/**
+        /**
          * Produce an object suitable for an Asn1OutputStream.
          * <pre>
          *  SingleResponse ::= Sequence {

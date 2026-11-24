@@ -163,7 +163,7 @@ namespace Org.BouncyCastle.Crypto.Engines
                 throw new ArgumentException("invalid type: " + Platform.GetTypeName(parameters), nameof(parameters));
             }
 
-            m_roundKeys = CreateRoundKeys(keyParameter.Key, forEncryption);
+            m_roundKeys = CreateRoundKeys(keyParameter.InternalKey, forEncryption);
 
             if (m_roundKeys.Length == 11)
             {
@@ -823,7 +823,11 @@ namespace Org.BouncyCastle.Crypto.Engines
         {
             if (Org.BouncyCastle.Runtime.Intrinsics.Vector.IsPackedLittleEndian)
             {
+#if NET8_0_OR_GREATER
+                MemoryMarshal.Write(t, in s);
+#else
                 MemoryMarshal.Write(t, ref s);
+#endif
                 return;
             }
 

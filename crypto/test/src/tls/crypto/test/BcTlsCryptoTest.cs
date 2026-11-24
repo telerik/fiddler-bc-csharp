@@ -1,6 +1,5 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.IO;
 
 using NUnit.Framework;
 
@@ -12,6 +11,7 @@ using Org.BouncyCastle.Utilities;
 namespace Org.BouncyCastle.Tls.Crypto.Tests
 {
     [TestFixture]
+    [Parallelizable(ParallelScope.All)]
     public class BcTlsCryptoTest
     {
         private static readonly byte[] ClientHello = Hex("01 00 00 c0 03 03 cb 34 ec b1 e7 81 63"
@@ -97,72 +97,24 @@ namespace Org.BouncyCastle.Tls.Crypto.Tests
         protected TlsCredentialedSigner LoadCredentialedSigner12(TlsCryptoParameters cryptoParams,
             SignatureAndHashAlgorithm signatureAndHashAlgorithm)
         {
-            switch (signatureAndHashAlgorithm.Signature)
-            {
-            case SignatureAlgorithm.dsa:
-                return LoadCredentialedSigner(cryptoParams, "dsa", signatureAndHashAlgorithm);
-            case SignatureAlgorithm.ecdsa:
-                return LoadCredentialedSigner(cryptoParams, "ecdsa", signatureAndHashAlgorithm);
-            case SignatureAlgorithm.ed25519:
-                return LoadCredentialedSigner(cryptoParams, "ed25519", signatureAndHashAlgorithm);
-            case SignatureAlgorithm.ed448:
-                return LoadCredentialedSigner(cryptoParams, "ed448", signatureAndHashAlgorithm);
-            case SignatureAlgorithm.rsa_pss_pss_sha256:
-                return LoadCredentialedSigner(cryptoParams, "rsa_pss_256", signatureAndHashAlgorithm);
-            case SignatureAlgorithm.rsa_pss_pss_sha384:
-                return LoadCredentialedSigner(cryptoParams, "rsa_pss_384", signatureAndHashAlgorithm);
-            case SignatureAlgorithm.rsa_pss_pss_sha512:
-                return LoadCredentialedSigner(cryptoParams, "rsa_pss_512", signatureAndHashAlgorithm);
-            case SignatureAlgorithm.rsa:
-            case SignatureAlgorithm.rsa_pss_rsae_sha256:
-            case SignatureAlgorithm.rsa_pss_rsae_sha384:
-            case SignatureAlgorithm.rsa_pss_rsae_sha512:
-                return LoadCredentialedSigner(cryptoParams, "rsa-sign", signatureAndHashAlgorithm);
+            var signatureAlgorithm = signatureAndHashAlgorithm.Signature;
 
-            // TODO[RFC 9189] Add test resources for these
-            case SignatureAlgorithm.gostr34102012_256:
-            case SignatureAlgorithm.gostr34102012_512:
-
-            default:
+            var resourceName = TlsTestUtilities.FindResourceName12(signatureAlgorithm, forServer: true);
+            if (resourceName == null)
                 return null;
-            }
+
+            return LoadCredentialedSigner(cryptoParams, resourceName, signatureAndHashAlgorithm);
         }
 
         protected TlsCredentialedSigner LoadCredentialedSigner13(TlsCryptoParameters cryptoParams, int signatureScheme)
         {
-            SignatureAndHashAlgorithm signatureAndHashAlgorithm = SignatureScheme.GetSignatureAndHashAlgorithm(
-                signatureScheme);
-
-            switch (signatureScheme)
-            {
-            case SignatureScheme.ecdsa_secp256r1_sha256:
-                return LoadCredentialedSigner(cryptoParams, "ecdsa", signatureAndHashAlgorithm);
-            case SignatureScheme.ed25519:
-                return LoadCredentialedSigner(cryptoParams, "ed25519", signatureAndHashAlgorithm);
-            case SignatureScheme.ed448:
-                return LoadCredentialedSigner(cryptoParams, "ed448", signatureAndHashAlgorithm);
-            case SignatureScheme.rsa_pss_pss_sha256:
-                return LoadCredentialedSigner(cryptoParams, "rsa_pss_256", signatureAndHashAlgorithm);
-            case SignatureScheme.rsa_pss_pss_sha384:
-                return LoadCredentialedSigner(cryptoParams, "rsa_pss_384", signatureAndHashAlgorithm);
-            case SignatureScheme.rsa_pss_pss_sha512:
-                return LoadCredentialedSigner(cryptoParams, "rsa_pss_512", signatureAndHashAlgorithm);
-            case SignatureScheme.rsa_pss_rsae_sha256:
-            case SignatureScheme.rsa_pss_rsae_sha384:
-            case SignatureScheme.rsa_pss_rsae_sha512:
-                return LoadCredentialedSigner(cryptoParams, "rsa-sign", signatureAndHashAlgorithm);
-
-            // TODO[tls] Add test resources for these
-            case SignatureScheme.ecdsa_brainpoolP256r1tls13_sha256:
-            case SignatureScheme.ecdsa_brainpoolP384r1tls13_sha384:
-            case SignatureScheme.ecdsa_brainpoolP512r1tls13_sha512:
-            case SignatureScheme.ecdsa_secp384r1_sha384:
-            case SignatureScheme.ecdsa_secp521r1_sha512:
-            case SignatureScheme.sm2sig_sm3:
-
-            default:
+            var resourceName = TlsTestUtilities.FindResourceName13(signatureScheme, forServer: true);
+            if (resourceName == null)
                 return null;
-            }
+
+            var signatureAndHashAlgorithm = SignatureScheme.GetSignatureAndHashAlgorithm(signatureScheme);
+
+            return LoadCredentialedSigner(cryptoParams, resourceName, signatureAndHashAlgorithm);
         }
 
         [Test]
@@ -176,9 +128,16 @@ namespace Org.BouncyCastle.Tls.Crypto.Tests
                 if (!NamedGroup.RefersToASpecificFiniteField(namedGroup) || !m_crypto.HasNamedGroup(namedGroup))
                     continue;
 
-                ImplTestDHDomain(new TlsDHConfig(namedGroup, false));
-                ImplTestDHDomain(new TlsDHConfig(namedGroup, true));
+                ImplTestDHDomain(new TlsDHConfig(namedGroup, padded: false));
+                ImplTestDHDomain(new TlsDHConfig(namedGroup, padded: true));
             }
+        }
+
+        [Test]
+        public void TestDHExplicit()
+        {
+            if (!m_crypto.HasDHAgreement())
+                return;
 
             var groups = new TestTlsDHGroupVerifier().Groups;
             foreach (DHGroup dhGroup in groups)
@@ -193,7 +152,7 @@ namespace Org.BouncyCastle.Tls.Crypto.Tests
 
                 int namedGroup = TlsDHUtilities.GetNamedGroupForDHParameters(p, g);
 
-                // Already tested the named groups
+                // Named groups tested elsewhere
                 if (NamedGroup.RefersToASpecificFiniteField(namedGroup))
                     continue;
 
@@ -443,6 +402,21 @@ namespace Org.BouncyCastle.Tls.Crypto.Tests
         }
 
         [Test]
+        public void TestKemDomain()
+        {
+            if (!m_crypto.HasKemAgreement())
+                return;
+
+            for (int namedGroup = 0; namedGroup < 0x10000; ++namedGroup)
+            {
+                if (!NamedGroup.RefersToASpecificKem(namedGroup) || !m_crypto.HasNamedGroup(namedGroup))
+                    continue;
+
+                ImplTestKemDomain(namedGroup);
+            }
+        }
+
+        [Test]
         public void TestSignaturesLegacy()
         {
             short[] signatureAlgorithms = new short[]{ SignatureAlgorithm.dsa, SignatureAlgorithm.ecdsa,
@@ -528,6 +502,13 @@ namespace Org.BouncyCastle.Tls.Crypto.Tests
                 SignatureScheme.rsa_pss_pss_sha256, SignatureScheme.rsa_pss_pss_sha384, SignatureScheme.rsa_pss_pss_sha512,
                 SignatureScheme.rsa_pss_rsae_sha256, SignatureScheme.rsa_pss_rsae_sha384,
                 SignatureScheme.rsa_pss_rsae_sha512, SignatureScheme.sm2sig_sm3,
+                SignatureScheme.mldsa44, SignatureScheme.mldsa65, SignatureScheme.mldsa87,
+                SignatureScheme.DRAFT_slhdsa_sha2_128s, SignatureScheme.DRAFT_slhdsa_sha2_128f,
+                SignatureScheme.DRAFT_slhdsa_sha2_192s, SignatureScheme.DRAFT_slhdsa_sha2_192f,
+                SignatureScheme.DRAFT_slhdsa_sha2_256s, SignatureScheme.DRAFT_slhdsa_sha2_256f,
+                SignatureScheme.DRAFT_slhdsa_shake_128s, SignatureScheme.DRAFT_slhdsa_shake_128f,
+                SignatureScheme.DRAFT_slhdsa_shake_192s, SignatureScheme.DRAFT_slhdsa_shake_192f,
+                SignatureScheme.DRAFT_slhdsa_shake_256s, SignatureScheme.DRAFT_slhdsa_shake_256f,
                 // These are only used for certs in 1.3 (cert verification is not done by TlsCrypto)
                 //SignatureScheme.ecdsa_sha1, SignatureScheme.rsa_pkcs1_sha1, SignatureScheme.rsa_pkcs1_sha256,
                 //SignatureScheme.rsa_pkcs1_sha384, SignatureScheme.rsa_pkcs1_sha512,
@@ -549,40 +530,20 @@ namespace Org.BouncyCastle.Tls.Crypto.Tests
             }
         }
 
-        private void Expect(TlsSecret secret, string expectedHex)
-        {
-            Expect(Extract(secret), Hex(expectedHex));
-        }
+        private void Expect(TlsSecret secret, string expectedHex) => Expect(Extract(secret), Hex(expectedHex));
 
-        private void Expect(byte[] actualOctets, string expectedHex)
-        {
-            Expect(actualOctets, Hex(expectedHex));
-        }
+        private void Expect(byte[] actualOctets, string expectedHex) => Expect(actualOctets, Hex(expectedHex));
 
-        private void Expect(byte[] actualOctets, byte[] expectedOctets)
-        {
+        private void Expect(byte[] actualOctets, byte[] expectedOctets) =>
             AssertArrayEquals(actualOctets, expectedOctets);
-        }
 
-        private byte[] Extract(TlsSecret secret)
-        {
-            return m_crypto.AdoptSecret(secret).Extract();
-        }
+        private byte[] Extract(TlsSecret secret) => m_crypto.AdoptSecret(secret).Extract();
 
-        private byte[] GetCurrentHash(TlsHash hash)
-        {
-            return hash.CloneHash().CalculateHash();
-        }
+        private byte[] GetCurrentHash(TlsHash hash) => hash.CloneHash().CalculateHash();
 
-        private static void AssertArrayEquals(byte[] a, byte[] b)
-        {
-            Assert.IsTrue(Arrays.AreEqual(a, b));
-        }
+        private static void AssertArrayEquals(byte[] a, byte[] b) => Assert.IsTrue(Arrays.AreEqual(a, b));
 
-        private static byte[] Hex(string s)
-        {
-            return Utilities.Encoders.Hex.Decode(s.Replace(" ", ""));
-        }
+        private static byte[] Hex(string s) => Utilities.Encoders.Hex.Decode(s.Replace(" ", ""));
 
         private byte[] ImplPrehash(int signatureScheme, byte[] message)
         {
@@ -600,11 +561,13 @@ namespace Org.BouncyCastle.Tls.Crypto.Tests
 
         private void ImplTestAgreement(TlsAgreement aA, TlsAgreement aB)
         {
-            byte[] pA = aA.GenerateEphemeral();
-            byte[] pB = aB.GenerateEphemeral();
+            // NOTE: Order is important since some agreements are actually KEMs
 
-            aA.ReceivePeerValue(pB);
+            byte[] pA = aA.GenerateEphemeral();
             aB.ReceivePeerValue(pA);
+
+            byte[] pB = aB.GenerateEphemeral();
+            aA.ReceivePeerValue(pB);
 
             TlsSecret sA = aA.CalculateSecret();
             TlsSecret sB = aB.CalculateSecret();
@@ -648,6 +611,20 @@ namespace Org.BouncyCastle.Tls.Crypto.Tests
             }
         }
 
+        private void ImplTestKemDomain(int namedGroup)
+        {
+            TlsKemDomain clientDomain = m_crypto.CreateKemDomain(new TlsKemConfig(namedGroup, isServer: false));
+            TlsKemDomain serverDomain = m_crypto.CreateKemDomain(new TlsKemConfig(namedGroup, isServer: true));
+
+            for (int i = 0; i < 2; ++i)
+            {
+                TlsAgreement clientKem = clientDomain.CreateKem();
+                TlsAgreement serverKem = serverDomain.CreateKem();
+
+                ImplTestAgreement(clientKem, serverKem);
+            }
+        }
+
         private void ImplTestSignatureLegacy(TlsCredentialedSigner credentialedSigner)
         {
             byte[] message = m_crypto.CreateNonceGenerator(TlsUtilities.EmptyBytes).GenerateNonce(100);
@@ -656,8 +633,11 @@ namespace Org.BouncyCastle.Tls.Crypto.Tests
             TlsStreamSigner tlsStreamSigner = credentialedSigner.GetStreamSigner();
             if (null != tlsStreamSigner)
             {
-                Stream output = tlsStreamSigner.Stream;
-                output.Write(message, 0, message.Length);
+                using (var output = tlsStreamSigner.Stream)
+                {
+                    output.Write(message, 0, message.Length);
+                }
+
                 signature = tlsStreamSigner.GetSignature();
             }
             else
@@ -677,8 +657,11 @@ namespace Org.BouncyCastle.Tls.Crypto.Tests
             TlsStreamVerifier tlsStreamVerifier = tlsVerifier.GetStreamVerifier(digitallySigned);
             if (null != tlsStreamVerifier)
             {
-                Stream output = tlsStreamVerifier.Stream;
-                output.Write(message, 0, message.Length);
+                using (var output = tlsStreamVerifier.Stream)
+                {
+                    output.Write(message, 0, message.Length);
+                }
+
                 verified = tlsStreamVerifier.IsVerified();
             }
             else
@@ -701,8 +684,11 @@ namespace Org.BouncyCastle.Tls.Crypto.Tests
             TlsStreamSigner tlsStreamSigner = credentialedSigner.GetStreamSigner();
             if (null != tlsStreamSigner)
             {
-                Stream output = tlsStreamSigner.Stream;
-                output.Write(message, 0, message.Length);
+                using (var output = tlsStreamSigner.Stream)
+                {
+                    output.Write(message, 0, message.Length);
+                }
+
                 signature = tlsStreamSigner.GetSignature();
             }
             else
@@ -720,8 +706,11 @@ namespace Org.BouncyCastle.Tls.Crypto.Tests
             TlsStreamVerifier tlsStreamVerifier = tlsVerifier.GetStreamVerifier(digitallySigned);
             if (null != tlsStreamVerifier)
             {
-                Stream output = tlsStreamVerifier.Stream;
-                output.Write(message, 0, message.Length);
+                using (var output = tlsStreamVerifier.Stream)
+                {
+                    output.Write(message, 0, message.Length);
+                }
+
                 verified = tlsStreamVerifier.IsVerified();
             }
             else
@@ -741,8 +730,11 @@ namespace Org.BouncyCastle.Tls.Crypto.Tests
             TlsStreamSigner tlsStreamSigner = credentialedSigner.GetStreamSigner();
             if (null != tlsStreamSigner)
             {
-                Stream output = tlsStreamSigner.Stream;
-                output.Write(message, 0, message.Length);
+                using (var output = tlsStreamSigner.Stream)
+                {
+                    output.Write(message, 0, message.Length);
+                }
+
                 signature = tlsStreamSigner.GetSignature();
             }
             else
@@ -754,8 +746,11 @@ namespace Org.BouncyCastle.Tls.Crypto.Tests
             TlsCertificate tlsCertificate = credentialedSigner.Certificate.GetCertificateAt(0);
             Tls13Verifier tls13Verifier = tlsCertificate.CreateVerifier(signatureScheme);
 
-            Stream output13 = tls13Verifier.Stream;
-            output13.Write(message, 0, message.Length);
+            using (var output = tls13Verifier.Stream)
+            {
+                output.Write(message, 0, message.Length);
+            }
+
             bool verified = tls13Verifier.VerifySignature(signature);
 
             Assert.IsTrue(verified);
@@ -769,22 +764,16 @@ namespace Org.BouncyCastle.Tls.Crypto.Tests
             internal TestTlsCryptoParameters(ProtocolVersion serverVersion)
                 : base(null)
             {
-                this.m_serverVersion = serverVersion;
+                m_serverVersion = serverVersion;
             }
 
-            public override ProtocolVersion ServerVersion
-            {
-                get { return m_serverVersion; }
-            }
+            public override ProtocolVersion ServerVersion => m_serverVersion;
         }
 
         private class TestTlsDHGroupVerifier
             : DefaultTlsDHGroupVerifier
         {
-            internal IList<DHGroup> Groups
-            {
-                get { return m_groups; }
-            }
+            internal IList<DHGroup> Groups => m_groups;
         }
     }
 }

@@ -14,54 +14,67 @@ namespace Org.BouncyCastle.Asn1.X509
             return new IssuerSerial(Asn1Sequence.GetInstance(obj));
 		}
 
-        public static IssuerSerial GetInstance(Asn1TaggedObject obj, bool explicitly)
+        public static IssuerSerial GetInstance(Asn1TaggedObject obj, bool explicitly) =>
+            new IssuerSerial(Asn1Sequence.GetInstance(obj, explicitly));
+
+        public static IssuerSerial GetOptional(Asn1Encodable element)
         {
-            return new IssuerSerial(Asn1Sequence.GetInstance(obj, explicitly));
+            if (element == null)
+                throw new ArgumentNullException(nameof(element));
+
+            if (element is IssuerSerial issuerSerial)
+                return issuerSerial;
+
+            Asn1Sequence asn1Sequence = Asn1Sequence.GetOptional(element);
+            if (asn1Sequence != null)
+                return new IssuerSerial(asn1Sequence);
+
+            return null;
         }
 
-        private readonly GeneralNames issuer;
-        private readonly DerInteger serial;
-        private readonly DerBitString issuerUid;
+        public static IssuerSerial GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new IssuerSerial(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
-        private IssuerSerial(
-            Asn1Sequence seq)
+        private readonly GeneralNames m_issuer;
+        private readonly DerInteger m_serial;
+        private readonly DerBitString m_issuerUid;
+
+        private IssuerSerial(Asn1Sequence seq)
         {
-			if (seq.Count != 2 && seq.Count != 3)
-			{
-				throw new ArgumentException("Bad sequence size: " + seq.Count);
-			}
+            int count = seq.Count, pos = 0;
+            if (count < 2 || count > 3)
+                throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
 
-			issuer = GeneralNames.GetInstance(seq[0]);
-			serial = DerInteger.GetInstance(seq[1]);
+            m_issuer = Asn1Utilities.Read(seq, ref pos, GeneralNames.GetInstance);
+            m_serial = Asn1Utilities.Read(seq, ref pos, DerInteger.GetInstance);
+            m_issuerUid = Asn1Utilities.ReadOptional(seq, ref pos, DerBitString.GetOptional);
 
-			if (seq.Count == 3)
-            {
-				issuerUid = DerBitString.GetInstance(seq[2]);
-			}
+            if (pos != count)
+                throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
         }
 
-		public IssuerSerial(
-			GeneralNames	issuer,
-			DerInteger		serial)
-		{
-			this.issuer = issuer;
-			this.serial = serial;
-		}
+        public IssuerSerial(X509Name issuer, DerInteger serial)
+            : this(new GeneralNames(new GeneralName(issuer)), serial)
+        {
+        }
 
-		public GeneralNames Issuer
-		{
-			get { return issuer; }
-		}
+        public IssuerSerial(GeneralNames issuer, DerInteger serial)
+            : this(issuer, serial, issuerUid: null)
+        {
+        }
 
-		public DerInteger Serial
-		{
-			get { return serial; }
-		}
+        public IssuerSerial(GeneralNames issuer, DerInteger serial, DerBitString issuerUid)
+        {
+            m_issuer = issuer ?? throw new ArgumentNullException(nameof(issuer));
+            m_serial = serial ?? throw new ArgumentNullException(nameof(serial));
+            m_issuerUid = issuerUid;
+        }
 
-		public DerBitString IssuerUid
-		{
-			get { return issuerUid; }
-		}
+        public GeneralNames Issuer => m_issuer;
+
+        public DerInteger Serial => m_serial;
+
+        public DerBitString IssuerUid => m_issuerUid;
 
 		/**
          * Produce an object suitable for an Asn1OutputStream.
@@ -75,9 +88,9 @@ namespace Org.BouncyCastle.Asn1.X509
          */
         public override Asn1Object ToAsn1Object()
         {
-            Asn1EncodableVector v = new Asn1EncodableVector(issuer, serial);
-            v.AddOptional(issuerUid);
-            return new DerSequence(v);
+            return m_issuerUid == null
+                ?  new DerSequence(m_issuer, m_serial)
+                :  new DerSequence(m_issuer, m_serial, m_issuerUid);
         }
 	}
 }

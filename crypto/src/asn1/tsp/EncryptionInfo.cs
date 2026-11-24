@@ -37,10 +37,11 @@ namespace Org.BouncyCastle.Asn1.Tsp
             return new EncryptionInfo(Asn1Sequence.GetInstance(obj));
         }
 
-        public static EncryptionInfo GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
-        {
-            return new EncryptionInfo(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
-        }
+        public static EncryptionInfo GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new EncryptionInfo(Asn1Sequence.GetInstance(taggedObject, declaredExplicit));
+
+        public static EncryptionInfo GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new EncryptionInfo(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
 
         /**
          * The OID for EncryptionInfo type.
@@ -52,19 +53,24 @@ namespace Org.BouncyCastle.Asn1.Tsp
          */
         private readonly Asn1Encodable m_encryptionInfoValue;
 
-        private EncryptionInfo(Asn1Sequence sequence)
+        private EncryptionInfo(Asn1Sequence seq)
         {
-            if (sequence.Count != 2)
-                throw new ArgumentException("wrong sequence size in constructor: " + sequence.Count, nameof(sequence));
+            int count = seq.Count, pos = 0;
+            if (count != 2)
+                throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
 
-            m_encryptionInfoType = DerObjectIdentifier.GetInstance(sequence[0]);
-            m_encryptionInfoValue = sequence[1];
+            m_encryptionInfoType = Asn1Utilities.Read(seq, ref pos, DerObjectIdentifier.GetInstance);
+            // TODO[asn1] Asn1Utilities helper method for this type of situation
+            m_encryptionInfoValue = Asn1Utilities.Read(seq, ref pos, element => element);
+
+            if (pos != count)
+                throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
         }
 
         public EncryptionInfo(DerObjectIdentifier encryptionInfoType, Asn1Encodable encryptionInfoValue)
         {
-            m_encryptionInfoType = encryptionInfoType;
-            m_encryptionInfoValue = encryptionInfoValue;
+            m_encryptionInfoType = encryptionInfoType ?? throw new ArgumentNullException(nameof(encryptionInfoType));
+            m_encryptionInfoValue = encryptionInfoValue ?? throw new ArgumentNullException(nameof(encryptionInfoValue));
         }
 
         public virtual DerObjectIdentifier EncryptionInfoType => m_encryptionInfoType;

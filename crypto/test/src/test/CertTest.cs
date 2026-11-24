@@ -18,7 +18,6 @@ using Org.BouncyCastle.Math;
 using Org.BouncyCastle.Math.EC;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Security.Certificates;
-using Org.BouncyCastle.Utilities.Collections;
 using Org.BouncyCastle.Utilities.Encoders;
 using Org.BouncyCastle.Utilities.IO;
 using Org.BouncyCastle.Utilities.Test;
@@ -239,24 +238,40 @@ namespace Org.BouncyCastle.Tests
             + "wvIEPRL2rocL0tKfAsVq1IawSJzSNgxG0lrcla3MrJBnZ4GaZDu4FutZh72MR3Gt"
             + "JaAL3iTJHJD55kK2D/VoyY1djlsPuNh6AEgdVwFAyp0v");
 
+        // github #2321: thisUpdate/nextUpdate are 13-character UTCTime-shaped
+        // values tagged as GeneralizedTime ("240123000000Z" reads as year 2401,
+        // month 23 - out of range), so the CRL must fail to parse.
+        private static readonly byte[] GentimeCrl = Base64.Decode(
+            "MIIB7DCB1QIBATANBgkqhkiG9w0BAQsFADBOMQswCQYDVQQGEwJVUzELMAkGA1UE" +
+            "CAwCVVMxCzAJBgNVBAcMAlVTMQswCQYDVQQKDAJVUzELMAkGA1UEAwwCVVMxCzAJ" +
+            "BgNVBAsMAlVTGA0yNDAxMjMwMDAwMDBaGA0zNDAxMjAwMDAwMDBaMDUwMwIUHIAC" +
+            "LvgfJAXulqYS3LYf4KxwHl4XDTI1MDMxMzAyNDQ0MFowDDAKBgNVHRUEAwoBBqAc" +
+            "MBowGAYDVR0UBBECDxnP/97adO3y9qRGDM7hQDANBgkqhkiG9w0BAQsFAAOCAQEA" +
+            "aDY9jBdAJiAujUkaLYLVtzNWF/0SxD5CB4dYIcZMqtPKLn5ykcxkXvnRbVihJ+Kn" +
+            "AAv9Fkn5iwj77EGwxNjyZktQ4gAmcMhCTBEcAHbmi92tHttot9Sr44+CN+0NaaQD" +
+            "OflIeVw7Zir90TWufjScy8/e7FkVm+aD5CicrbJWqoe21pB1Q1jS49iNrZzqZ2vw" +
+            "HLiqNAzpecxwUih/YPe5+CBk5Nq4vICeieGVC/JO9r5SkdDwWQTl0I3kSK6n4Jh7" +
+            "53FmIen80F2ZZuZu4/fhJ7C4rlr6W9i6FrK06s5mk1PeYFHKhCkwI8wp8cIudJQD" +
+            "lLsK2u4CTcuTKdbDLsszYA==");
+
         //
         // ecdsa cert with extra octet string.
         //
-//		private static readonly byte[] oldEcdsa = Base64.Decode(
-//			"MIICljCCAkCgAwIBAgIBATALBgcqhkjOPQQBBQAwgY8xCzAJBgNVBAYTAkFVMSgwJ"
-//			+ "gYDVQQKEx9UaGUgTGVnaW9uIG9mIHRoZSBCb3VuY3kgQ2FzdGxlMRIwEAYDVQQHEw"
-//			+ "lNZWxib3VybmUxETAPBgNVBAgTCFZpY3RvcmlhMS8wLQYJKoZIhvcNAQkBFiBmZWV"
-//			+ "kYmFjay1jcnlwdG9AYm91bmN5Y2FzdGxlLm9yZzAeFw0wMTEyMDcwMTAwMDRaFw0w"
-//			+ "MTEyMDcwMTAxNDRaMIGPMQswCQYDVQQGEwJBVTEoMCYGA1UEChMfVGhlIExlZ2lvb"
-//			+ "iBvZiB0aGUgQm91bmN5IENhc3RsZTESMBAGA1UEBxMJTWVsYm91cm5lMREwDwYDVQ"
-//			+ "QIEwhWaWN0b3JpYTEvMC0GCSqGSIb3DQEJARYgZmVlZGJhY2stY3J5cHRvQGJvdW5"
-//			+ "jeWNhc3RsZS5vcmcwgeQwgb0GByqGSM49AgEwgbECAQEwKQYHKoZIzj0BAQIef///"
-//			+ "////////////f///////gAAAAAAAf///////MEAEHn///////////////3///////"
-//			+ "4AAAAAAAH///////AQeawFsO9zxiUHQ1lSSFHXKcanbL7J9HTd5YYXClCwKBB8CD/"
-//			+ "qWPNyogWzMM7hkK+35BcPTWFc9Pyf7vTs8uaqvAh5///////////////9///+eXpq"
-//			+ "fXZBx+9FSJoiQnQsDIgAEHwJbbcU7xholSP+w9nFHLebJUhqdLSU05lq/y9X+DHAw"
-//			+ "CwYHKoZIzj0EAQUAA0MAMEACHnz6t4UNoVROp74ma4XNDjjGcjaqiIWPZLK8Bdw3G"
-//			+ "QIeLZ4j3a6ividZl344UH+UPUE7xJxlYGuy7ejTsqRR");
+        //private static readonly byte[] oldEcdsa = Base64.Decode(
+        //    "MIICljCCAkCgAwIBAgIBATALBgcqhkjOPQQBBQAwgY8xCzAJBgNVBAYTAkFVMSgwJ"
+        //    + "gYDVQQKEx9UaGUgTGVnaW9uIG9mIHRoZSBCb3VuY3kgQ2FzdGxlMRIwEAYDVQQHEw"
+        //    + "lNZWxib3VybmUxETAPBgNVBAgTCFZpY3RvcmlhMS8wLQYJKoZIhvcNAQkBFiBmZWV"
+        //    + "kYmFjay1jcnlwdG9AYm91bmN5Y2FzdGxlLm9yZzAeFw0wMTEyMDcwMTAwMDRaFw0w"
+        //    + "MTEyMDcwMTAxNDRaMIGPMQswCQYDVQQGEwJBVTEoMCYGA1UEChMfVGhlIExlZ2lvb"
+        //    + "iBvZiB0aGUgQm91bmN5IENhc3RsZTESMBAGA1UEBxMJTWVsYm91cm5lMREwDwYDVQ"
+        //    + "QIEwhWaWN0b3JpYTEvMC0GCSqGSIb3DQEJARYgZmVlZGJhY2stY3J5cHRvQGJvdW5"
+        //    + "jeWNhc3RsZS5vcmcwgeQwgb0GByqGSM49AgEwgbECAQEwKQYHKoZIzj0BAQIef///"
+        //    + "////////////f///////gAAAAAAAf///////MEAEHn///////////////3///////"
+        //    + "4AAAAAAAH///////AQeawFsO9zxiUHQ1lSSFHXKcanbL7J9HTd5YYXClCwKBB8CD/"
+        //    + "qWPNyogWzMM7hkK+35BcPTWFc9Pyf7vTs8uaqvAh5///////////////9///+eXpq"
+        //    + "fXZBx+9FSJoiQnQsDIgAEHwJbbcU7xholSP+w9nFHLebJUhqdLSU05lq/y9X+DHAw"
+        //    + "CwYHKoZIzj0EAQUAA0MAMEACHnz6t4UNoVROp74ma4XNDjjGcjaqiIWPZLK8Bdw3G"
+        //    + "QIeLZ4j3a6ividZl344UH+UPUE7xJxlYGuy7ejTsqRR");
 
         private static readonly byte[] uncompressedPtEC = Base64.Decode(
             "MIIDKzCCAsGgAwIBAgICA+kwCwYHKoZIzj0EAQUAMGYxCzAJBgNVBAYTAkpQ"
@@ -986,32 +1001,18 @@ namespace Org.BouncyCastle.Tests
             {
             }
 
-            public string Algorithm
-            {
-                get { return null; }
-            }
+            public string Algorithm => null;
 
-            public string Format
-            {
-                get { return null; }
-            }
+            public string Format => null;
 
-            public byte[] GetEncoded()
-            {
-                return null;
-            }
+            public byte[] GetEncoded() => null;
         }
 
-        private AsymmetricKeyParameter dudPublicKey = new DudPublicKey();
+        private readonly AsymmetricKeyParameter dudPublicKey = new DudPublicKey();
 
-        public override string Name
-        {
-            get { return "CertTest"; }
-        }
+        public override string Name => "CertTest";
 
-        internal void checkCertificate(
-            int		id,
-            byte[]	bytes)
+        internal void CheckCertificate(int id, byte[] bytes)
         {
             string dump = "";
 
@@ -1020,7 +1021,6 @@ namespace Org.BouncyCastle.Tests
                 X509Certificate cert = new X509CertificateParser().ReadCertificate(bytes);
 
                 AsymmetricKeyParameter k = cert.GetPublicKey();
-                // Console.WriteLine(cert);
             }
             catch (Exception e)
             {
@@ -1028,9 +1028,7 @@ namespace Org.BouncyCastle.Tests
             }
         }
 
-        internal void checkNameCertificate(
-            int     id,
-            byte[]  bytes)
+        internal void CheckCertificateIssuer(int id, byte[] bytes)
         {
             string dump = "";
 
@@ -1038,49 +1036,37 @@ namespace Org.BouncyCastle.Tests
             {
                 X509Certificate cert = new X509CertificateParser().ReadCertificate(bytes);
 
-                AsymmetricKeyParameter k = cert.GetPublicKey();
                 if (!cert.IssuerDN.ToString().Equals("C=DE,O=DATEV eG,0.2.262.1.10.7.20=1+CN=CA DATEV D03 1:PN"))
                 {
                     Fail(id + " failed - name test.");
                 }
-                // Console.WriteLine(cert);
             }
             catch (Exception e)
             {
                 Fail(dump + SimpleTest.NewLine + Name + ": "+ id + " failed - exception " + e.Message, e);
             }
-
         }
 
-        internal void checkKeyUsage(
-            int		id,
-            byte[]	bytes)
+        internal void CheckCertificateKeyUsage(int id, byte[] bytes)
         {
             string dump = "";
 
             try
             {
                 X509Certificate cert = new X509CertificateParser().ReadCertificate(bytes);
-
-                AsymmetricKeyParameter k = cert.GetPublicKey();
 
                 if (cert.GetKeyUsage()[7])
                 {
                     Fail("error generating cert - key usage wrong.");
                 }
-
-                // Console.WriteLine(cert);
             }
             catch (Exception e)
             {
                 Fail(dump + SimpleTest.NewLine + Name + ": "+ id + " failed - exception " + e.Message, e);
             }
-
         }
 
-        internal void checkSelfSignedCertificate(
-            int     id,
-            byte[]  bytes)
+        internal void CheckCertificateSelfSigned(int id, byte[] bytes)
         {
             string dump = "";
 
@@ -1088,10 +1074,7 @@ namespace Org.BouncyCastle.Tests
             {
                 X509Certificate cert = new X509CertificateParser().ReadCertificate(bytes);
 
-                AsymmetricKeyParameter k = cert.GetPublicKey();
-
-                cert.Verify(k);
-                // Console.WriteLine(cert);
+                cert.Verify(cert.GetPublicKey());
             }
             catch (Exception e)
             {
@@ -1099,10 +1082,8 @@ namespace Org.BouncyCastle.Tests
             }
         }
 
-        /**
-         * we Generate a self signed certificate for the sake of testing - RSA
-         */
-        internal void checkCreation1()
+        /// <summary>Generate a self signed certificate for the sake of testing - RSA.</summary>
+        internal void CheckCreation1()
         {
             //
             // a sample key pair.
@@ -1125,13 +1106,13 @@ namespace Org.BouncyCastle.Tests
             //
             // set up the keys
             //
-//			AsymmetricKeyParameter privKey;
-//			AsymmetricKeyParameter pubKey;
+            //AsymmetricKeyParameter privKey;
+            //AsymmetricKeyParameter pubKey;
 
-//			KeyFactory  fact = KeyFactory.GetInstance("RSA");
-//
-//			privKey = fact.generatePrivate(privKeySpec);
-//			pubKey = fact.generatePublic(pubKeySpec);
+            //KeyFactory fact = KeyFactory.GetInstance("RSA");
+
+            //privKey = fact.generatePrivate(privKeySpec);
+            //pubKey = fact.generatePublic(pubKeySpec);
 
             //
             // distinguished name table.
@@ -1162,7 +1143,7 @@ namespace Org.BouncyCastle.Tests
             certGen.SetSerialNumber(BigInteger.One);
             certGen.SetIssuerDN(new X509Name(ord, values));
             certGen.SetNotBefore(DateTime.UtcNow.AddSeconds(-50));
-            certGen.SetNotAfter(DateTime.UtcNow.AddSeconds(50));
+            certGen.SetNotAfter(DateTime.UtcNow.AddMonths(6));
             certGen.SetSubjectDN(new X509Name(ord, values));
             certGen.SetPublicKey(pubKey);
 
@@ -1191,7 +1172,7 @@ namespace Org.BouncyCastle.Tests
             certGen.SetSerialNumber(BigInteger.One);
             certGen.SetIssuerDN(new X509Name(ord, values));
             certGen.SetNotBefore(DateTime.UtcNow.AddSeconds(-50));
-            certGen.SetNotAfter(DateTime.UtcNow.AddSeconds(50));
+            certGen.SetNotAfter(DateTime.UtcNow.AddMonths(6));
             certGen.SetSubjectDN(new X509Name(ord, values));
             certGen.SetPublicKey(pubKey);
             certGen.AddExtension("2.5.29.15", true,
@@ -1248,7 +1229,7 @@ namespace Org.BouncyCastle.Tests
             certGen1.SetSerialNumber(BigInteger.One);
             certGen1.SetIssuerDN(new X509Name(ord, values));
             certGen1.SetNotBefore(DateTime.UtcNow.AddSeconds(-50));
-            certGen1.SetNotAfter(DateTime.UtcNow.AddSeconds(50));
+            certGen1.SetNotAfter(DateTime.UtcNow.AddMonths(6));
             certGen1.SetSubjectDN(new X509Name(ord, values));
             certGen1.SetPublicKey(pubKey);
             cert = certGen1.Generate(new Asn1SignatureFactory("MD5WithRSAEncryption", privKey, null));
@@ -1266,10 +1247,8 @@ namespace Org.BouncyCastle.Tests
             }
         }
 
-        /**
-         * we Generate a self signed certificate for the sake of testing - DSA
-         */
-        internal void checkCreation2()
+        /// <summary>Generate a self signed certificate for the sake of testing - DSA.</summary>
+        internal void CheckCreation2()
         {
             //
             // set up the keys
@@ -1279,9 +1258,6 @@ namespace Org.BouncyCastle.Tests
 
             try
             {
-//				KeyPairGenerator g = KeyPairGenerator.GetInstance("DSA", "SUN");
-//				g.initialize(512, new SecureRandom());
-//				KeyPair p = g.generateKeyPair();
                 IAsymmetricCipherKeyPairGenerator g = GeneratorUtilities.GetKeyPairGenerator("DSA");
                 DsaParametersGenerator dpg = new DsaParametersGenerator();
                 dpg.Init(512, 25, new SecureRandom());
@@ -1326,7 +1302,7 @@ namespace Org.BouncyCastle.Tests
             certGen.SetSerialNumber(BigInteger.One);
             certGen.SetIssuerDN(new X509Name(ord, values));
             certGen.SetNotBefore(DateTime.UtcNow.AddSeconds(-50));
-            certGen.SetNotAfter(DateTime.UtcNow.AddSeconds(50));
+            certGen.SetNotAfter(DateTime.UtcNow.AddMonths(6));
             certGen.SetSubjectDN(new X509Name(ord, values));
             certGen.SetPublicKey(pubKey);
 
@@ -1355,7 +1331,7 @@ namespace Org.BouncyCastle.Tests
             certGen1.SetSerialNumber(BigInteger.One);
             certGen1.SetIssuerDN(new X509Name(ord, values));
             certGen1.SetNotBefore(DateTime.UtcNow.AddSeconds(-50));
-            certGen1.SetNotAfter(DateTime.UtcNow.AddSeconds(50));
+            certGen1.SetNotAfter(DateTime.UtcNow.AddMonths(6));
             certGen1.SetSubjectDN(new X509Name(ord, values));
             certGen1.SetPublicKey(pubKey);
 
@@ -1394,7 +1370,7 @@ namespace Org.BouncyCastle.Tests
         /**
          * we Generate a self signed certificate for the sake of testing - ECDSA
          */
-        internal void checkCreation3()
+        internal void CheckCreation3()
         {
             X9ECParameters x9 = ECNamedCurveTable.GetByName("prime239v1");
             ECCurve curve = x9.Curve;
@@ -1413,21 +1389,21 @@ namespace Org.BouncyCastle.Tests
             //
             // set up the keys
             //
-//			AsymmetricKeyParameter privKey;
-//			AsymmetricKeyParameter pubKey;
-//
-//			try
-//			{
-//				KeyFactory fact = KeyFactory.GetInstance("ECDSA");
-//
-//				privKey = fact.generatePrivate(privKeySpec);
-//				pubKey = fact.generatePublic(pubKeySpec);
-//			}
-//			catch (Exception e)
-//			{
-//				Fail("error setting up keys - " + e.ToString());
-//				return;
-//			}
+            //AsymmetricKeyParameter privKey;
+            //AsymmetricKeyParameter pubKey;
+
+            //try
+            //{
+            //    KeyFactory fact = KeyFactory.GetInstance("ECDSA");
+
+            //    privKey = fact.generatePrivate(privKeySpec);
+            //    pubKey = fact.generatePublic(pubKeySpec);
+            //}
+            //catch (Exception e)
+            //{
+            //    Fail("error setting up keys - " + e.ToString());
+            //    return;
+            //}
 
             //
             // distinguished name table.
@@ -1467,7 +1443,7 @@ namespace Org.BouncyCastle.Tests
             certGen.SetSerialNumber(BigInteger.One);
             certGen.SetIssuerDN(new X509Name(order, attrs));
             certGen.SetNotBefore(DateTime.UtcNow.AddSeconds(-50));
-            certGen.SetNotAfter(DateTime.UtcNow.AddSeconds(50));
+            certGen.SetNotAfter(DateTime.UtcNow.AddMonths(6));
             certGen.SetSubjectDN(new X509Name(order, attrs));
             certGen.SetPublicKey(pubKey);
 
@@ -1527,7 +1503,7 @@ namespace Org.BouncyCastle.Tests
         /**
          * we Generate a self signed certificate for the sake of testing - SHA224withECDSA
          */
-        private void createECCert(
+        private void CreateECCert(
             string				algorithm,
             DerObjectIdentifier	algOid)
         {
@@ -1584,7 +1560,7 @@ namespace Org.BouncyCastle.Tests
             certGen.SetSerialNumber(BigInteger.One);
             certGen.SetIssuerDN(new X509Name(order, attrs));
             certGen.SetNotBefore(DateTime.UtcNow.AddSeconds(-50));
-            certGen.SetNotAfter(DateTime.UtcNow.AddSeconds(50));
+            certGen.SetNotAfter(DateTime.UtcNow.AddMonths(6));
             certGen.SetSubjectDN(new X509Name(order, attrs));
             certGen.SetPublicKey(pubKey);
 
@@ -1641,7 +1617,7 @@ namespace Org.BouncyCastle.Tests
             // Console.WriteLine(cert);
         }
 
-        private void checkCrl(
+        private void CheckCrl(
             int     id,
             byte[]  bytes)
         {
@@ -1660,7 +1636,7 @@ namespace Org.BouncyCastle.Tests
 
         }
 
-        private void checkCrlCreation1()
+        private void CheckCrlCreation1()
         {
             IAsymmetricCipherKeyPairGenerator kpGen = GeneratorUtilities.GetKeyPairGenerator("RSA");
             kpGen.Init(
@@ -1679,7 +1655,7 @@ namespace Org.BouncyCastle.Tests
             crlGen.AddCrlEntry(BigInteger.One, now, CrlReason.PrivilegeWithdrawn);
 
             crlGen.AddExtension(X509Extensions.AuthorityKeyIdentifier, false,
-                new AuthorityKeyIdentifierStructure(pair.Public));
+                X509ExtensionUtilities.CreateAuthorityKeyIdentifier(pair.Public));
 
             X509Crl crl = crlGen.Generate(new Asn1SignatureFactory("SHA256WithRSAEncryption", pair.Private, null));
 
@@ -1688,14 +1664,11 @@ namespace Org.BouncyCastle.Tests
                 Fail("failed CRL issuer test");
             }
 
-            Asn1OctetString authExt = crl.GetExtensionValue(X509Extensions.AuthorityKeyIdentifier);
-
-            if (authExt == null)
+            var authKeyID = X509ExtensionUtilities.GetAuthorityKeyIdentifier(crl);
+            if (authKeyID == null)
             {
                 Fail("failed to find CRL extension");
             }
-
-            AuthorityKeyIdentifier authId = new AuthorityKeyIdentifierStructure(authExt);
 
             X509CrlEntry entry = crl.GetRevokedCertificate(BigInteger.One);
 
@@ -1731,7 +1704,7 @@ namespace Org.BouncyCastle.Tests
             }
         }
 
-        private void checkCrlCreation2()
+        private void CheckCrlCreation2()
         {
             IAsymmetricCipherKeyPairGenerator kpGen = GeneratorUtilities.GetKeyPairGenerator("RSA");
             kpGen.Init(
@@ -1766,7 +1739,8 @@ namespace Org.BouncyCastle.Tests
 
             crlGen.AddCrlEntry(BigInteger.One, now, entryExtensions);
 
-            crlGen.AddExtension(X509Extensions.AuthorityKeyIdentifier, false, new AuthorityKeyIdentifierStructure(pair.Public));
+            crlGen.AddExtension(X509Extensions.AuthorityKeyIdentifier, false,
+                X509ExtensionUtilities.CreateAuthorityKeyIdentifier(pair.Public));
 
             X509Crl crl = crlGen.Generate(new Asn1SignatureFactory("SHA256WithRSAEncryption", pair.Private, null));
 
@@ -1775,14 +1749,11 @@ namespace Org.BouncyCastle.Tests
                 Fail("failed CRL issuer test");
             }
 
-            Asn1OctetString authExt = crl.GetExtensionValue(X509Extensions.AuthorityKeyIdentifier);
-
-            if (authExt == null)
+            var authKeyID = X509ExtensionUtilities.GetAuthorityKeyIdentifier(crl);
+            if (authKeyID == null)
             {
                 Fail("failed to find CRL extension");
             }
-
-            AuthorityKeyIdentifier authId = new AuthorityKeyIdentifierStructure(authExt);
 
             X509CrlEntry entry = crl.GetRevokedCertificate(BigInteger.One);
 
@@ -1818,7 +1789,7 @@ namespace Org.BouncyCastle.Tests
             }
         }
 
-        private void checkCrlCreation3()
+        private void CheckCrlCreation3()
         {
             IAsymmetricCipherKeyPairGenerator kpGen = GeneratorUtilities.GetKeyPairGenerator("RSA");
             kpGen.Init(
@@ -1853,7 +1824,8 @@ namespace Org.BouncyCastle.Tests
 
             crlGen.AddCrlEntry(BigInteger.One, now, entryExtensions);
 
-            crlGen.AddExtension(X509Extensions.AuthorityKeyIdentifier, false, new AuthorityKeyIdentifierStructure(pair.Public));
+            crlGen.AddExtension(X509Extensions.AuthorityKeyIdentifier, false,
+                X509ExtensionUtilities.CreateAuthorityKeyIdentifier(pair.Public));
 
             X509Crl crl = crlGen.Generate(new Asn1SignatureFactory("SHA256WithRSAEncryption", pair.Private, null));
 
@@ -1862,14 +1834,11 @@ namespace Org.BouncyCastle.Tests
                 Fail("failed CRL issuer test");
             }
 
-            Asn1OctetString authExt = crl.GetExtensionValue(X509Extensions.AuthorityKeyIdentifier);
-
-            if (authExt == null)
+            var authKeyID = X509ExtensionUtilities.GetAuthorityKeyIdentifier(crl);
+            if (authKeyID == null)
             {
                 Fail("failed to find CRL extension");
             }
-
-            AuthorityKeyIdentifier authId = new AuthorityKeyIdentifierStructure(authExt);
 
             X509CrlEntry entry = crl.GetRevokedCertificate(BigInteger.One);
 
@@ -1919,7 +1888,8 @@ namespace Org.BouncyCastle.Tests
 
             crlGen.AddCrlEntry(BigInteger.Two, now, entryExtensions);
 
-            crlGen.AddExtension(X509Extensions.AuthorityKeyIdentifier, false, new AuthorityKeyIdentifierStructure(pair.Public));
+            crlGen.AddExtension(X509Extensions.AuthorityKeyIdentifier, false,
+                X509ExtensionUtilities.CreateAuthorityKeyIdentifier(pair.Public));
 
             X509Crl newCrl = crlGen.Generate(new Asn1SignatureFactory("SHA256WithRSAEncryption", pair.Private, null));
 
@@ -1986,7 +1956,7 @@ namespace Org.BouncyCastle.Tests
         /**
          * we Generate a self signed certificate for the sake of testing - GOST3410
          */
-        internal void checkCreation4()
+        internal void CheckCreation4()
         {
             //
             // set up the keys
@@ -2036,7 +2006,7 @@ namespace Org.BouncyCastle.Tests
             certGen.SetSerialNumber(BigInteger.One);
             certGen.SetIssuerDN(new X509Name(order, attrs));
             certGen.SetNotBefore(DateTime.UtcNow.AddSeconds(-50));
-            certGen.SetNotAfter(DateTime.UtcNow.AddSeconds(50));
+            certGen.SetNotAfter(DateTime.UtcNow.AddMonths(6));
             certGen.SetSubjectDN(new X509Name(order, attrs));
             certGen.SetPublicKey(pubKey);
 
@@ -2062,7 +2032,7 @@ namespace Org.BouncyCastle.Tests
             byte[] bytesch = cert.GetEncoded();
         }
 
-        internal void checkCreation5()
+        internal void CheckCreation5()
         {
             //
             // a sample key pair.
@@ -2119,7 +2089,7 @@ namespace Org.BouncyCastle.Tests
             certGen.SetSerialNumber(BigInteger.One);
             certGen.SetIssuerDN(new X509Name(ord, values));
             certGen.SetNotBefore(DateTime.UtcNow.AddSeconds(-50));
-            certGen.SetNotAfter(DateTime.UtcNow.AddSeconds(50));
+            certGen.SetNotAfter(DateTime.UtcNow.AddMonths(6));
             certGen.SetSubjectDN(new X509Name(ord, values));
             certGen.SetPublicKey(pubKey);
             certGen.AddExtension("2.5.29.15", true,
@@ -2140,12 +2110,12 @@ namespace Org.BouncyCastle.Tests
             certGen.SetSerialNumber(BigInteger.One);
             certGen.SetIssuerDN(new X509Name(ord, values));
             certGen.SetNotBefore(DateTime.UtcNow.AddSeconds(-50));
-            certGen.SetNotAfter(DateTime.UtcNow.AddSeconds(50));
+            certGen.SetNotAfter(DateTime.UtcNow.AddMonths(6));
             certGen.SetSubjectDN(new X509Name(ord, values));
             certGen.SetPublicKey(pubKey);
 
             certGen.CopyAndAddExtension(new DerObjectIdentifier("2.5.29.15"), true, baseCert);
-            certGen.CopyAndAddExtension("2.5.29.37", false, baseCert);
+            certGen.CopyAndAddExtension(new DerObjectIdentifier("2.5.29.37"), false, baseCert);
 
             X509Certificate cert = certGen.Generate(new Asn1SignatureFactory("MD5WithRSAEncryption", privKey, null));
 
@@ -2170,7 +2140,7 @@ namespace Org.BouncyCastle.Tests
             //
             try
             {
-                certGen.CopyAndAddExtension("2.5.99.99", true, baseCert);
+                certGen.CopyAndAddExtension(new DerObjectIdentifier("2.5.99.99"), true, baseCert);
 
                 Fail("exception not thrown on dud extension copy");
             }
@@ -2193,7 +2163,7 @@ namespace Org.BouncyCastle.Tests
             }
         }
 
-        private void doTestForgedSignature()
+        private void ImplTestForgedSignature()
         {
             string cert = "MIIBsDCCAVoCAQYwDQYJKoZIhvcNAQEFBQAwYzELMAkGA1UEBhMCQVUxEzARBgNV"
                 + "BAgTClF1ZWVuc2xhbmQxGjAYBgNVBAoTEUNyeXB0U29mdCBQdHkgTHRkMSMwIQYD"
@@ -2220,7 +2190,7 @@ namespace Org.BouncyCastle.Tests
             }
         }
 
-        private void pemTest()
+        private void PemTest()
         {
             X509Certificate cert = readPemCert(PemData.CERTIFICATE_1);
             if (cert == null)
@@ -2255,7 +2225,7 @@ namespace Org.BouncyCastle.Tests
             return new X509CertificateParser().ReadCertificate(Encoding.ASCII.GetBytes(pemData));
         }
 
-        private void pkcs7Test()
+        private void Pkcs7Test()
         {
             Asn1Encodable rootCert = Asn1Object.FromByteArray(CertPathTest.rootCertBin);
             Asn1Encodable rootCrl = Asn1Object.FromByteArray(CertPathTest.rootCrlBin);
@@ -2346,7 +2316,7 @@ namespace Org.BouncyCastle.Tests
             }
         }
 
-        private void createPssCert(
+        private void CreatePssCert(
             string algorithm)
         {
             AsymmetricCipherKeyPair keyPair = GenerateLongFixedKeys();
@@ -2379,7 +2349,7 @@ namespace Org.BouncyCastle.Tests
             certGen.SetSerialNumber(BigInteger.One);
             certGen.SetIssuerDN(new X509Name(ord, values));
             certGen.SetNotBefore(DateTime.UtcNow.AddSeconds(-50));
-            certGen.SetNotAfter(DateTime.UtcNow.AddSeconds(50));
+            certGen.SetNotAfter(DateTime.UtcNow.AddMonths(6));
             certGen.SetSubjectDN(new X509Name(ord, values));
             certGen.SetPublicKey(pubKey);
             certGen.AddExtension("2.5.29.15", true,
@@ -2420,7 +2390,7 @@ namespace Org.BouncyCastle.Tests
             return new AsymmetricCipherKeyPair(pubKey, privKey);
         }
 
-        private void rfc4491Test()
+        private void Rfc4491Test()
         {
             X509CertificateParser certFact = new X509CertificateParser();
 
@@ -2433,7 +2403,7 @@ namespace Org.BouncyCastle.Tests
             x509.Verify(x509.GetPublicKey());
         }
 
-        private void doTestNullDerNullCert()
+        private void ImplTestNullDerNullCert()
         {
             AsymmetricCipherKeyPair keyPair = GenerateLongFixedKeys();
 
@@ -2445,7 +2415,7 @@ namespace Org.BouncyCastle.Tests
             certGen.SetSerialNumber(BigInteger.One);
             certGen.SetIssuerDN(new X509Name("CN=Test"));
             certGen.SetNotBefore(DateTime.UtcNow.AddSeconds(-50));
-            certGen.SetNotAfter(DateTime.UtcNow.AddSeconds(50));
+            certGen.SetNotAfter(DateTime.UtcNow.AddMonths(6));
             certGen.SetSubjectDN(new X509Name("CN=Test"));
             certGen.SetPublicKey(pubKey);
             X509Certificate cert = certGen.Generate(new Asn1SignatureFactory("MD5WithRSAEncryption", privKey, null));
@@ -2475,7 +2445,7 @@ namespace Org.BouncyCastle.Tests
             }
         }
 
-        private void pemFileTest()
+        private void PemFileTest()
         {
             X509CertificateParser fact = new X509CertificateParser();
 
@@ -2502,7 +2472,7 @@ namespace Org.BouncyCastle.Tests
             IsTrue("collection not empty", certs2.Count == 0);
         }
 
-        private void invalidCrls()
+        private void InvalidCrls()
         {
             X509CrlParser crlParser = new X509CrlParser();
 
@@ -2511,9 +2481,24 @@ namespace Org.BouncyCastle.Tests
 
             var crl = crlParser.ReadCrl(GetTestDataAsStream("cert_chain.data"));
             IsTrue("single crl", crl == null);
+
+            // github bc-java #2321: the malformed GeneralizedTime in thisUpdate must fail
+            // the parse rather than producing a CRL with a nonsensical date.
+            try
+            {
+                crlParser.ReadCrl(GentimeCrl);
+                Fail("malformed GeneralizedTime CRL - no exception");
+            }
+            catch (CrlException e)
+            {
+                var message = e.InnerException?.InnerException?.Message;
+
+                Assert.NotNull(message);
+                Assert.That(message.StartsWith("invalid GeneralizedTime format"));
+            }
         }
 
-        private void pemFileTestWithNl()
+        private void PemFileTestWithNewLine()
         {
             X509CertificateParser fact = new X509CertificateParser();
 
@@ -2540,67 +2525,118 @@ namespace Org.BouncyCastle.Tests
             IsTrue("collection not empty", certs2.Count == 0);
         }
 
+        /**
+         * RFC 5280 sec. 4.2.1.12 permits extendedKeyUsage to be marked critical.
+         * Loading a cert with critical EKU through the BC CertificateFactory
+         * must report hasUnsupportedCriticalExtension() == false (matching the
+         * JDK provider), since the BC X509Certificate fully implements
+         * getExtendedKeyUsage() (github #1796).
+         */
+        private void ImplTestCriticalEkuIssue1796()
+        {
+            byte[] criticalEkuCert = Base64.Decode(
+                "MIIFaTCCA1GgAwIBAgIIAUwqL4ejTt0wDQYJKoZIhvcNAQELBQAwWDELMAkGA1UE"
+              + "BhMCQ0gxEDAOBgNVBAcTB1p1ZXJpY2gxGDAWBgNVBAoTD0JvYXJkZXJab25lLm5l"
+              + "dDEdMBsGA1UEAxMUQm9hcmRlclpvbmUgVHJ1c3QgQ0EwHhcNMTgxMjE5MjExOTI5"
+              + "WhcNMjIxMjE5MjExOTI5WjB4MQswCQYDVQQGEwJDSDEQMA4GA1UEBxMHWnVlcmlj"
+              + "aDEYMBYGA1UEChMPQm9hcmRlclpvbmUubmV0MRowGAYDVQQDExFRdWFsaXR5IEFz"
+              + "c3VyYW5jZTEhMB8GCSqGSIb3DQEJARYScWFAYm9hcmRlcnpvbmUubmV0MIIBIjAN"
+              + "BgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAu5Y1gLUCfCP+n52o8bDHDCwvj1dW"
+              + "yc8yqaj/9RiyPn+je2hWRkYCe7gOuwz5KTFq6j7qXJ53aElTeJJoXA+DRy3nlmPY"
+              + "x5xBVnb8eONtJdLlIjXpF5Hz+NDNM9neD1Qaq/cEw+zBMubsHISjSiIc5BYRL9LE"
+              + "rU/l7LV0k1sLOIKF6YzBarLhl+QJLqNyl5mLAjlOW5SV8n5Vu0BM4jOSe998xsR2"
+              + "JR1fOfxJdIE6YVe4AfpoCmlMhy6la5Eg1pC4nS3TB8uKHvrYrjf0xvmNB0B+zyUO"
+              + "qJ+brtDBVZee22b+tBuXjSWOMIKZ8+/NFMsi9fHV57LM+VSTl+OKmo+pQQIDAQAB"
+              + "o4IBFTCCAREwDAYDVR0TAQH/BAIwADAOBgNVHQ8BAf8EBAMCBsAwFgYDVR0lAQH/"
+              + "BAwwCgYIKwYBBQUHAwMwHQYDVR0OBBYEFK8qHWuUOothpG8y2/3G3dfp5gSwMB8G"
+              + "A1UdIwQYMBaAFIwZJnuz6MIe1hRzikDhyKh46F6BMEYGA1UdHwQ/MD0wO6A5oDeG"
+              + "NWh0dHA6Ly93d3cuYm9hcmRlcnpvbmUubmV0L2FwaS9jYS9jcmwvYnotdHJ1c3Qt"
+              + "Y2EuY3JsMFEGCCsGAQUFBwEBBEUwQzBBBggrBgEFBQcwAoY1aHR0cDovL3d3dy5i"
+              + "b2FyZGVyem9uZS5uZXQvYXBpL2NhL2NydC9iei10cnVzdC1jYS5jcnQwDQYJKoZI"
+              + "hvcNAQELBQADggIBAIyt5U6rh/KSCnFfHuRjyClKjYizrw6Enl+6Df/IiAlRcudb"
+              + "6AIwG8R9ywMyb+JxIwipmwjhYDJR4PKKdMgtsmldmQN4zngFjDqp6+k+wM9Cj5Rw"
+              + "tScmqPnPDaTprxjwYnyLU0/71R3Sd+ERUpBj3TP5mEOr1kgIUBucr6QYYCZrSs5l"
+              + "IyHGd73g1Mn7YlrsFIhfzyrUz6gnsToehHVsOfPEqeVDsrEts51imC8ZuF7EMy9g"
+              + "GRnt2rV0XnpLfUGK9nuUvaV9sOvshXnOBV/XZudgvPQoJ4gs+gGwC3Z+ZFUabpe+"
+              + "QbbY9jCN8ZcCv5mJZuA9y2fCkWZ0S30VcbY/6aSFpb0P8fOSJf89HuKts4P6IFfp"
+              + "Xkay7uu/lgkynHrAcVUSi9NJ/xA/7mcO1M/ai77/llmvASYtSapd/t+LbWtOlAyw"
+              + "EaFafaNx22nJeHe3iyIxIyl7qS/jOgwgdL1y6HaWEbYhJdFs/GBUhTeb/fOWZ9fG"
+              + "XZtuNJtVECc1gl+rBHY/bypzbv5phK0gRXBqQ1VQ6srho01CAtc48EDooRFsAhH0"
+              + "hVps7WSHS/GEjWFZ3yHBkOKH/gsigZgqqD0c2VuaDMmnnhk1SNI4+Fz6xT07tNr6"
+              + "DVHa59dv36r7WyNAwacMVDNPYvGGwB0VAlW/ppbqXuFnk7hQfR3vUIQatdm5");
+
+            var cert = new X509Certificate(criticalEkuCert);
+
+            IsTrue("EKU not in critical OIDs",
+                cert.GetCriticalExtensionOids().Contains(X509Extensions.ExtendedKeyUsage.GetID()));
+
+            // NOTE: The bc-csharp API doesn't have an equivalent method
+            //IsTrue("critical EKU must be reported as supported", !cert.HasUnsupportedCriticalExtension());
+        }
+
         public override void PerformTest()
         {
-            checkCertificate(1, cert1);
-            checkCertificate(2, cert2);
-            checkCertificate(3, cert3);
-            checkCertificate(4, cert4);
-            checkCertificate(5, cert5);
+            CheckCertificate(1, cert1);
+            CheckCertificate(2, cert2);
+            CheckCertificate(3, cert3);
+            CheckCertificate(4, cert4);
+            CheckCertificate(5, cert5);
             // This cert uses an incorrect encoding (compressed wrapped in extra octet string)
             // which the Java build supports backwards, but we choose not to for C# build
-//			checkCertificate(6, oldEcdsa);
-            checkCertificate(7, cert7);
+            //CheckCertificate(6, oldEcdsa);
+            CheckCertificate(7, cert7);
 
-            checkKeyUsage(8, keyUsage);
-            checkSelfSignedCertificate(9, uncompressedPtEC);
-            checkNameCertificate(10, nameCert);
+            CheckCertificateKeyUsage(8, keyUsage);
+            CheckCertificateSelfSigned(9, uncompressedPtEC);
+            CheckCertificateIssuer(10, nameCert);
 
-            checkSelfSignedCertificate(11, probSelfSignedCert);
-            checkSelfSignedCertificate(12, gostCA1);
-            checkSelfSignedCertificate(13, gostCA2);
-            checkSelfSignedCertificate(14, gost341094base);
-            checkSelfSignedCertificate(15, gost34102001base);
-            checkSelfSignedCertificate(16, gost341094A);
-            checkSelfSignedCertificate(17, gost341094B);
-            checkSelfSignedCertificate(17, gost34102001A);
+            CheckCertificateSelfSigned(11, probSelfSignedCert);
+            CheckCertificateSelfSigned(12, gostCA1);
+            CheckCertificateSelfSigned(13, gostCA2);
+            CheckCertificateSelfSigned(14, gost341094base);
+            CheckCertificateSelfSigned(15, gost34102001base);
+            CheckCertificateSelfSigned(16, gost341094A);
+            CheckCertificateSelfSigned(17, gost341094B);
+            CheckCertificateSelfSigned(18, gost34102001A);
 
-            checkCrl(1, crl1);
+            CheckCrl(1, crl1);
 
-            checkCreation1();
-            checkCreation2();
-            checkCreation3();
-            checkCreation4();
-            checkCreation5();
+            CheckCreation1();
+            CheckCreation2();
+            CheckCreation3();
+            CheckCreation4();
+            CheckCreation5();
 
-            createECCert("SHA1withECDSA", X9ObjectIdentifiers.ECDsaWithSha1);
-            createECCert("SHA224withECDSA", X9ObjectIdentifiers.ECDsaWithSha224);
-            createECCert("SHA256withECDSA", X9ObjectIdentifiers.ECDsaWithSha256);
-            createECCert("SHA384withECDSA", X9ObjectIdentifiers.ECDsaWithSha384);
-            createECCert("SHA512withECDSA", X9ObjectIdentifiers.ECDsaWithSha512);
+            CreateECCert("SHA1withECDSA", X9ObjectIdentifiers.ECDsaWithSha1);
+            CreateECCert("SHA224withECDSA", X9ObjectIdentifiers.ECDsaWithSha224);
+            CreateECCert("SHA256withECDSA", X9ObjectIdentifiers.ECDsaWithSha256);
+            CreateECCert("SHA384withECDSA", X9ObjectIdentifiers.ECDsaWithSha384);
+            CreateECCert("SHA512withECDSA", X9ObjectIdentifiers.ECDsaWithSha512);
 
-            createPssCert("SHA1withRSAandMGF1");
-            createPssCert("SHA224withRSAandMGF1");
-            createPssCert("SHA256withRSAandMGF1");
-            createPssCert("SHA384withRSAandMGF1");
+            CreatePssCert("SHA1withRSAandMGF1");
+            CreatePssCert("SHA224withRSAandMGF1");
+            CreatePssCert("SHA256withRSAandMGF1");
+            CreatePssCert("SHA384withRSAandMGF1");
 
-            checkCrlCreation1();
-            checkCrlCreation2();
-            checkCrlCreation3();
+            CheckCrlCreation1();
+            CheckCrlCreation2();
+            CheckCrlCreation3();
 
-            pemTest();
-            pemFileTest();
-            pemFileTestWithNl();
-            pkcs7Test();
-            rfc4491Test();
+            PemTest();
+            PemFileTest();
+            PemFileTestWithNewLine();
+            Pkcs7Test();
+            Rfc4491Test();
 
-            invalidCrls();
+            InvalidCrls();
 
-            doTestForgedSignature();
+            ImplTestForgedSignature();
 
-            doTestNullDerNullCert();
+            ImplTestNullDerNullCert();
 
-            checkCertificate(18, emptyDNCert);
+            CheckCertificate(19, emptyDNCert);
+
+            ImplTestCriticalEkuIssue1796();
         }
 
         [Test]

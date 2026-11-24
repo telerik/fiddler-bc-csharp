@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 
 using Org.BouncyCastle.Tls.Crypto;
@@ -25,10 +26,6 @@ namespace Org.BouncyCastle.Tls
 
             TlsClientContextImpl clientContext = new TlsClientContextImpl(client.Crypto);
 
-            ClientHandshakeState state = new ClientHandshakeState();
-            state.client = client;
-            state.clientContext = clientContext;
-
             client.Init(clientContext);
             clientContext.HandshakeBeginning(client);
 
@@ -38,23 +35,34 @@ namespace Org.BouncyCastle.Tls
             DtlsRecordLayer recordLayer = new DtlsRecordLayer(clientContext, client, transport);
             client.NotifyCloseHandle(recordLayer);
 
+            ClientHandshakeState state = new ClientHandshakeState();
+            state.client = client;
+            state.clientContext = clientContext;
+            state.recordLayer = recordLayer;
+
             try
             {
-                return ClientHandshake(state, recordLayer);
+                return ClientHandshake(state);
+            }
+            catch (TlsFatalAlertReceived)
+            {
+                Debug.Assert(recordLayer.IsFailed);
+                InvalidateSession(state);
+                throw;
             }
             catch (TlsFatalAlert fatalAlert)
             {
-                AbortClientHandshake(state, recordLayer, fatalAlert.AlertDescription);
+                AbortClientHandshake(state, fatalAlert.AlertDescription);
                 throw;
             }
             catch (IOException)
             {
-                AbortClientHandshake(state, recordLayer, AlertDescription.internal_error);
+                AbortClientHandshake(state, AlertDescription.internal_error);
                 throw;
             }
             catch (Exception e)
             {
-                AbortClientHandshake(state, recordLayer, AlertDescription.internal_error);
+                AbortClientHandshake(state, AlertDescription.internal_error);
                 throw new TlsFatalAlert(AlertDescription.internal_error, e);
             }
             finally
@@ -63,22 +71,23 @@ namespace Org.BouncyCastle.Tls
             }
         }
 
-        internal virtual void AbortClientHandshake(ClientHandshakeState state, DtlsRecordLayer recordLayer,
-            short alertDescription)
+        internal virtual void AbortClientHandshake(ClientHandshakeState state, short alertDescription)
         {
-            recordLayer.Fail(alertDescription);
+            state.recordLayer.Fail(alertDescription);
             InvalidateSession(state);
         }
 
         /// <exception cref="IOException"/>
-        internal virtual DtlsTransport ClientHandshake(ClientHandshakeState state, DtlsRecordLayer recordLayer)
+        internal virtual DtlsTransport ClientHandshake(ClientHandshakeState state)
         {
             TlsClient client = state.client;
             TlsClientContextImpl clientContext = state.clientContext;
+            DtlsRecordLayer recordLayer = state.recordLayer;
             SecurityParameters securityParameters = clientContext.SecurityParameters;
 
             DtlsReliableHandshake handshake = new DtlsReliableHandshake(clientContext, recordLayer,
-                client.GetHandshakeTimeoutMillis(), TlsUtilities.GetHandshakeResendTimeMillis(client), null);
+                client.GetHandshakeTimeoutMillis(), TlsUtilities.GetHandshakeResendTimeMillis(client), null,
+                TlsUtilities.GetMaxHandshakeMessageSize(client));
 
             byte[] clientHelloBody = GenerateClientHello(state);
 
@@ -136,7 +145,8 @@ namespace Org.BouncyCastle.Tls
 
                 handshake.Finish();
 
-                if (securityParameters.IsExtendedMasterSecret)
+                if (securityParameters.IsExtendedMasterSecret &&
+                    ProtocolVersion.DTLSv12.IsEqualOrLaterVersionOf(securityParameters.NegotiatedVersion))
                 {
                     securityParameters.m_tlsUnique = securityParameters.PeerVerifyData;
                 }
@@ -247,12 +257,14 @@ namespace Org.BouncyCastle.Tls
                 {
                     clientAuthCertificate = clientAuthCredentials.Certificate;
 
-                    if (clientAuthCredentials is TlsCredentialedSigner)
+                    if (clientAuthCredentials is TlsCredentialedSigner credentialedSigner)
                     {
-                        clientAuthSigner = (TlsCredentialedSigner)clientAuthCredentials;
+                        clientAuthSigner = credentialedSigner;
                         clientAuthAlgorithm = TlsUtilities.GetSignatureAndHashAlgorithm(
                             securityParameters.NegotiatedVersion, clientAuthSigner);
                         clientAuthStreamSigner = clientAuthSigner.GetStreamSigner();
+
+                        TlsUtilities.Verify12SignatureAlgorithm(clientAuthAlgorithm, AlertDescription.internal_error);
 
                         if (ProtocolVersion.DTLSv12.Equals(securityParameters.NegotiatedVersion))
                         {
@@ -302,6 +314,8 @@ namespace Org.BouncyCastle.Tls
             securityParameters.m_sessionHash = TlsUtilities.GetCurrentPrfHash(handshake.HandshakeHash);
 
             TlsProtocol.EstablishMasterSecret(clientContext, state.keyExchange);
+            state.keyExchange = null;
+
             recordLayer.InitPendingEpoch(TlsUtilities.InitCipher(clientContext));
 
             if (clientAuthSigner != null)
@@ -363,7 +377,10 @@ namespace Org.BouncyCastle.Tls
 
             state.tlsSession = TlsUtilities.ImportSession(securityParameters.SessionID, state.sessionParameters);
 
-            securityParameters.m_tlsUnique = securityParameters.LocalVerifyData;
+            if (ProtocolVersion.DTLSv12.IsEqualOrLaterVersionOf(securityParameters.NegotiatedVersion))
+            {
+                securityParameters.m_tlsUnique = securityParameters.LocalVerifyData;
+            }
 
             clientContext.HandshakeComplete(client, state.tlsSession);
 
@@ -410,9 +427,10 @@ namespace Org.BouncyCastle.Tls
 
             TlsSession sessionToResume = offeringDtlsV12Minus ? client.GetSessionToResume() : null;
 
-            bool fallback = client.IsFallback();
-
+            // NOTE: Client is free to modify the cipher suites up until GetSessionToResume
             state.offeredCipherSuites = client.GetCipherSuites();
+
+            bool fallback = client.IsFallback();
 
             state.clientExtensions = TlsExtensionsUtilities.EnsureExtensionsInitialised(client.GetClientExtensions());
 
@@ -510,12 +528,17 @@ namespace Org.BouncyCastle.Tls
                 state.clientExtensions.Remove(ExtensionType.extended_master_secret);
             }
 
-            // Cipher Suites (and SCSV)
+            // NOT renegotiating
+            if (offeringDtlsV12Minus)
             {
                 /*
-                 * RFC 5746 3.4. The client MUST include either an empty "renegotiation_info" extension,
-                 * or the TLS_EMPTY_RENEGOTIATION_INFO_SCSV signaling cipher suite value in the
-                 * ClientHello. Including both is NOT RECOMMENDED.
+                 * RFC 5746 3.4. Client Behavior: Initial Handshake (both full and session-resumption)
+                 */
+
+                /*
+                 * The client MUST include either an empty "renegotiation_info" extension, or the
+                 * TLS_EMPTY_RENEGOTIATION_INFO_SCSV signaling cipher suite value in the ClientHello.
+                 * Including both is NOT RECOMMENDED.
                  */
                 bool noRenegExt = (null == TlsUtilities.GetExtensionData(state.clientExtensions,
                     ExtensionType.renegotiation_info));
@@ -713,7 +736,7 @@ namespace Org.BouncyCastle.Tls
         protected virtual void ProcessServerCertificate(ClientHandshakeState state, byte[] body)
         {
             state.authentication = TlsUtilities.ReceiveServerCertificate(state.clientContext, state.client,
-                new MemoryStream(body, false), state.serverExtensions);
+                new MemoryStream(body, false));
         }
 
         /// <exception cref="IOException"/>
@@ -843,7 +866,10 @@ namespace Org.BouncyCastle.Tls
                      * fatal alert.
                      */
                     if (null == TlsUtilities.GetExtensionData(state.clientExtensions, extType))
-                        throw new TlsFatalAlert(AlertDescription.unsupported_extension);
+                    {
+                        throw new TlsFatalAlert(AlertDescription.unsupported_extension,
+                            "Unrequested extension in ServerHello: " + ExtensionType.GetText(extType));
+                    }
 
                     /*
                      * RFC 3546 2.3. If [...] the older session is resumed, then the server MUST ignore
@@ -1114,6 +1140,7 @@ namespace Org.BouncyCastle.Tls
         {
             internal TlsClient client = null;
             internal TlsClientContextImpl clientContext = null;
+            internal DtlsRecordLayer recordLayer = null;
             internal TlsSession tlsSession = null;
             internal SessionParameters sessionParameters = null;
             internal TlsSecret sessionMasterSecret = null;

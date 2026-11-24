@@ -68,11 +68,7 @@ namespace Org.BouncyCastle.Crypto.Encodings
 
         public void Init(bool forEncryption, ICipherParameters parameters)
         {
-            SecureRandom initRandom = null;
-            if (parameters is ParametersWithRandom withRandom)
-            {
-                initRandom = withRandom.Random;
-            }
+            ParameterUtilities.GetRandom(parameters, out var initRandom);
 
             this.random = forEncryption ? CryptoServicesRegistrar.GetSecureRandom(initRandom) : null;
             this.forEncryption = forEncryption;
@@ -82,31 +78,19 @@ namespace Org.BouncyCastle.Crypto.Encodings
 
         public int GetInputBlockSize()
         {
-            int baseBlockSize = engine.GetInputBlockSize();
+            int blockSize = engine.GetInputBlockSize();
 
-            if (forEncryption)
-            {
-                return baseBlockSize - 1 - 2 * defHash.Length;
-            }
-            else
-            {
-                return baseBlockSize;
-            }
+            return forEncryption ? GetReducedBlockSize(blockSize) : blockSize;
         }
 
         public int GetOutputBlockSize()
         {
-            int baseBlockSize = engine.GetOutputBlockSize();
+            int blockSize = engine.GetOutputBlockSize();
 
-            if (forEncryption)
-            {
-                return baseBlockSize;
-            }
-            else
-            {
-                return baseBlockSize - 1 - 2 * defHash.Length;
-            }
+            return forEncryption ? blockSize : GetReducedBlockSize(blockSize);
         }
+
+        private int GetReducedBlockSize(int blockSize) => blockSize - 1 - 2 * defHash.Length;
 
         public byte[] ProcessBlock(byte[] inBytes, int inOff, int inLen)
         {
@@ -117,10 +101,11 @@ namespace Org.BouncyCastle.Crypto.Encodings
 
         private byte[] EncodeBlock(byte[] inBytes, int inOff, int inLen)
         {
-            int inputBlockSize = GetInputBlockSize();
-            Check.DataLength(inLen > inputBlockSize, "input data too long");
+            int inBlockSize = engine.GetInputBlockSize();
 
-            byte[] block = new byte[inputBlockSize + 1 + 2 * defHash.Length];
+            Check.DataLength(inLen > GetReducedBlockSize(inBlockSize), "input data too long");
+
+            byte[] block = new byte[inBlockSize];
 
             //
             // copy in the message
@@ -167,15 +152,17 @@ namespace Org.BouncyCastle.Crypto.Encodings
         */
         private byte[] DecodeBlock(byte[] inBytes, int inOff, int inLen)
         {
+            int outBlockSize = engine.GetOutputBlockSize();
+
             // i.e. wrong when block.length < (2 * defHash.length) + 1
-            int wrongMask = GetOutputBlockSize() >> 31;
+            int wrongMask = GetReducedBlockSize(outBlockSize) >> 31;
 
             //
             // as we may have zeros in our leading bytes for the block we produced
             // on encryption, we need to make sure our decrypted block comes back
             // the same size.
             //
-            byte[] block = new byte[engine.GetOutputBlockSize()];
+            byte[] block = new byte[outBlockSize];
             {
                 byte[] data = engine.ProcessBlock(inBytes, inOff, inLen);
                 wrongMask |= (block.Length - data.Length) >> 31;

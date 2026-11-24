@@ -1,11 +1,10 @@
 using System;
 
 using Org.BouncyCastle.Asn1.X500;
-using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Asn1.X509.SigI
 {
-	/**
+    /**
 	* Structure for a name or pseudonym.
 	* 
 	* <pre>
@@ -18,160 +17,146 @@ namespace Org.BouncyCastle.Asn1.X509.SigI
 	*       }
 	* </pre>
 	* 
-	* @see org.bouncycastle.asn1.x509.sigi.PersonalData
+	* @see Org.BouncyCastle.Asn1.X509.sigi.PersonalData
 	* 
 	*/
-	public class NameOrPseudonym
-		: Asn1Encodable, IAsn1Choice
-	{
-		private readonly DirectoryString	pseudonym;
-		private readonly DirectoryString	surname;
-		private readonly Asn1Sequence		givenName;
+    public class NameOrPseudonym
+        : Asn1Encodable, IAsn1Choice
+    {
+        public static NameOrPseudonym GetInstance(object obj) => Asn1Utilities.GetInstanceChoice(obj, GetOptional);
 
-		public static NameOrPseudonym GetInstance(
-			object obj)
-		{
-			if (obj == null || obj is NameOrPseudonym)
-			{
-				return (NameOrPseudonym)obj;
-			}
+        public static NameOrPseudonym GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            Asn1Utilities.GetInstanceChoice(taggedObject, declaredExplicit, GetInstance);
 
-			if (obj is IAsn1String)
-			{
-				return new NameOrPseudonym(DirectoryString.GetInstance(obj));
-			}
+        public static NameOrPseudonym GetOptional(Asn1Encodable element)
+        {
+            if (element == null)
+                throw new ArgumentNullException(nameof(element));
 
-			if (obj is Asn1Sequence)
-			{
-				return new NameOrPseudonym((Asn1Sequence) obj);
-			}
+            if (element is NameOrPseudonym nameOrPseudonym)
+                return nameOrPseudonym;
 
-            throw new ArgumentException("unknown object in factory: " + Platform.GetTypeName(obj), "obj");
-		}
+            // TODO Add type for surAndGivenName?
+            Asn1Sequence surAndGivenName = Asn1Sequence.GetOptional(element);
+            if (surAndGivenName != null)
+                return new NameOrPseudonym(surAndGivenName);
 
-		/**
-		* Constructor from DERString.
-		* <p/>
-		* The sequence is of type NameOrPseudonym:
-		* <p/>
-		* <pre>
-		*       NameOrPseudonym ::= CHOICE {
-		*     	   surAndGivenName SEQUENCE {
-		*     	     surName DirectoryString,
-		*     	     givenName SEQUENCE OF DirectoryString
-		*         },
-		*     	   pseudonym DirectoryString
-		*       }
-		* </pre>
-		* @param pseudonym pseudonym value to use.
-		*/
-		public NameOrPseudonym(
-			DirectoryString pseudonym)
-		{
-			this.pseudonym = pseudonym;
-		}
+            DirectoryString pseudonym = DirectoryString.GetOptional(element);
+            if (pseudonym != null)
+                return new NameOrPseudonym(pseudonym);
 
-		/**
-		* Constructor from Asn1Sequence.
-		* <p/>
-		* The sequence is of type NameOrPseudonym:
-		* <p/>
-		* <pre>
-		*       NameOrPseudonym ::= CHOICE {
-		*     	   surAndGivenName SEQUENCE {
-		*     	     surName DirectoryString,
-		*     	     givenName SEQUENCE OF DirectoryString
-		*         },
-		*     	   pseudonym DirectoryString
-		*       }
-		* </pre>
-		*
-		* @param seq The ASN.1 sequence.
-		*/
-		private NameOrPseudonym(
-			Asn1Sequence seq)
-		{
-			if (seq.Count != 2)
-				throw new ArgumentException("Bad sequence size: " + seq.Count);
+            return null;
+        }
 
-			if (!(seq[0] is IAsn1String))
-                throw new ArgumentException("Bad object encountered: " + Platform.GetTypeName(seq[0]));
+        public static NameOrPseudonym GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            Asn1Utilities.GetTaggedChoice(taggedObject, declaredExplicit, GetInstance);
 
-			surname = DirectoryString.GetInstance(seq[0]);
-			givenName = Asn1Sequence.GetInstance(seq[1]);
-		}
+        private readonly DirectoryString m_pseudonym;
+        private readonly DirectoryString m_surname;
+        private readonly Asn1Sequence m_givenName;
 
-		/**
-		* Constructor from a given details.
-		*
-		* @param pseudonym The pseudonym.
-		*/
-		public NameOrPseudonym(
-			string pseudonym)
-			: this(new DirectoryString(pseudonym))
-		{
-		}
+        /**
+         * Constructor from DERString.
+         * <p/>
+         * The sequence is of type NameOrPseudonym:
+         * <p/>
+         * <pre>
+         *       NameOrPseudonym ::= CHOICE {
+         *     	   surAndGivenName SEQUENCE {
+         *     	     surName DirectoryString,
+         *     	     givenName SEQUENCE OF DirectoryString
+         *         },
+         *     	   pseudonym DirectoryString
+         *       }
+         * </pre>
+         * @param pseudonym pseudonym value to use.
+         */
+        public NameOrPseudonym(DirectoryString pseudonym)
+        {
+            m_pseudonym = pseudonym ?? throw new ArgumentNullException(nameof(pseudonym));
+        }
 
-		/**
-		 * Constructor from a given details.
-		 *
-		 * @param surname   The surname.
-		 * @param givenName A sequence of directory strings making up the givenName
-		 */
-		public NameOrPseudonym(
-			DirectoryString	surname,
-			Asn1Sequence	givenName)
-		{
-			this.surname = surname;
-			this.givenName = givenName;
-		}
+        /**
+         * Constructor from Asn1Sequence.
+         * <p/>
+         * The sequence is of type NameOrPseudonym:
+         * <p/>
+         * <pre>
+         *       NameOrPseudonym ::= CHOICE {
+         *     	   surAndGivenName SEQUENCE {
+         *     	     surName DirectoryString,
+         *     	     givenName SEQUENCE OF DirectoryString
+         *         },
+         *     	   pseudonym DirectoryString
+         *       }
+         * </pre>
+         *
+         * @param seq The ASN.1 sequence.
+         */
+        private NameOrPseudonym(Asn1Sequence seq)
+        {
+            int count = seq.Count, pos = 0;
+            if (count != 2)
+                throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
 
-		public DirectoryString Pseudonym
-		{
-			get { return pseudonym; }
-		}
+            m_surname = Asn1Utilities.Read(seq, ref pos, DirectoryString.GetInstance);
+            m_givenName = Asn1Utilities.Read(seq, ref pos, Asn1Sequence.GetInstance);
 
-		public DirectoryString Surname
-		{
-			get { return surname; }
-		}
+            if (pos != count)
+                throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
+        }
 
-		public DirectoryString[] GetGivenName()
-		{
-			DirectoryString[] items = new DirectoryString[givenName.Count];
-			int count = 0;
-			foreach (object o in givenName)
-			{
-				items[count++] = DirectoryString.GetInstance(o);
-			}
-			return items;
-		}
+        /**
+         * Constructor from a given details.
+         *
+         * @param pseudonym The pseudonym.
+         */
+        public NameOrPseudonym(string pseudonym)
+            : this(new DirectoryString(pseudonym))
+        {
+        }
 
-		/**
-		* Produce an object suitable for an Asn1OutputStream.
-		* <p/>
-		* Returns:
-		* <p/>
-		* <pre>
-		*       NameOrPseudonym ::= CHOICE {
-		*     	   surAndGivenName SEQUENCE {
-		*     	     surName DirectoryString,
-		*     	     givenName SEQUENCE OF DirectoryString
-		*         },
-		*     	   pseudonym DirectoryString
-		*       }
-		* </pre>
-		*
-		* @return an Asn1Object
-		*/
-		public override Asn1Object ToAsn1Object()
-		{
-			if (pseudonym != null)
-			{
-				return pseudonym.ToAsn1Object();
-			}
+        /**
+         * Constructor from a given details.
+         *
+         * @param surname   The surname.
+         * @param givenName A sequence of directory strings making up the givenName
+         */
+        public NameOrPseudonym(DirectoryString surname, Asn1Sequence givenName)
+        {
+            m_surname = surname ?? throw new ArgumentNullException(nameof(surname));
+            m_givenName = givenName ?? throw new ArgumentNullException(nameof(givenName));
+        }
 
-			return new DerSequence(surname, givenName);
-		}
-	}
+        public DirectoryString Pseudonym => m_pseudonym;
+
+        public DirectoryString Surname => m_surname;
+
+        public DirectoryString[] GetGivenName() => m_givenName?.MapElements(DirectoryString.GetInstance);
+
+        /**
+         * Produce an object suitable for an Asn1OutputStream.
+         * <p/>
+         * Returns:
+         * <p/>
+         * <pre>
+         *       NameOrPseudonym ::= CHOICE {
+         *     	   surAndGivenName SEQUENCE {
+         *     	     surName DirectoryString,
+         *     	     givenName SEQUENCE OF DirectoryString
+         *         },
+         *     	   pseudonym DirectoryString
+         *       }
+         * </pre>
+         *
+         * @return an Asn1Object
+         */
+        public override Asn1Object ToAsn1Object()
+        {
+            if (m_pseudonym != null)
+                return m_pseudonym.ToAsn1Object();
+
+            return new DerSequence(m_surname, m_givenName);
+        }
+    }
 }

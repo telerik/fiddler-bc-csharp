@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -9,125 +8,119 @@ using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Utilities;
 using Org.BouncyCastle.Utilities.Collections;
+using Org.BouncyCastle.Utilities.Encoders;
 using Org.BouncyCastle.X509;
 
 namespace Org.BouncyCastle.Cms.Tests
 {
-	[TestFixture]
-	public class MiscDataStreamTest
-	{
-		private const string TestMessage = "Hello World!";
-		private const string SignDN = "O=Bouncy Castle, C=AU";
-		private static AsymmetricCipherKeyPair signKP;
-		private static X509Certificate signCert;
+    [TestFixture]
+    [Parallelizable(ParallelScope.All)]
+    public class MiscDataStreamTest
+    {
+        private static byte[] data = Base64.Decode(
+            "TUlNRS1WZXJzaW9uOiAxLjAKQ29udGVudC1UeXBlOiBhcHBsaWNhdGlvbi9v" +
+            "Y3RldC1zdHJlYW0KQ29udGVudC1UcmFuc2Zlci1FbmNvZGluZzogYmluYXJ5" +
+            "CkNvbnRlbnQtRGlzcG9zaXRpb246IGF0dGFjaG1lbnQ7IGZpbGVuYW1lPWRv" +
+            "Yy5iaW4KClRoaXMgaXMgYSB2ZXJ5IGh1Z2Ugc2VjcmV0LCBtYWRlIHdpdGgg" +
+            "b3BlbnNzbAoKCgo=");
 
-		private const string OrigDN = "CN=Bob, OU=Sales, O=Bouncy Castle, C=AU";
-		private static AsymmetricCipherKeyPair origKP;
-		private static X509Certificate origCert;
+        private static byte[] digestedData = Base64.Decode(
+            "MIIBGAYJKoZIhvcNAQcFoIIBCTCCAQUCAQAwCwYJYIZIAWUDBAIBMIHQBgkq" +
+            "hkiG9w0BBwGggcIEgb9NSU1FLVZlcnNpb246IDEuMApDb250ZW50LVR5cGU6" +
+            "IGFwcGxpY2F0aW9uL29jdGV0LXN0cmVhbQpDb250ZW50LVRyYW5zZmVyLUVu" +
+            "Y29kaW5nOiBiaW5hcnkKQ29udGVudC1EaXNwb3NpdGlvbjogYXR0YWNobWVu" +
+            "dDsgZmlsZW5hbWU9ZG9jLmJpbgoKVGhpcyBpcyBhIHZlcnkgaHVnZSBzZWNy" +
+            "ZXQsIG1hZGUgd2l0aCBvcGVuc3NsCgoKCgQgHLG72tSYW0LgcxOA474iwdCv" +
+            "KyhnaV4RloWTAvkq+do=");
 
-		private const string ReciDN = "CN=Doug, OU=Sales, O=Bouncy Castle, C=AU";
-		//		private static AsymmetricCipherKeyPair reciKP;
-		//		private static X509Certificate reciCert;
+        private const string TestMessage = "Hello World!";
 
-		private static AsymmetricCipherKeyPair origDsaKP;
-		private static X509Certificate origDsaCert;
+        private const string OrigDN = "CN=Bob, OU=Sales, O=Bouncy Castle, C=AU";
+        private static AsymmetricCipherKeyPair origKP;
+        private static X509Certificate origCert;
 
-		private static X509Crl signCrl;
-		private static X509Crl origCrl;
+        private static AsymmetricCipherKeyPair origDsaKP;
+        private static X509Certificate origDsaCert;
 
-		private static AsymmetricCipherKeyPair SignKP
-		{
-			get { return signKP == null ? (signKP = CmsTestUtil.MakeKeyPair()) : signKP; }
-		}
+        private const string ReciDN = "CN=Doug, OU=Sales, O=Bouncy Castle, C=AU";
+        //private static AsymmetricCipherKeyPair reciKP;
+        //private static X509Certificate reciCert;
 
-		private static AsymmetricCipherKeyPair OrigKP
-		{
-			get { return origKP == null ? (origKP = CmsTestUtil.MakeKeyPair()) : origKP; }
-		}
+        private const string SignDN = "O=Bouncy Castle, C=AU";
+        private static AsymmetricCipherKeyPair signKP;
+        private static X509Certificate signCert;
 
-		//		private static AsymmetricCipherKeyPair ReciKP
-		//		{
-		//			get { return reciKP == null ? (reciKP = CmsTestUtil.MakeKeyPair()) : reciKP; }
-		//		}
+        private static X509Crl signCrl;
+        private static X509Crl origCrl;
 
-		private static AsymmetricCipherKeyPair OrigDsaKP
-		{
-			get { return origDsaKP == null ? (origDsaKP = CmsTestUtil.MakeDsaKeyPair()) : origDsaKP; }
-		}
+        private static AsymmetricCipherKeyPair OrigKP => CmsTestUtil.InitKP(ref origKP, CmsTestUtil.MakeKeyPair);
 
-		private static X509Certificate SignCert
-		{
-			get { return signCert == null ? (signCert = CmsTestUtil.MakeCertificate(SignKP, SignDN, SignKP, SignDN)) : signCert; }
-		}
+        private static AsymmetricCipherKeyPair OrigDsaKP =>
+            CmsTestUtil.InitKP(ref origDsaKP, CmsTestUtil.MakeDsaKeyPair);
 
-		private static X509Certificate OrigCert
-		{
-			get { return origCert == null ? (origCert = CmsTestUtil.MakeCertificate(OrigKP, OrigDN, SignKP, SignDN)) : origCert; }
-		}
+        //private static AsymmetricCipherKeyPair ReciKP => CmsTestUtil.InitKP(ref reciKP, CmsTestUtil.MakeKeyPair);
 
-		//		private static X509Certificate ReciCert
-		//		{
-		//			get { return reciCert == null ? (reciCert = CmsTestUtil.MakeCertificate(ReciKP, ReciDN, SignKP, SignDN)) : reciCert; }
-		//		}
+        private static AsymmetricCipherKeyPair SignKP => CmsTestUtil.InitKP(ref signKP, CmsTestUtil.MakeKeyPair);
 
-		private static X509Certificate OrigDsaCert
-		{
-			get { return origDsaCert == null ? (origDsaCert = CmsTestUtil.MakeCertificate(OrigDsaKP, OrigDN, SignKP, SignDN)) : origDsaCert; }
-		}
+        private static X509Certificate OrigCert => CmsTestUtil.InitCertificate(ref origCert,
+            () => CmsTestUtil.MakeCertificate(OrigKP, OrigDN, SignKP, SignDN));
 
-		private static X509Crl SignCrl
-		{
-			get { return signCrl == null ? (signCrl = CmsTestUtil.MakeCrl(SignKP)) : signCrl; }
-		}
+        private static X509Certificate OrigDsaCert => CmsTestUtil.InitCertificate(ref origDsaCert,
+            () => CmsTestUtil.MakeCertificate(OrigDsaKP, OrigDN, SignKP, SignDN));
 
-		private static X509Crl OrigCrl
-		{
-			get { return origCrl == null ? (origCrl = CmsTestUtil.MakeCrl(OrigKP)) : origCrl; }
-		}
+        //private static X509Certificate ReciCert => CmsTestUtil.InitCertificate(ref reciCert,
+        //    () => CmsTestUtil.MakeCertificate(ReciKP, ReciDN, SignKP, SignDN));
 
-		private void VerifySignatures(CmsSignedDataParser sp, byte[] contentDigest)
-		{
-			IStore<X509Certificate> certStore = sp.GetCertificates();
-			SignerInformationStore signers = sp.GetSignerInfos();
+        private static X509Certificate SignCert => CmsTestUtil.InitCertificate(ref signCert,
+            () => CmsTestUtil.MakeCertificate(SignKP, SignDN, SignKP, SignDN));
 
-			foreach (SignerInformation signer in signers.GetSigners())
-			{
-				var certCollection = certStore.EnumerateMatches(signer.SignerID);
+        private static X509Crl OrigCrl => CmsTestUtil.InitCrl(ref origCrl, () => CmsTestUtil.MakeCrl(OrigKP));
 
-				var certEnum = certCollection.GetEnumerator();
+        private static X509Crl SignCrl => CmsTestUtil.InitCrl(ref signCrl, () => CmsTestUtil.MakeCrl(SignKP));
 
-				certEnum.MoveNext();
-				X509Certificate	cert = certEnum.Current;
+        private void VerifySignatures(CmsSignedDataParser sp, byte[] contentDigest)
+        {
+            IStore<X509Certificate> certStore = sp.GetCertificates();
+            SignerInformationStore signers = sp.GetSignerInfos();
 
-				Assert.IsTrue(signer.Verify(cert));
+            foreach (SignerInformation signer in signers.GetSigners())
+            {
+                var certCollection = certStore.EnumerateMatches(signer.SignerID);
 
-				if (contentDigest != null)
-				{
-					Assert.IsTrue(Arrays.AreEqual(contentDigest, signer.GetContentDigest()));
-				}
-			}
-		}
+                var certEnum = certCollection.GetEnumerator();
 
-		private void VerifySignatures(
-			CmsSignedDataParser sp)
-		{
-			VerifySignatures(sp, null);
-		}
+                certEnum.MoveNext();
+                X509Certificate cert = certEnum.Current;
 
-		//private void VerifyEncodedData(MemoryStream bOut)
-		//{
-		//	using (var sp = new CmsSignedDataParser(bOut.ToArray()))
-		//	{
-		//		sp.GetSignedContent().Drain();
+                Assert.IsTrue(signer.Verify(cert));
 
-		//		VerifySignatures(sp);
-		//	}
-		//}
+                if (contentDigest != null)
+                {
+                    Assert.IsTrue(Arrays.AreEqual(contentDigest, signer.GetContentDigest()));
+                }
+            }
+        }
 
-		private void CheckSigParseable(byte[] sig)
-		{
-			using (var sp = new CmsSignedDataParser(sig))
-			{
+        private void VerifySignatures(
+            CmsSignedDataParser sp)
+        {
+            VerifySignatures(sp, null);
+        }
+
+        //private void VerifyEncodedData(MemoryStream bOut)
+        //{
+        //    using (var sp = new CmsSignedDataParser(bOut.ToArray()))
+        //    {
+        //        sp.GetSignedContent().Drain();
+
+        //        VerifySignatures(sp);
+        //    }
+        //}
+
+        private void CheckSigParseable(byte[] sig)
+        {
+            using (var sp = new CmsSignedDataParser(sig))
+            {
                 sp.Version.ToString();
                 CmsTypedStream sc = sp.GetSignedContent();
                 if (sc != null)
@@ -141,56 +134,56 @@ namespace Org.BouncyCastle.Cms.Tests
             }
         }
 
-		[Test]
-		public void TestSha1WithRsa()
-		{
-			var certList = new List<X509Certificate>();
-			certList.Add(OrigCert);
-			certList.Add(SignCert);
+        [Test]
+        public void TestSha1WithRsa()
+        {
+            var certList = new List<X509Certificate>();
+            certList.Add(OrigCert);
+            certList.Add(SignCert);
 
-			var crlList = new List<X509Crl>();
-			crlList.Add(SignCrl);
-			crlList.Add(OrigCrl);
+            var crlList = new List<X509Crl>();
+            crlList.Add(SignCrl);
+            crlList.Add(OrigCrl);
 
-			var x509Certs = CollectionUtilities.CreateStore(certList);
-			var x509Crls = CollectionUtilities.CreateStore(crlList);
+            var x509Certs = CollectionUtilities.CreateStore(certList);
+            var x509Crls = CollectionUtilities.CreateStore(crlList);
 
-			CmsSignedDataStreamGenerator gen = new CmsSignedDataStreamGenerator();
+            CmsSignedDataStreamGenerator gen = new CmsSignedDataStreamGenerator();
 
-			gen.AddSigner(OrigKP.Private, OrigCert, CmsSignedDataStreamGenerator.DigestSha1);
+            gen.AddSigner(OrigKP.Private, OrigCert, CmsSignedDataStreamGenerator.DigestSha1);
 
-			gen.AddCertificates(x509Certs);
-			gen.AddCrls(x509Crls);
+            gen.AddCertificates(x509Certs);
+            gen.AddCrls(x509Crls);
 
-			MemoryStream bOut = new MemoryStream();
-			Stream sigOut = gen.Open(bOut);
+            MemoryStream bOut = new MemoryStream();
+            Stream sigOut = gen.Open(bOut);
 
-			CmsCompressedDataStreamGenerator cGen = new CmsCompressedDataStreamGenerator();
+            CmsCompressedDataStreamGenerator cGen = new CmsCompressedDataStreamGenerator();
 
-			Stream cOut = cGen.Open(sigOut, CmsCompressedDataStreamGenerator.ZLib);
+            Stream cOut = cGen.Open(sigOut, CmsCompressedDataStreamGenerator.ZLib);
 
-			byte[] testBytes = Encoding.ASCII.GetBytes(TestMessage);
-			cOut.Write(testBytes, 0, testBytes.Length);
+            byte[] testBytes = Encoding.ASCII.GetBytes(TestMessage);
+            cOut.Write(testBytes, 0, testBytes.Length);
 
-			cOut.Close();
+            cOut.Close();
 
-			sigOut.Close();
+            sigOut.Close();
 
-			CheckSigParseable(bOut.ToArray());
+            CheckSigParseable(bOut.ToArray());
 
-			// generate compressed stream
-			MemoryStream cDataOut = new MemoryStream();
-		    
-			cOut = cGen.Open(cDataOut, CmsCompressedDataStreamGenerator.ZLib);
+            // generate compressed stream
+            MemoryStream cDataOut = new MemoryStream();
 
-			cOut.Write(testBytes, 0, testBytes.Length);
+            cOut = cGen.Open(cDataOut, CmsCompressedDataStreamGenerator.ZLib);
 
-			cOut.Close();
+            cOut.Write(testBytes, 0, testBytes.Length);
 
-			CmsSignedDataParser sp = new CmsSignedDataParser(
-				new CmsTypedStream(new MemoryStream(cDataOut.ToArray(), false)), bOut.ToArray());
+            cOut.Close();
 
-			sp.GetSignedContent().Drain();
+            CmsSignedDataParser sp = new CmsSignedDataParser(
+                new CmsTypedStream(new MemoryStream(cDataOut.ToArray(), false)), bOut.ToArray());
+
+            sp.GetSignedContent().Drain();
 
             byte[] cDataOutBytes = cDataOut.ToArray();
 
@@ -198,6 +191,23 @@ namespace Org.BouncyCastle.Cms.Tests
             byte[] hash = DigestUtilities.CalculateDigest("SHA1", cDataOutBytes);
 
             VerifySignatures(sp, hash);
-		}
-	}
+        }
+
+        [Test]
+        public void DigestedData()
+        {
+            CmsDigestedData digData = new CmsDigestedData(digestedData);
+
+            byte[] content;
+            using (var buf = new MemoryStream())
+            {
+                digData.GetDigestedContent().Write(buf);
+                content = buf.ToArray();
+            }
+
+            Assert.That(Arrays.AreEqual(data, content));
+
+            Assert.True(digData.Verify());
+        }
+    }
 }

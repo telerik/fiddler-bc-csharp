@@ -130,6 +130,11 @@ namespace Org.BouncyCastle.OpenSsl
                 type = "PKCS7";
                 encoding = pkcsContentInfo.GetEncoded();
             }
+            else if (obj is Asn1.X9.X962Parameters x962Parameters)
+            {
+                type = "EC PARAMETERS";
+                encoding = x962Parameters.GetEncoded();
+            }
             else
             {
                 throw new PemGenerationException("Object type not supported: " + Platform.GetTypeName(obj));
@@ -287,8 +292,7 @@ namespace Org.BouncyCastle.OpenSsl
 
                 return info.ParsePrivateKey().GetEncoded();
             }
-            else if (algOid.Equals(X9ObjectIdentifiers.IdECPublicKey) ||
-                     algOid.Equals(CryptoProObjectIdentifiers.GostR3410x2001))
+            else if (algOid.Equals(X9ObjectIdentifiers.IdECPublicKey))
             {
                 keyType = "EC PRIVATE KEY";
 
@@ -304,7 +308,7 @@ namespace Org.BouncyCastle.OpenSsl
                 BigInteger y = p.G.ModPow(x, p.P);
 
                 var sequence = new DerSequence(
-                    new DerInteger(0),
+                    DerInteger.Zero,
                     new DerInteger(p.P),
                     new DerInteger(p.Q),
                     new DerInteger(p.G),

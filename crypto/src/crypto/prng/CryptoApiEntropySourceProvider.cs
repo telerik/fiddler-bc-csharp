@@ -16,10 +16,7 @@ namespace Org.BouncyCastle.Crypto.Prng
 
         public CryptoApiEntropySourceProvider(RandomNumberGenerator rng, bool isPredictionResistant)
         {
-            if (rng == null)
-                throw new ArgumentNullException("rng");
-
-            mRng = rng;
+            mRng = rng ?? throw new ArgumentNullException(nameof(rng));
             mPredictionResistant = isPredictionResistant;
         }
 

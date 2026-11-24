@@ -1,8 +1,10 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+
 using Org.BouncyCastle.Tls.Crypto;
 using Org.BouncyCastle.Utilities;
 using Org.BouncyCastle.Utilities.IO;
@@ -123,7 +125,11 @@ namespace Org.BouncyCastle.Tls
         //private readonly ByteQueue m_heartbeatQueue = new ByteQueue(0);
 
         internal readonly RecordStream m_recordStream;
+#if NET9_0_OR_GREATER
+        internal readonly Lock m_recordWriteLock = new();
+#else
         internal readonly object m_recordWriteLock = new object();
+#endif
         internal readonly SemaphoreSlim m_recordWrite = new SemaphoreSlim(1, 1);
 
         private int m_maxHandshakeMessageSize = -1;
@@ -133,7 +139,7 @@ namespace Org.BouncyCastle.Tls
         private TlsStream m_tlsStream = null;
 
         private volatile bool m_closed = false;
-        private volatile bool m_failedWithError = false;
+        private volatile bool m_failed = false;
         private volatile bool m_appDataReady = false;
         private volatile bool m_appDataSplitEnabled = true;
         private volatile bool m_keyUpdateEnabled = false;
@@ -147,6 +153,7 @@ namespace Org.BouncyCastle.Tls
         protected TlsSecret m_sessionMasterSecret = null;
 
         protected byte[] m_retryCookie = null;
+        // TODO[api] Remove and manage via SecurityParameters.m_negotiatedGroup
         protected int m_retryGroup = -1;
         protected IDictionary<int, byte[]> m_clientExtensions = null;
         protected IDictionary<int, byte[]> m_serverExtensions = null;
@@ -315,8 +322,8 @@ namespace Org.BouncyCastle.Tls
         /// <exception cref="IOException"/>
         protected virtual void HandleFailure()
         {
-            this.m_closed = true;
-            this.m_failedWithError = true;
+            m_closed = true;
+            m_failed = true;
 
             /*
              * RFC 2246 7.2.1. The session becomes unresumable if any connection is terminated
@@ -396,7 +403,7 @@ namespace Org.BouncyCastle.Tls
             AbstractTlsContext context = ContextAdmin;
             TlsPeer peer = Peer;
 
-            this.m_maxHandshakeMessageSize = System.Math.Max(1024, peer.GetMaxHandshakeMessageSize());
+            this.m_maxHandshakeMessageSize = TlsUtilities.GetMaxHandshakeMessageSize(peer);
 
             this.m_handshakeHash = new DeferredHash(context);
             this.m_connectionState = CS_START;
@@ -526,7 +533,7 @@ namespace Org.BouncyCastle.Tls
                     throw new TlsFatalAlert(AlertDescription.unexpected_message);
 
                 m_applicationDataQueue.AddData(buf, off, len);
-                ProcessApplicationDataQueue();
+                //ProcessApplicationDataQueue();
                 break;
             }
             case ContentType.change_cipher_spec:
@@ -669,15 +676,6 @@ namespace Org.BouncyCastle.Tls
             }
         }
 
-        private void ProcessApplicationDataQueue()
-        {
-            /*
-             * There is nothing we need to do here.
-             *
-             * This function could be used for callbacks when application data arrives in the future.
-             */
-        }
-
         /// <exception cref="IOException"/>
         private void ProcessAlertQueue()
         {
@@ -755,9 +753,9 @@ namespace Org.BouncyCastle.Tls
 
             while (m_applicationDataQueue.Available < 1)
             {
-                if (this.m_closed)
+                if (m_closed)
                 {
-                    if (this.m_failedWithError)
+                    if (m_failed)
                         throw new IOException("Cannot read application data on failed TLS connection");
 
                     return 0;
@@ -787,9 +785,9 @@ namespace Org.BouncyCastle.Tls
 
             while (m_applicationDataQueue.Available < 1)
             {
-                if (this.m_closed)
+                if (m_closed)
                 {
-                    if (this.m_failedWithError)
+                    if (m_failed)
                         throw new IOException("Cannot read application data on failed TLS connection");
 
                     return 0;
@@ -818,9 +816,9 @@ namespace Org.BouncyCastle.Tls
 
             while (m_applicationDataQueue.Available < 1)
             {
-                if (this.m_closed)
+                if (m_closed)
                 {
-                    if (this.m_failedWithError)
+                    if (m_failed)
                         throw new IOException("Cannot read application data on failed TLS connection");
 
                     return 0;
@@ -887,7 +885,7 @@ namespace Org.BouncyCastle.Tls
             }
             catch (TlsFatalAlertReceived)
             {
-                // Connection failure already handled at source
+                Debug.Assert(IsFailed);
                 throw;
             }
             catch (TlsFatalAlert e)
@@ -931,7 +929,7 @@ namespace Org.BouncyCastle.Tls
             }
             catch (TlsFatalAlertReceived)
             {
-                // Connection failure already handled at source
+                Debug.Assert(IsFailed);
                 throw;
             }
             catch (TlsFatalAlert e)
@@ -962,6 +960,11 @@ namespace Org.BouncyCastle.Tls
             {
                 return m_recordStream.ReadFullRecord(input, inputOff, inputLen);
             }
+            catch (TlsFatalAlertReceived)
+            {
+                Debug.Assert(IsFailed);
+                throw;
+            }
             catch (TlsFatalAlert e)
             {
                 HandleException(e.AlertDescription, "Failed to process record", e);
@@ -984,7 +987,7 @@ namespace Org.BouncyCastle.Tls
         {
             try
             {
-                m_recordStream.WriteRecord(type, buf, offset, len);
+                WriteRecord(type, buf, offset, len);
             }
             catch (TlsFatalAlert e)
             {
@@ -1008,7 +1011,7 @@ namespace Org.BouncyCastle.Tls
         {
             try
             {
-                await m_recordStream.WriteRecordAsync(type, buffer, cancellationToken);
+                await WriteRecordAsync(type, buffer, cancellationToken);
             }
             catch (TlsFatalAlert e)
             {
@@ -1032,7 +1035,7 @@ namespace Org.BouncyCastle.Tls
         {
             try
             {
-                m_recordStream.WriteRecord(type, buffer);
+                WriteRecord(type, buffer);
             }
             catch (TlsFatalAlert e)
             {
@@ -1050,6 +1053,21 @@ namespace Org.BouncyCastle.Tls
                 throw new TlsFatalAlert(AlertDescription.internal_error, e);
             }
         }
+#endif
+
+        /// <exception cref="IOException"/>
+        protected virtual void WriteRecord(short type, byte[] buf, int off, int len) =>
+            m_recordStream.WriteRecord(type, buf, off, len);
+
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+        /// <exception cref="IOException"/>
+        protected virtual void WriteRecord(short type, ReadOnlySpan<byte> buffer) =>
+            m_recordStream.WriteRecord(type, buffer);
+
+        /// <exception cref="IOException"/>
+        protected virtual Task WriteRecordAsync(short type, ReadOnlyMemory<byte> buffer,
+            CancellationToken cancellationToken) =>
+            m_recordStream.WriteRecordAsync(type, buffer, cancellationToken);
 #endif
 
         /// <summary>Write some application data.</summary>
@@ -1254,12 +1272,12 @@ namespace Org.BouncyCastle.Tls
                         case ADS_MODE_0_N_FIRSTONLY:
                         {
                             this.m_appDataSplitEnabled = false;
-                            SafeWriteRecord(ContentType.application_data, TlsUtilities.EmptyBytes, 0, 0);
+                            SafeWriteRecord(ContentType.application_data, ReadOnlySpan<byte>.Empty);
                             break;
                         }
                         case ADS_MODE_0_N:
                         {
-                            SafeWriteRecord(ContentType.application_data, TlsUtilities.EmptyBytes, 0, 0);
+                            SafeWriteRecord(ContentType.application_data, ReadOnlySpan<byte>.Empty);
                             break;
                         }
                         case ADS_MODE_1_Nsub1:
@@ -1424,7 +1442,11 @@ namespace Org.BouncyCastle.Tls
             {
                 // Fragment data according to the current fragment limit.
                 int toWrite = System.Math.Min(len - total, m_recordStream.PlaintextLimit);
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+                SafeWriteRecord(ContentType.handshake, buf.AsSpan(off + total, toWrite));
+#else
                 SafeWriteRecord(ContentType.handshake, buf, off + total, toWrite);
+#endif
                 total += toWrite;
             }
             while (total < len);
@@ -1857,7 +1879,7 @@ namespace Org.BouncyCastle.Tls
 
             try
             {
-                await m_recordStream.WriteRecordAsync(ContentType.alert, alert.AsMemory(0, 2), cancellationToken);
+                await WriteRecordAsync(ContentType.alert, alert.AsMemory(0, 2), cancellationToken);
             }
             catch (Exception)
             {
@@ -1871,11 +1893,15 @@ namespace Org.BouncyCastle.Tls
         {
             Peer.NotifyAlertRaised(AlertLevel.fatal, alertDescription, message, cause);
 
-            byte[] alert = new byte[]{ (byte)AlertLevel.fatal, (byte)alertDescription };
-
             try
             {
-                m_recordStream.WriteRecord(ContentType.alert, alert, 0, 2);
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+                Span<byte> alert = stackalloc byte[] { (byte)AlertLevel.fatal, (byte)alertDescription };
+                WriteRecord(ContentType.alert, alert);
+#else
+                byte[] alert = new byte[]{ (byte)AlertLevel.fatal, (byte)alertDescription };
+                WriteRecord(ContentType.alert, alert, 0, 2);
+#endif
             }
             catch (Exception)
             {
@@ -1888,11 +1914,14 @@ namespace Org.BouncyCastle.Tls
         {
             Peer.NotifyAlertRaised(AlertLevel.warning, alertDescription, message, null);
 
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+            Span<byte> alert = stackalloc byte[] { (byte)AlertLevel.warning, (byte)alertDescription };
+            SafeWriteRecord(ContentType.alert, alert);
+#else
             byte[] alert = new byte[]{ (byte)AlertLevel.warning, (byte)alertDescription };
-
             SafeWriteRecord(ContentType.alert, alert, 0, 2);
+#endif
         }
-
 
         /// <exception cref="IOException"/>
         protected virtual void Receive13KeyUpdate(MemoryStream buf)
@@ -1982,8 +2011,13 @@ namespace Org.BouncyCastle.Tls
         /// <exception cref="IOException"/>
         protected virtual void SendChangeCipherSpecMessage()
         {
-            byte[] message = new byte[]{ 1 };
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+            Span<byte> message = stackalloc byte[] { (byte)ChangeCipherSpec.change_cipher_spec };
+            SafeWriteRecord(ContentType.change_cipher_spec, message);
+#else
+            byte[] message = new byte[]{ (byte)ChangeCipherSpec.change_cipher_spec };
             SafeWriteRecord(ContentType.change_cipher_spec, message, 0, message.Length);
+#endif
         }
 
         /// <exception cref="IOException"/>
@@ -2088,10 +2122,7 @@ namespace Org.BouncyCastle.Tls
             get { return m_appDataReady; }
         }
 
-        public virtual bool IsClosed
-        {
-            get { return m_closed; }
-        }
+        public virtual bool IsClosed => m_closed;
 
         public virtual bool IsConnected
         {
@@ -2105,6 +2136,8 @@ namespace Org.BouncyCastle.Tls
                 return null != context && context.IsConnected;
             }
         }
+
+        public virtual bool IsFailed => m_failed;
 
         public virtual bool IsHandshaking
         {
@@ -2169,9 +2202,8 @@ namespace Org.BouncyCastle.Tls
         /// <exception cref="IOException"/>
         internal static void EstablishMasterSecret(TlsContext context, TlsKeyExchange keyExchange)
         {
-            TlsSecret preMasterSecret = keyExchange.GeneratePreMasterSecret();
-            if (preMasterSecret == null)
-                throw new TlsFatalAlert(AlertDescription.internal_error);
+            TlsSecret preMasterSecret = keyExchange.GeneratePreMasterSecret()
+                ?? throw new TlsFatalAlert(AlertDescription.internal_error);
 
             try
             {

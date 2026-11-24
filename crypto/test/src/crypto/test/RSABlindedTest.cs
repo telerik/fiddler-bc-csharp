@@ -2,21 +2,20 @@ using System;
 
 using NUnit.Framework;
 
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Crypto.Digests;
 using Org.BouncyCastle.Crypto.Encodings;
 using Org.BouncyCastle.Crypto.Engines;
 using Org.BouncyCastle.Crypto.Generators;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Math;
 using Org.BouncyCastle.Security;
+using Org.BouncyCastle.Utilities;
 using Org.BouncyCastle.Utilities.Encoders;
 using Org.BouncyCastle.Utilities.Test;
 
 namespace Org.BouncyCastle.Crypto.Tests
 {
-	[TestFixture]
-	public class RsaBlindedTest
+    [TestFixture]
+    public class RsaBlindedTest
 		: SimpleTest
 	{
 		static BigInteger mod = new BigInteger("b259d2d6e627a768c94be36164c2d9fc79d97aab9253140e5bf17751197731d6f7540d2509e7b9ffee0a70a6e26d56e92d2edd7f85aba85600b69089f35f6bdbf3c298e05842535d9f064e6b0391cb7d306e0a2d20c4dfb4e7b49a9640bdea26c10ad69c3f05007ce2513cee44cfe01998e62b6c3637d3fc0391079b26ee36d5", 16);
@@ -81,25 +80,21 @@ namespace Org.BouncyCastle.Crypto.Tests
 				}
 			}
 
+            Properties.WithThreadProperty(Properties.Pkcs1NotStrict, bool.TrueString, () =>
+            {
+                var nonStrict = new Pkcs1Encoding(new RsaEngine());
+                nonStrict.Init(forEncryption: false, pubParameters);
 
-			// Create the encoding with StrictLengthEnabled=false (done thru environment in Java version)
-			Pkcs1Encoding.StrictLengthEnabled = false;
-
-			eng = new Pkcs1Encoding(new RsaBlindedEngine());
-
-			eng.Init(false, pubParameters);
-
-			try
-			{
-				data = eng.ProcessBlock(data, 0, data.Length);
-			}
-			catch (InvalidCipherTextException e)
-			{
-				Fail("RSA: failed - exception " + e.ToString(), e);
-			}
-
-			Pkcs1Encoding.StrictLengthEnabled = true;
-		}
+                try
+                {
+                    byte[] shouldWork = nonStrict.ProcessBlock(data, 0, data.Length);
+                }
+                catch (InvalidCipherTextException e)
+                {
+                    Fail("RSA: failed - exception " + e.ToString(), e);
+                }
+            });
+        }
 
 		private void doTestTruncatedPkcs1Block(RsaKeyParameters pubParameters, RsaKeyParameters privParameters)
 		{

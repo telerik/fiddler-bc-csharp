@@ -6,8 +6,7 @@ using System.Threading;
 
 using NUnit.Framework;
 
-using Org.BouncyCastle.Crypto.Parameters;
-using Org.BouncyCastle.Security;
+using Org.BouncyCastle.Tls.Crypto.Impl.BC;
 using Org.BouncyCastle.Utilities.IO;
 
 namespace Org.BouncyCastle.Tls.Tests
@@ -38,7 +37,7 @@ namespace Org.BouncyCastle.Tls.Tests
                     Console.WriteLine("--------------------------------------------------------------------------------");
                     Console.WriteLine("Accepted " + s);
                     ServerTask serverTask = new ServerTask(s, stdout, tlsVersion);
-                    Thread t = new Thread(new ThreadStart(serverTask.Run));
+                    Thread t = new Thread(serverTask.Run);
                     t.Start();
                 }
             }
@@ -65,14 +64,19 @@ namespace Org.BouncyCastle.Tls.Tests
             {
                 try
                 {
-                    MockRawKeysTlsServer server = new MockRawKeysTlsServer(CertificateType.RawPublicKey,
-                        CertificateType.RawPublicKey, new short[]{ CertificateType.RawPublicKey },
-                        new Ed25519PrivateKeyParameters(new SecureRandom()), tlsVersion);
+                    MockRawKeysTlsServer server = new MockRawKeysTlsServer(new BcTlsCrypto(),
+                        CertificateType.RawPublicKey, CertificateType.RawPublicKey,
+                        new short[]{ CertificateType.RawPublicKey }, tlsVersion);
                     TlsServerProtocol serverProtocol = new TlsServerProtocol(s.GetStream());
                     serverProtocol.Accept(server);
-                    Stream log = new TeeOutputStream(serverProtocol.Stream, stdout);
-                    Streams.PipeAll(serverProtocol.Stream, log);
-                    serverProtocol.Close();
+
+                    using (var stream = serverProtocol.Stream)
+                    {
+                        // NB: We don't dispose this directly to avoid disposing stdout
+                        Stream log = new TeeOutputStream(stream, stdout);
+
+                        Streams.PipeAll(stream, log);
+                    }
                 }
                 finally
                 {

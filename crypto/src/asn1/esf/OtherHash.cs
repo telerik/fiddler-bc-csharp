@@ -18,31 +18,39 @@ namespace Org.BouncyCastle.Asn1.Esf
     public class OtherHash
 		: Asn1Encodable, IAsn1Choice
 	{
-        public static OtherHash GetInstance(object obj)
+        public static OtherHash GetInstance(object obj) => Asn1Utilities.GetInstanceChoice(obj, GetOptional);
+
+        public static OtherHash GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            Asn1Utilities.GetInstanceChoice(taggedObject, declaredExplicit, GetInstance);
+
+        public static OtherHash GetOptional(Asn1Encodable element)
         {
-            if (obj == null)
-                return null;
-            if (obj is OtherHash otherHash)
-                return otherHash;
-            if (obj is Asn1OctetString asn1OctetString)
-                return new OtherHash(asn1OctetString);
-            return new OtherHash(OtherHashAlgAndValue.GetInstance(obj));
+            if (element == null)
+                throw new ArgumentNullException(nameof(element));
+
+            if (element is OtherHash existing)
+                return existing;
+
+            Asn1OctetString sha1Hash = Asn1OctetString.GetOptional(element);
+            if (sha1Hash != null)
+                return new OtherHash(sha1Hash);
+
+            OtherHashAlgAndValue otherHash = OtherHashAlgAndValue.GetOptional(element);
+            if (otherHash != null)
+                return new OtherHash(otherHash);
+
+            return null;
         }
 
-        public static OtherHash GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
-        {
-            return Asn1Utilities.GetInstanceFromChoice(taggedObject, declaredExplicit, GetInstance);
-        }
+        public static OtherHash GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            Asn1Utilities.GetTaggedChoice(taggedObject, declaredExplicit, GetInstance);
 
         private readonly Asn1OctetString m_sha1Hash;
         private readonly OtherHashAlgAndValue m_otherHash;
 
         public OtherHash(byte[] sha1Hash)
 		{
-			if (sha1Hash == null)
-				throw new ArgumentNullException(nameof(sha1Hash));
-
-			m_sha1Hash = new DerOctetString(sha1Hash);
+			m_sha1Hash = DerOctetString.FromContents(sha1Hash);
 		}
 
 		public OtherHash(Asn1OctetString sha1Hash)

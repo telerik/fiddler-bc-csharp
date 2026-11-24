@@ -2,23 +2,24 @@ using System;
 
 namespace Org.BouncyCastle.Asn1.X509
 {
-    /**
-     * The KeyPurposeID object.
-     * <pre>
-     *     KeyPurposeID ::= OBJECT IDENTIFIER
-     * </pre>
-     */
+    /// <summary>The KeyPurposeID object.</summary>
+    /// <remarks>
+    /// <code>
+    /// KeyPurposeID ::= OBJECT IDENTIFIER
+    /// </code>
+    /// </remarks>
+    // TODO[api] This class isn't needed, only the OID registry
     public sealed class KeyPurposeID
         : DerObjectIdentifier
     {
-        private const string id_kp = "1.3.6.1.5.5.7.3";
+        private static readonly string id_kp = X509ObjectIdentifiers.IdPkix.Branch("3").GetID();
 
-		private KeyPurposeID(string id)
-			: base(id)
+        private KeyPurposeID(string id)
+            : base(id)
         {
         }
 
-		public static readonly KeyPurposeID AnyExtendedKeyUsage = new KeyPurposeID(X509Extensions.ExtendedKeyUsage.Id + ".0");
+        public static readonly KeyPurposeID AnyExtendedKeyUsage = new KeyPurposeID(X509Extensions.ExtendedKeyUsage.Id + ".0");
 
         public static readonly KeyPurposeID id_kp_serverAuth = new KeyPurposeID(id_kp + ".1");
         public static readonly KeyPurposeID id_kp_clientAuth = new KeyPurposeID(id_kp + ".2");
@@ -43,6 +44,33 @@ namespace Org.BouncyCastle.Asn1.X509
         public static readonly KeyPurposeID id_kp_cmcCA = new KeyPurposeID(id_kp + ".27");
         public static readonly KeyPurposeID id_kp_cmcRA = new KeyPurposeID(id_kp + ".28");
         public static readonly KeyPurposeID id_kp_cmKGA = new KeyPurposeID(id_kp + ".32");
+
+        /// <summary>RFC 9336 sec. 3.1 - signing documents (e.g. PDF, XML, JSON) for human consumption.</summary>
+        /// <remarks><code>id-kp-documentSigning OBJECT IDENTIFIER ::= { id-kp 36 }</code></remarks>
+        public static readonly KeyPurposeID id_kp_documentSigning = new KeyPurposeID(id_kp + ".36");
+
+        /// <summary>
+        /// RFC 9734 sec. 3 - proving the identity of an Instant Messaging (IM) client, whose IM URI (RFC 3860) or XMPP
+        /// URI (RFC 6121) appears in the subjectAltName.
+        /// </summary>
+        /// <remarks><code>id-kp-imUri OBJECT IDENTIFIER ::= { id-kp 40 }</code></remarks>
+        public static readonly KeyPurposeID id_kp_imUri = new KeyPurposeID(id_kp + ".40");
+
+        /// <summary>RFC 9809 sec. 3 - signing general-purpose configuration files.</summary>
+        /// <remarks><code>id-kp-configSigning OBJECT IDENTIFIER ::= { id-kp 41 }</code></remarks>
+        public static readonly KeyPurposeID id_kp_configSigning = new KeyPurposeID(id_kp + ".41");
+
+        /// <summary>RFC 9809 sec. 3 - signing trust anchor configuration files.</summary>
+        /// <remarks><code>id-kp-trustAnchorConfigSigning OBJECT IDENTIFIER ::= { id-kp 42 }</code></remarks>
+        public static readonly KeyPurposeID id_kp_trustAnchorConfigSigning = new KeyPurposeID(id_kp + ".42");
+
+        /// <summary>RFC 9809 sec. 3 - signing software or firmware update packages.</summary>
+        /// <remarks><code>id-kp-updatePackageSigning OBJECT IDENTIFIER ::= { id-kp 43 }</code></remarks>
+        public static readonly KeyPurposeID id_kp_updatePackageSigning = new KeyPurposeID(id_kp + ".43");
+
+        /// <summary>RFC 9809 sec. 3 - authenticating communication peers for safety-critical communication.</summary>
+        /// <remarks><code>id-kp-safetyCommunication OBJECT IDENTIFIER ::= { id-kp 44 }</code></remarks>
+        public static readonly KeyPurposeID id_kp_safetyCommunication = new KeyPurposeID(id_kp + ".44");
 
         //
         // microsoft key purpose ids

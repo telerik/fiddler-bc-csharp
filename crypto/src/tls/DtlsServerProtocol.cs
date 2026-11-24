@@ -1,11 +1,10 @@
-﻿using System;
-using System.Collections;
+using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 
 using Org.BouncyCastle.Tls.Crypto;
 using Org.BouncyCastle.Utilities;
-using Org.BouncyCastle.Utilities.IO;
 
 namespace Org.BouncyCastle.Tls
 {
@@ -41,10 +40,6 @@ namespace Org.BouncyCastle.Tls
 
             TlsServerContextImpl serverContext = new TlsServerContextImpl(server.Crypto);
 
-            ServerHandshakeState state = new ServerHandshakeState();
-            state.server = server;
-            state.serverContext = serverContext;
-
             server.Init(serverContext);
             serverContext.HandshakeBeginning(server);
 
@@ -54,23 +49,34 @@ namespace Org.BouncyCastle.Tls
             DtlsRecordLayer recordLayer = new DtlsRecordLayer(serverContext, server, transport);
             server.NotifyCloseHandle(recordLayer);
 
+            ServerHandshakeState state = new ServerHandshakeState();
+            state.server = server;
+            state.serverContext = serverContext;
+            state.recordLayer = recordLayer;
+
             try
             {
-                return ServerHandshake(state, recordLayer, request);
+                return ServerHandshake(state, request);
+            }
+            catch (TlsFatalAlertReceived)
+            {
+                Debug.Assert(recordLayer.IsFailed);
+                InvalidateSession(state);
+                throw;
             }
             catch (TlsFatalAlert fatalAlert)
             {
-                AbortServerHandshake(state, recordLayer, fatalAlert.AlertDescription);
+                AbortServerHandshake(state, fatalAlert.AlertDescription);
                 throw;
             }
             catch (IOException)
             {
-                AbortServerHandshake(state, recordLayer, AlertDescription.internal_error);
+                AbortServerHandshake(state, AlertDescription.internal_error);
                 throw;
             }
             catch (Exception e)
             {
-                AbortServerHandshake(state, recordLayer, AlertDescription.internal_error);
+                AbortServerHandshake(state, AlertDescription.internal_error);
                 throw new TlsFatalAlert(AlertDescription.internal_error, e);
             }
             finally
@@ -79,32 +85,29 @@ namespace Org.BouncyCastle.Tls
             }
         }
 
-        internal virtual void AbortServerHandshake(ServerHandshakeState state, DtlsRecordLayer recordLayer,
-            short alertDescription)
+        internal virtual void AbortServerHandshake(ServerHandshakeState state, short alertDescription)
         {
-            recordLayer.Fail(alertDescription);
+            state.recordLayer.Fail(alertDescription);
             InvalidateSession(state);
         }
 
         /// <exception cref="IOException"/>
-        internal virtual DtlsTransport ServerHandshake(ServerHandshakeState state, DtlsRecordLayer recordLayer,
-            DtlsRequest request)
+        internal virtual DtlsTransport ServerHandshake(ServerHandshakeState state, DtlsRequest request)
         {
             TlsServer server = state.server;
             TlsServerContextImpl serverContext = state.serverContext;
+            DtlsRecordLayer recordLayer = state.recordLayer;
             SecurityParameters securityParameters = serverContext.SecurityParameters;
 
             DtlsReliableHandshake handshake = new DtlsReliableHandshake(serverContext, recordLayer,
-                server.GetHandshakeTimeoutMillis(), TlsUtilities.GetHandshakeResendTimeMillis(server), request);
+                server.GetHandshakeTimeoutMillis(), TlsUtilities.GetHandshakeResendTimeMillis(server), request,
+                TlsUtilities.GetMaxHandshakeMessageSize(server));
 
             DtlsReliableHandshake.Message clientMessage = null;
 
             if (null == request)
             {
                 clientMessage = handshake.ReceiveMessage();
-
-                // NOTE: DtlsRecordLayer requires any DTLS version, we don't otherwise constrain this
-                //ProtocolVersion recordLayerVersion = recordLayer.ReadVersion;
 
                 if (clientMessage.Type == HandshakeType.client_hello)
                 {
@@ -125,14 +128,7 @@ namespace Org.BouncyCastle.Tls
             }
 
             {
-                byte[] serverHelloBody = GenerateServerHello(state, recordLayer);
-
-                // TODO[dtls13] Ideally, move this into GenerateServerHello once legacy_record_version clarified
-                {
-                    ProtocolVersion recordLayerVersion = serverContext.ServerVersion;
-                    recordLayer.ReadVersion = recordLayerVersion;
-                    recordLayer.SetWriteVersion(recordLayerVersion);
-                }
+                byte[] serverHelloBody = GenerateServerHello(state);
 
                 handshake.SendMessage(HandshakeType.server_hello, serverHelloBody);
             }
@@ -157,7 +153,8 @@ namespace Org.BouncyCastle.Tls
 
                 handshake.Finish();
 
-                if (securityParameters.IsExtendedMasterSecret)
+                if (securityParameters.IsExtendedMasterSecret &&
+                    ProtocolVersion.DTLSv12.IsEqualOrLaterVersionOf(securityParameters.NegotiatedVersion))
                 {
                     securityParameters.m_tlsUnique = securityParameters.LocalVerifyData;
                 }
@@ -183,11 +180,11 @@ namespace Org.BouncyCastle.Tls
 
             state.keyExchange = TlsUtilities.InitKeyExchangeServer(serverContext, server);
 
-            state.serverCredentials = null;
+            TlsCredentials serverCredentials = null;
 
             if (!KeyExchangeAlgorithm.IsAnonymous(securityParameters.KeyExchangeAlgorithm))
             {
-                state.serverCredentials = TlsUtilities.EstablishServerCredentials(server);
+                serverCredentials = TlsUtilities.EstablishServerCredentials(server);
             }
 
             // Server certificate
@@ -195,15 +192,15 @@ namespace Org.BouncyCastle.Tls
                 Certificate serverCertificate = null;
 
                 MemoryStream endPointHash = new MemoryStream();
-                if (state.serverCredentials == null)
+                if (serverCredentials == null)
                 {
                     state.keyExchange.SkipServerCredentials();
                 }
                 else
                 {
-                    state.keyExchange.ProcessServerCredentials(state.serverCredentials);
+                    state.keyExchange.ProcessServerCredentials(serverCredentials);
 
-                    serverCertificate = state.serverCredentials.Certificate;
+                    serverCertificate = serverCredentials.Certificate;
 
                     SendCertificateMessage(serverContext, handshake, serverCertificate, endPointHash);
                 }
@@ -232,7 +229,7 @@ namespace Org.BouncyCastle.Tls
                 handshake.SendMessage(HandshakeType.server_key_exchange, serverKeyExchange);
             }
 
-            if (state.serverCredentials != null)
+            if (serverCredentials != null)
             {
                 state.certificateRequest = server.GetCertificateRequest();
 
@@ -339,6 +336,8 @@ namespace Org.BouncyCastle.Tls
             securityParameters.m_sessionHash = TlsUtilities.GetCurrentPrfHash(handshake.HandshakeHash);
 
             TlsProtocol.EstablishMasterSecret(serverContext, state.keyExchange);
+            state.keyExchange = null;
+
             recordLayer.InitPendingEpoch(TlsUtilities.InitCipher(serverContext));
 
             /*
@@ -404,7 +403,10 @@ namespace Org.BouncyCastle.Tls
 
             state.tlsSession = TlsUtilities.ImportSession(securityParameters.SessionID, state.sessionParameters);
 
-            securityParameters.m_tlsUnique = securityParameters.PeerVerifyData;
+            if (ProtocolVersion.DTLSv12.IsEqualOrLaterVersionOf(securityParameters.NegotiatedVersion))
+            {
+                securityParameters.m_tlsUnique = securityParameters.PeerVerifyData;
+            }
 
             serverContext.HandshakeComplete(server, state.tlsSession);
 
@@ -442,13 +444,12 @@ namespace Org.BouncyCastle.Tls
         }
 
         /// <exception cref="IOException"/>
-        internal virtual byte[] GenerateServerHello(ServerHandshakeState state, DtlsRecordLayer recordLayer)
+        internal virtual byte[] GenerateServerHello(ServerHandshakeState state)
         {
             TlsServer server = state.server;
             TlsServerContextImpl serverContext = state.serverContext;
             SecurityParameters securityParameters = serverContext.SecurityParameters;
 
-            // TODO[dtls13] Negotiate cipher suite first?
 
             ProtocolVersion serverVersion;
 
@@ -463,7 +464,7 @@ namespace Org.BouncyCastle.Tls
                 //    ? ProtocolVersion.DTLSv12
                 //    : server_version;
 
-                //recordLayer.SetWriteVersion(legacy_record_version);
+                //state.recordLayer.SetWriteVersion(legacy_record_version);
                 securityParameters.m_negotiatedVersion = serverVersion;
             }
 
@@ -471,14 +472,16 @@ namespace Org.BouncyCastle.Tls
             //if (ProtocolVersion.DTLSv13.IsEqualOrEarlierVersionOf(serverVersion))
             //{
             //    // See RFC 8446 D.4.
-            //    recordStream.SetIgnoreChangeCipherSpec(true);
+            //    state.recordLayer.SetIgnoreChangeCipherSpec(true);
 
-            //    recordStream.SetWriteVersion(ProtocolVersion.DTLSv12);
+            //    state.recordLayer.ReadVersion = ProtocolVersion.DTLSv12;
+            //    state.recordLayer.SetWriteVersion(ProtocolVersion.DTLSv12);
 
             //    return Generate13ServerHello(clientHello, clientHelloMessage, false);
             //}
 
-            //recordStream.setWriteVersion(serverVersion);
+            state.recordLayer.ReadVersion = serverVersion;
+            state.recordLayer.SetWriteVersion(serverVersion);
 
             {
                 bool useGmtUnixTime = server.ShouldUseGmtUnixTime();
@@ -699,7 +702,7 @@ namespace Org.BouncyCastle.Tls
 
             state.clientHello = null;
 
-            ApplyMaxFragmentLengthExtension(recordLayer, securityParameters.MaxFragmentLength);
+            ApplyMaxFragmentLengthExtension(state.recordLayer, securityParameters.MaxFragmentLength);
 
             MemoryStream buf = new MemoryStream();
             serverHello.Encode(serverContext, buf);
@@ -825,6 +828,8 @@ namespace Org.BouncyCastle.Tls
         /// <exception cref="IOException"/>
         protected virtual void ProcessClientHello(ServerHandshakeState state, ClientHello clientHello)
         {
+            state.recordLayer.SetWriteVersion(ProtocolVersion.DTLSv10);
+
             state.clientHello = clientHello;
 
             // TODO Read RFCs for guidance on the expected record layer version number
@@ -992,6 +997,7 @@ namespace Org.BouncyCastle.Tls
         {
             internal TlsServer server = null;
             internal TlsServerContextImpl serverContext = null;
+            internal DtlsRecordLayer recordLayer = null;
             internal TlsSession tlsSession = null;
             internal SessionParameters sessionParameters = null;
             internal TlsSecret sessionMasterSecret = null;
@@ -1000,7 +1006,6 @@ namespace Org.BouncyCastle.Tls
             internal IDictionary<int, byte[]> serverExtensions = null;
             internal bool expectSessionTicket = false;
             internal TlsKeyExchange keyExchange = null;
-            internal TlsCredentials serverCredentials = null;
             internal CertificateRequest certificateRequest = null;
             internal TlsHeartbeat heartbeat = null;
             internal short heartbeatPolicy = HeartbeatMode.peer_not_allowed_to_send;

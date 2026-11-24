@@ -1,7 +1,4 @@
-using System;
-
 using Org.BouncyCastle.Math;
-using Org.BouncyCastle.Utilities;
 
 namespace Org.BouncyCastle.Asn1.Cmp
 {
@@ -36,15 +33,16 @@ namespace Org.BouncyCastle.Asn1.Cmp
             return new PkiStatusEncodable(DerInteger.GetInstance(obj));
         }
 
-        public static PkiStatusEncodable GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit)
-        {
-            return GetInstance(DerInteger.GetInstance(taggedObject, declaredExplicit));
-        }
+        public static PkiStatusEncodable GetInstance(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new PkiStatusEncodable(DerInteger.GetInstance(taggedObject, declaredExplicit));
+
+        public static PkiStatusEncodable GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit) =>
+            new PkiStatusEncodable(DerInteger.GetTagged(taggedObject, declaredExplicit));
 
         private readonly DerInteger m_status;
 
 		private PkiStatusEncodable(PkiStatus status)
-			: this(new DerInteger((int)status))
+			: this(DerInteger.ValueOf((int)status))
 		{
 		}
 
@@ -52,6 +50,8 @@ namespace Org.BouncyCastle.Asn1.Cmp
 		{
 			m_status = status;
 		}
+
+		public virtual DerInteger Status => m_status;
 
 		public virtual BigInteger Value => m_status.Value;
 

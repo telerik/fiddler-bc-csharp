@@ -14,7 +14,8 @@ using Org.BouncyCastle.X509;
 namespace Org.BouncyCastle.Cms.Tests
 {
     [TestFixture]
-	public class Rfc4134Test
+    [Parallelizable(ParallelScope.All)]
+    public class Rfc4134Test
 	{
 		private static readonly byte[] exContent = GetRfc4134Data("ExContent.bin");
 		private static readonly byte[] sha1 = Hex.Decode("406aec085279ba6e16022d9e0629c0229687dd48");
@@ -130,18 +131,20 @@ namespace Org.BouncyCastle.Cms.Tests
 			VerifyEnvelopedData(envelopedParser, CmsEnvelopedGenerator.DesEde3Cbc);
 		}
 
-		[Test]
-		public void Test5_2()
-		{
-			byte[] data = GetRfc4134Data("5.2.bin");
-			CmsEnvelopedData envelopedData = new CmsEnvelopedData(data);
+        [Test]
+        public void Test5_2()
+        {
+            Properties.WithThreadProperty(Properties.CmsAllowLenientRsaPkcs1, bool.TrueString, () => {
+                byte[] data = GetRfc4134Data("5.2.bin");
+                CmsEnvelopedData envelopedData = new CmsEnvelopedData(data);
 
-			VerifyEnvelopedData(envelopedData, CmsEnvelopedGenerator.RC2Cbc);
+                VerifyEnvelopedData(envelopedData, CmsEnvelopedGenerator.RC2Cbc);
 
-			CmsEnvelopedDataParser envelopedParser = new CmsEnvelopedDataParser(data);
+                CmsEnvelopedDataParser envelopedParser = new CmsEnvelopedDataParser(data);
 
-			VerifyEnvelopedData(envelopedParser, CmsEnvelopedGenerator.RC2Cbc);
-		}
+                VerifyEnvelopedData(envelopedParser, CmsEnvelopedGenerator.RC2Cbc);
+            });
+        }
 
 		private void VerifyEnvelopedData(CmsEnvelopedData envelopedData, string symAlgorithmOID)
 		{
@@ -290,28 +293,21 @@ namespace Org.BouncyCastle.Cms.Tests
 			}
 		}
 
-		private static void VerifySigner(SignerInformation signer, X509Certificate cert)
-		{
-			if (cert.GetPublicKey() is DsaPublicKeyParameters)
-			{
-				DsaPublicKeyParameters key = (DsaPublicKeyParameters)cert.GetPublicKey();
+        private static void VerifySigner(SignerInformation signer, X509Certificate cert)
+        {
+            if (cert.GetPublicKey() is DsaPublicKeyParameters dsa)
+            {
+                if (dsa.Parameters == null)
+                {
+                    Assert.IsTrue(signer.Verify(GetInheritedKey(dsa)));
+                    return;
+                }
+            }
 
-				if (key.Parameters == null)
-				{
-					Assert.IsTrue(signer.Verify(GetInheritedKey(key)));
-				}
-				else
-				{
-					Assert.IsTrue(signer.Verify(cert));
-				}
-			}
-			else
-			{
-				Assert.IsTrue(signer.Verify(cert));
-			}
-		}
+            Assert.IsTrue(signer.Verify(cert));
+        }
 
-		private static DsaPublicKeyParameters GetInheritedKey(DsaPublicKeyParameters dsaPubKey)
+        private static DsaPublicKeyParameters GetInheritedKey(DsaPublicKeyParameters dsaPubKey)
 		{
 			X509Certificate cert = new X509CertificateParser().ReadCertificate(
 				GetRfc4134Data("CarlDSSSelf.cer"));

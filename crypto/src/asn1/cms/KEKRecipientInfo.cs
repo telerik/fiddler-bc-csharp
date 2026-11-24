@@ -25,51 +25,53 @@ namespace Org.BouncyCastle.Asn1.Cms
 #pragma warning restore CS0618 // Type or member is obsolete
         }
 
-        private DerInteger			version;
-        private KekIdentifier       kekID;
-        private AlgorithmIdentifier keyEncryptionAlgorithm;
-        private Asn1OctetString     encryptedKey;
-
-		public KekRecipientInfo(
-            KekIdentifier       kekID,
-            AlgorithmIdentifier keyEncryptionAlgorithm,
-            Asn1OctetString     encryptedKey)
+        public static KekRecipientInfo GetTagged(Asn1TaggedObject taggedObject, bool declaredExplicit)
         {
-            this.version = new DerInteger(4);
-            this.kekID = kekID;
-            this.keyEncryptionAlgorithm = keyEncryptionAlgorithm;
-            this.encryptedKey = encryptedKey;
+#pragma warning disable CS0618 // Type or member is obsolete
+            return new KekRecipientInfo(Asn1Sequence.GetTagged(taggedObject, declaredExplicit));
+#pragma warning restore CS0618 // Type or member is obsolete
+        }
+
+        private readonly DerInteger m_version;
+        private readonly KekIdentifier m_kekID;
+        private readonly AlgorithmIdentifier m_keyEncryptionAlgorithm;
+        private readonly Asn1OctetString m_encryptedKey;
+
+        public KekRecipientInfo(KekIdentifier kekID, AlgorithmIdentifier keyEncryptionAlgorithm,
+            Asn1OctetString encryptedKey)
+        {
+            m_version = DerInteger.Four;
+            m_kekID = kekID ?? throw new ArgumentNullException(nameof(kekID));
+            m_keyEncryptionAlgorithm = keyEncryptionAlgorithm ?? throw new ArgumentNullException(nameof(keyEncryptionAlgorithm));
+            m_encryptedKey = encryptedKey ?? throw new ArgumentNullException(nameof(encryptedKey));
         }
 
         [Obsolete("Use 'GetInstance' instead")]
-        public KekRecipientInfo(
-            Asn1Sequence seq)
+        public KekRecipientInfo(Asn1Sequence seq)
         {
-            version = (DerInteger) seq[0];
-            kekID = KekIdentifier.GetInstance(seq[1]);
-            keyEncryptionAlgorithm = AlgorithmIdentifier.GetInstance(seq[2]);
-            encryptedKey = (Asn1OctetString) seq[3];
+            if (seq == null)
+                throw new ArgumentNullException(nameof(seq));
+
+            int count = seq.Count, pos = 0;
+            if (count != 4)
+                throw new ArgumentException("Bad sequence size: " + count, nameof(seq));
+
+            m_version = Asn1Utilities.Read(seq, ref pos, DerInteger.GetInstance);
+            m_kekID = Asn1Utilities.Read(seq, ref pos, KekIdentifier.GetInstance);
+            m_keyEncryptionAlgorithm = Asn1Utilities.Read(seq, ref pos, AlgorithmIdentifier.GetInstance);
+            m_encryptedKey = Asn1Utilities.Read(seq, ref pos, Asn1OctetString.GetInstance);
+
+            if (pos != count)
+                throw new ArgumentException("Unexpected elements in sequence", nameof(seq));
         }
 
-        public DerInteger Version
-		{
-			get { return version; }
-		}
+        public DerInteger Version => m_version;
 
-		public KekIdentifier KekID
-		{
-			get { return kekID; }
-		}
+        public KekIdentifier KekID => m_kekID;
 
-		public AlgorithmIdentifier KeyEncryptionAlgorithm
-		{
-			get { return keyEncryptionAlgorithm; }
-		}
+		public AlgorithmIdentifier KeyEncryptionAlgorithm => m_keyEncryptionAlgorithm;
 
-		public Asn1OctetString EncryptedKey
-		{
-			get { return encryptedKey; }
-		}
+        public Asn1OctetString EncryptedKey => m_encryptedKey;
 
 		/**
          * Produce an object suitable for an Asn1OutputStream.
@@ -82,9 +84,7 @@ namespace Org.BouncyCastle.Asn1.Cms
          * }
          * </pre>
          */
-        public override Asn1Object ToAsn1Object()
-        {
-			return new DerSequence(version, kekID, keyEncryptionAlgorithm, encryptedKey);
-        }
+        public override Asn1Object ToAsn1Object() =>
+            new DerSequence(m_version, m_kekID, m_keyEncryptionAlgorithm, m_encryptedKey);
     }
 }

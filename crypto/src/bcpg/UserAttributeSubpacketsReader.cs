@@ -1,65 +1,73 @@
 using System;
 using System.IO;
+
 using Org.BouncyCastle.Bcpg.Attr;
-using Org.BouncyCastle.Utilities.IO;
 
 namespace Org.BouncyCastle.Bcpg
 {
-    /**
-    * reader for user attribute sub-packets
-    */
+    /// <summary>Parser for user attribute subpackets</summary>
     public class UserAttributeSubpacketsParser
     {
-        private readonly Stream input;
+        // Absolute upper bound on a single user attribute subpacket body. A crafted long-length
+        // header could otherwise force a multi-gigabyte new byte[] (below) before any body bytes
+        // are read, a pre-auth allocation DoS. 2 MiB matches SignaturePacket.MaxSubpacketLength;
+        // subpackets are not expected to approach it.
+        public static readonly int MaxSubpacketLength = 2 * 1024 * 1024;
 
-        public UserAttributeSubpacketsParser(
-            Stream input)
+        private readonly Stream m_input;
+        private readonly int m_limit;
+
+        public UserAttributeSubpacketsParser(Stream input)
+            : this(input, StreamUtilities.FindLimit(input))
         {
-            this.input = input;
+        }
+
+        public UserAttributeSubpacketsParser(Stream input, int limit)
+        {
+            m_input = input;
+            m_limit = limit;
         }
 
         public virtual UserAttributeSubpacket ReadPacket()
         {
-            int l = input.ReadByte();
-            if (l < 0)
+            uint bodyLen = StreamUtilities.ReadBodyLen(m_input, out var streamFlags);
+            if (streamFlags.HasFlag(StreamUtilities.StreamFlags.Eof))
                 return null;
 
-            int bodyLen = 0;
-            bool longLength = false;
-            if (l < 192)
-            {
-                bodyLen = l;
-            }
-            else if (l <= 223)
-            {
-                bodyLen = ((l - 192) << 8) + (input.ReadByte()) + 192;
-            }
-            else if (l == 255)
-            {
-                bodyLen = (input.ReadByte() << 24) | (input.ReadByte() << 16)
-                    |  (input.ReadByte() << 8)  | input.ReadByte();
-                longLength = true;
-            }
-            else
-            {
-                throw new IOException("unrecognised length reading user attribute sub packet");
-            }
+            if (streamFlags.HasFlag(StreamUtilities.StreamFlags.Partial))
+                throw new MalformedPacketException("unrecognised length reading user attribute sub packet");
 
-            int tag = input.ReadByte();
-            if (tag < 0)
-                throw new EndOfStreamException("unexpected EOF reading user attribute sub packet");
+            if (bodyLen < 1U)
+                throw new MalformedPacketException("Body length octet too small.");
+            if (bodyLen > m_limit)
+                throw new MalformedPacketException($"Body length octet ({bodyLen}) exceeds limit ({m_limit}).");
+            // Absolute cap, independent of the FindLimit() hint, so a crafted length cannot drive a huge allocation.
+            if (bodyLen > MaxSubpacketLength)
+                throw new MalformedPacketException(
+                    $"Body length octet ({bodyLen}) exceeds max user attribute subpacket length ({MaxSubpacketLength}).");
 
+            bool isLongLength = streamFlags.HasFlag(StreamUtilities.StreamFlags.LongLength);
+
+            int tag = StreamUtilities.RequireByte(m_input);
             byte[] data = new byte[bodyLen - 1];
-            if (Streams.ReadFully(input, data) < data.Length)
-                throw new EndOfStreamException();
 
-            UserAttributeSubpacketTag type = (UserAttributeSubpacketTag) tag;
-            switch (type)
+            StreamUtilities.RequireBytes(m_input, data);
+
+            UserAttributeSubpacketTag type = (UserAttributeSubpacketTag)tag;
+            try
             {
+                switch (type)
+                {
                 case UserAttributeSubpacketTag.ImageAttribute:
-                    return new ImageAttrib(longLength, data);
+                    return new ImageAttrib(isLongLength, data);
+                }
             }
-            return new UserAttributeSubpacket(type, longLength, data);
+            catch (ArgumentException e)
+            {
+                throw new MalformedPacketException("Malformed UserAttribute subpacket.", e);
+            }
+
+            return new UserAttributeSubpacket(type, isLongLength, data);
         }
     }
 }

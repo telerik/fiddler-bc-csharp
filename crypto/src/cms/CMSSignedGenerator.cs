@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Org.BouncyCastle.Asn1;
 using Org.BouncyCastle.Asn1.Cms;
 using Org.BouncyCastle.Asn1.CryptoPro;
+using Org.BouncyCastle.Asn1.GM;
 using Org.BouncyCastle.Asn1.Nist;
 using Org.BouncyCastle.Asn1.Oiw;
 using Org.BouncyCastle.Asn1.Pkcs;
@@ -12,6 +13,7 @@ using Org.BouncyCastle.Asn1.TeleTrust;
 using Org.BouncyCastle.Asn1.X509;
 using Org.BouncyCastle.Asn1.X9;
 using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Operators.Utilities;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Utilities.Collections;
 using Org.BouncyCastle.X509;
@@ -46,8 +48,8 @@ namespace Org.BouncyCastle.Cms
     public abstract class CmsSignedGenerator
     {
         /**
-        * Default type for the signed data.
-        */
+         * Default type for the signed data.
+         */
         public static readonly string Data = CmsObjectIdentifiers.Data.Id;
 
         public static readonly string DigestSha1 = OiwObjectIdentifiers.IdSha1.Id;
@@ -57,11 +59,21 @@ namespace Org.BouncyCastle.Cms
         public static readonly string DigestSha512 = NistObjectIdentifiers.IdSha512.Id;
         public static readonly string DigestSha512_224 = NistObjectIdentifiers.IdSha512_224.Id;
         public static readonly string DigestSha512_256 = NistObjectIdentifiers.IdSha512_256.Id;
+
+        public static readonly string DigestSha3_224 = NistObjectIdentifiers.IdSha3_224.Id;
+        public static readonly string DigestSha3_256 = NistObjectIdentifiers.IdSha3_256.Id;
+        public static readonly string DigestSha3_384 = NistObjectIdentifiers.IdSha3_384.Id;
+        public static readonly string DigestSha3_512 = NistObjectIdentifiers.IdSha3_512.Id;
+
+        public static readonly string DigestShake128 = NistObjectIdentifiers.IdShake128.Id;
+        public static readonly string DigestShake256 = NistObjectIdentifiers.IdShake256.Id;
+
         public static readonly string DigestMD5 = PkcsObjectIdentifiers.MD5.Id;
         public static readonly string DigestGost3411 = CryptoProObjectIdentifiers.GostR3411.Id;
         public static readonly string DigestRipeMD128 = TeleTrusTObjectIdentifiers.RipeMD128.Id;
         public static readonly string DigestRipeMD160 = TeleTrusTObjectIdentifiers.RipeMD160.Id;
         public static readonly string DigestRipeMD256 = TeleTrusTObjectIdentifiers.RipeMD256.Id;
+        public static readonly string DigestSM3 = GMObjectIdentifiers.sm3.Id;
 
         public static readonly string EncryptionRsa = PkcsObjectIdentifiers.RsaEncryption.Id;
         public static readonly string EncryptionDsa = X9ObjectIdentifiers.IdDsaWithSha1.Id;
@@ -74,13 +86,16 @@ namespace Org.BouncyCastle.Cms
 
         internal List<Asn1Encodable> _certs = new List<Asn1Encodable>();
         internal List<Asn1Encodable> _crls = new List<Asn1Encodable>();
-        internal IList<SignerInformation> _signers = new List<SignerInformation>();
-        internal IDictionary<DerObjectIdentifier, byte[]> m_digests = new Dictionary<DerObjectIdentifier, byte[]>();
+        internal List<SignerInformation> _signers = new List<SignerInformation>();
+        internal Dictionary<DerObjectIdentifier, byte[]> m_digests = new Dictionary<DerObjectIdentifier, byte[]>();
+        internal IDigestAlgorithmFinder m_digestAlgorithmFinder = DefaultDigestAlgorithmFinder.Instance;
         internal bool _useDerForCerts = false;
         internal bool _useDerForCrls = false;
 
+        // TODO[api] Restrict to internal
         protected readonly SecureRandom m_random;
 
+        // TODO[api] Restrict to internal
         protected CmsSignedGenerator()
             : this(CryptoServicesRegistrar.GetSecureRandom())
         {
@@ -88,15 +103,16 @@ namespace Org.BouncyCastle.Cms
 
         /// <summary>Constructor allowing specific source of randomness</summary>
         /// <param name="random">Instance of <c>SecureRandom</c> to use.</param>
+        // TODO[api] Restrict to internal
         protected CmsSignedGenerator(SecureRandom random)
         {
-            if (random == null)
-                throw new ArgumentNullException(nameof(random));
-
-            m_random = random;
+            m_random = random ?? throw new ArgumentNullException(nameof(random));
         }
 
-        internal protected virtual IDictionary<CmsAttributeTableParameter, object> GetBaseParameters(
+        // TODO[api] After removing this, SignatureAlgorithmIdentifier can be assumed present in
+        // DefaultSignedAttributeTableGenerator.AddMissingStandardAttributes
+        [Obsolete("Will be removed")]
+        protected internal virtual IDictionary<CmsAttributeTableParameter, object> GetBaseParameters(
             DerObjectIdentifier contentType, AlgorithmIdentifier digAlgId, byte[] hash)
         {
             var param = new Dictionary<CmsAttributeTableParameter, object>();
@@ -112,81 +128,86 @@ namespace Org.BouncyCastle.Cms
             return param;
         }
 
-        internal protected virtual Asn1Set GetAttributeSet(
-            Asn1.Cms.AttributeTable attr)
+        internal virtual IDictionary<CmsAttributeTableParameter, object> GetBaseParameters(
+            DerObjectIdentifier contentType, AlgorithmIdentifier digAlgID, AlgorithmIdentifier sigAlgID, byte[] hash)
         {
-            return attr == null
-                ? null
-                : DerSet.FromVector(attr.ToAsn1EncodableVector());
+            var param = new Dictionary<CmsAttributeTableParameter, object>();
+
+            if (contentType != null)
+            {
+                param[CmsAttributeTableParameter.ContentType] = contentType;
+            }
+
+            param[CmsAttributeTableParameter.DigestAlgorithmIdentifier] = digAlgID;
+            param[CmsAttributeTableParameter.SignatureAlgorithmIdentifier] = sigAlgID;
+            param[CmsAttributeTableParameter.Digest] = hash.Clone();
+
+            return param;
         }
 
-        public void AddAttributeCertificate(X509V2AttributeCertificate attrCert)
+        // TODO[api] Restrict to internal
+        protected internal virtual Asn1Set GetAttributeSet(Asn1.Cms.AttributeTable attr)
         {
-            _certs.Add(new DerTaggedObject(false, 2, attrCert.AttributeCertificate));
+            return attr == null ? null : DerSet.FromCollection(attr);
         }
 
-        public void AddAttributeCertificates(IStore<X509V2AttributeCertificate> attrCertStore)
-        {
-            _certs.AddRange(CmsUtilities.GetAttributeCertificatesFromStore(attrCertStore));
-        }
+        public void AddAttributeCertificate(X509V2AttributeCertificate attrCert) =>
+            CmsUtilities.CollectAttributeCertificate(_certs, attrCert);
 
-        public void AddCertificate(X509Certificate cert)
-        {
-            _certs.Add(cert.CertificateStructure);
-        }
+        public void AddAttributeCertificates(IStore<X509V2AttributeCertificate> attrCertStore) =>
+            CmsUtilities.CollectAttributeCertificates(_certs, attrCertStore);
 
-        public void AddCertificates(IStore<X509Certificate> certStore)
-        {
-            _certs.AddRange(CmsUtilities.GetCertificatesFromStore(certStore));
-        }
+        public void AddCertificate(X509Certificate cert) => CmsUtilities.CollectCertificate(_certs, cert);
 
-        public void AddCrl(X509Crl crl)
-        {
-            _crls.Add(crl.CertificateList);
-        }
+        public void AddCertificates(IStore<X509Certificate> certStore) =>
+            CmsUtilities.CollectCertificates(_certs, certStore);
 
-        public void AddCrls(IStore<X509Crl> crlStore)
-        {
-            _crls.AddRange(CmsUtilities.GetCrlsFromStore(crlStore));
-        }
+        public void AddCrl(X509Crl crl) => CmsUtilities.CollectCrl(_crls, crl);
 
-        public void AddOtherRevocationInfo(OtherRevocationInfoFormat otherRevocationInfo)
-        {
-            CmsUtilities.ValidateOtherRevocationInfo(otherRevocationInfo);
-            _crls.Add(new DerTaggedObject(false, 1, otherRevocationInfo));
-        }
+        public void AddCrls(IStore<X509Crl> crlStore) => CmsUtilities.CollectCrls(_crls, crlStore);
 
-        public void AddOtherRevocationInfos(IStore<OtherRevocationInfoFormat> otherRevocationInfoStore)
-        {
-            _crls.AddRange(CmsUtilities.GetOtherRevocationInfosFromStore(otherRevocationInfoStore));
-        }
+        public void AddOtherRevocationInfo(OtherRevocationInfoFormat otherRevocationInfo) =>
+            CmsUtilities.CollectOtherRevocationInfo(_crls, otherRevocationInfo);
+
+        public void AddOtherRevocationInfo(DerObjectIdentifier otherRevInfoFormat, Asn1Encodable otherRevInfo) =>
+            CmsUtilities.CollectOtherRevocationInfo(_crls, otherRevInfoFormat, otherRevInfo);
+
+        public void AddOtherRevocationInfos(IStore<OtherRevocationInfoFormat> otherRevocationInfoStore) =>
+            CmsUtilities.CollectOtherRevocationInfos(_crls, otherRevocationInfoStore);
 
         public void AddOtherRevocationInfos(DerObjectIdentifier otherRevInfoFormat,
             IStore<Asn1Encodable> otherRevInfoStore)
         {
-            _crls.AddRange(CmsUtilities.GetOtherRevocationInfosFromStore(otherRevInfoStore, otherRevInfoFormat));
+            CmsUtilities.CollectOtherRevocationInfos(_crls, otherRevInfoFormat, otherRevInfoStore);
         }
 
         /**
-		 * Add a store of precalculated signers to the generator.
-		 *
-		 * @param signerStore store of signers
-		 */
+         * Add a store of precalculated signers to the generator.
+         *
+         * @param signerStore store of signers
+         */
         public void AddSigners(SignerInformationStore signerStore)
         {
-            foreach (SignerInformation o in signerStore.GetSigners())
+            foreach (SignerInformation o in signerStore.SignersInternal)
             {
                 _signers.Add(o);
                 AddSignerCallback(o);
             }
         }
 
+        public IDigestAlgorithmFinder DigestAlgorithmFinder
+        {
+            get { return m_digestAlgorithmFinder; }
+            set { m_digestAlgorithmFinder = value ?? throw new ArgumentNullException(nameof(value)); }
+        }
+
         /**
-		 * Return a map of oids and byte arrays representing the digests calculated on the content during
-		 * the last generate.
-		 *
-		 * @return a map of oids (as string objects) and byte[] representing digests.
-		 */
+         * Return a map of oids and byte arrays representing the digests calculated on the content during
+         * the last generate.
+         *
+         * @return a map of oids (as string objects) and byte[] representing digests.
+         */
+        // TODO[api] Prefer to return just a copy of m_digests (i.e. keyed by DerObjectIdentifier)?
         public IDictionary<string, byte[]> GetGeneratedDigests()
         {
             var result = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
@@ -197,31 +218,27 @@ namespace Org.BouncyCastle.Cms
             return result;
         }
 
+        [Obsolete("Will be removed. Replaced in CmsSignedDataGenerator by the similar 'UseDefiniteLength' property")]
         public bool UseDerForCerts
         {
             get { return _useDerForCerts; }
             set { this._useDerForCerts = value; }
         }
 
+        [Obsolete("Will be removed. Replaced in CmsSignedDataGenerator by the similar 'UseDefiniteLength' property")]
         public bool UseDerForCrls
         {
             get { return _useDerForCrls; }
             set { this._useDerForCrls = value; }
         }
 
-        internal virtual void AddSignerCallback(
-            SignerInformation si)
+        internal virtual void AddSignerCallback(SignerInformation signerInformation)
         {
         }
 
-        internal static SignerIdentifier GetSignerIdentifier(X509Certificate cert)
-        {
-            return new SignerIdentifier(CmsUtilities.GetIssuerAndSerialNumber(cert));
-        }
+        internal static SignerIdentifier GetSignerIdentifier(X509Certificate c) => CmsUtilities.GetSignerIdentifier(c);
 
-        internal static SignerIdentifier GetSignerIdentifier(byte[] subjectKeyIdentifier)
-        {
-            return new SignerIdentifier(new DerOctetString(subjectKeyIdentifier));
-        }
+        internal static SignerIdentifier GetSignerIdentifier(byte[] subjectKeyIdentifier) =>
+            CmsUtilities.GetSignerIdentifier(subjectKeyIdentifier);
     }
 }

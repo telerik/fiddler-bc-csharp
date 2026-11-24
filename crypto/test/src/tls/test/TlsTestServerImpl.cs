@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 
@@ -142,6 +142,12 @@ namespace Org.BouncyCastle.Tls.Tests
 
             if (TlsTestConfig.Debug)
             {
+                int negotiatedGroup = securityParameters.NegotiatedGroup;
+                if (negotiatedGroup >= 0)
+                {
+                    Console.WriteLine("TLS server negotiated group: " + NamedGroup.GetText(negotiatedGroup));
+                }
+
                 Console.WriteLine("TLS server reports 'tls-server-end-point' = " + ToHexString(m_tlsServerEndPoint));
                 Console.WriteLine("TLS server reports 'tls-unique' = " + ToHexString(m_tlsUnique));
             }
@@ -149,13 +155,11 @@ namespace Org.BouncyCastle.Tls.Tests
 
         public override ProtocolVersion GetServerVersion()
         {
-            ProtocolVersion serverVersion = (null != m_config.serverNegotiateVersion)
-                ?   m_config.serverNegotiateVersion
-                :   base.GetServerVersion();
+            ProtocolVersion serverVersion = m_config.serverNegotiateVersion ?? base.GetServerVersion();
 
             if (TlsTestConfig.Debug)
             {
-                Console.WriteLine("TLS server negotiated " + serverVersion);
+                Console.WriteLine("TLS server negotiated version " + serverVersion);
             }
 
             return serverVersion;
@@ -239,6 +243,7 @@ namespace Org.BouncyCastle.Tls.Tests
 
             string[] trustedCertResources = new string[]{ "x509-client-dsa.pem", "x509-client-ecdh.pem",
                 "x509-client-ecdsa.pem", "x509-client-ed25519.pem", "x509-client-ed448.pem",
+                "x509-client-ml_dsa_44.pem", "x509-client-ml_dsa_65.pem", "x509-client-ml_dsa_87.pem",
                 "x509-client-rsa_pss_256.pem", "x509-client-rsa_pss_384.pem", "x509-client-rsa_pss_512.pem",
                 "x509-client-rsa.pem" };
 
@@ -317,15 +322,8 @@ namespace Org.BouncyCastle.Tls.Tests
             return TlsUtilities.GetSupportedCipherSuites(Crypto, TestCipherSuites);
         }
 
-        protected override ProtocolVersion[] GetSupportedVersions()
-        {
-            if (m_config.serverSupportedVersions != null)
-            {
-                return m_config.serverSupportedVersions;
-            }
-
-            return base.GetSupportedVersions();
-        }
+        protected override ProtocolVersion[] GetSupportedVersions() =>
+            m_config.serverSupportedVersions ?? base.GetSupportedVersions();
 
         protected virtual string ToHexString(byte[] data)
         {

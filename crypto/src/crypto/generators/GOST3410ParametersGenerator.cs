@@ -153,12 +153,12 @@ namespace Org.BouncyCastle.Crypto.Generators
 			//Verify and perform condition: 0<x<2^32; 0<c<2^32; c - odd.
 			while(x0<0 || x0>4294967296L)
 			{
-				x0 = init_random.NextInt()*2;
+				x0 = init_random.NextInt()*2L;
 			}
 
 			while((c<0 || c>4294967296L) || (c/2==0))
 			{
-				c = init_random.NextInt()*2+1;
+				c = init_random.NextInt()*2L+1;
 			}
 
 			BigInteger C = BigInteger.ValueOf(c);
@@ -358,12 +358,12 @@ step3:
 			//Verify and perform condition: 0<x<2^32; 0<c<2^32; c - odd.
 			while(x0<0 || x0>4294967296L)
 			{
-				x0 = init_random.NextInt()*2;
+				x0 = init_random.NextInt()*2L;
 			}
 
 			while((c<0 || c>4294967296L) || (c/2==0))
 			{
-				c = init_random.NextInt()*2+1;
+				c = init_random.NextInt()*2L+1;
 			}
 
 			BigInteger [] qp = new BigInteger[2];
@@ -486,16 +486,16 @@ step3:
 				x0 = init_random.NextInt();
 				c  = init_random.NextInt();
 
-				switch(size)
+				switch (size)
 				{
-					case 512:
-						procedure_A(x0, c, pq, 512);
-						break;
-					case 1024:
-						procedure_B(x0, c, pq);
-						break;
-					default:
-						throw new ArgumentException("Ooops! key size 512 or 1024 bit.");
+				case 512:
+					procedure_A(x0, c, pq, 512);
+					break;
+				case 1024:
+					procedure_B(x0, c, pq);
+					break;
+				default:
+					throw new ArgumentException("Ooops! key size 512 or 1024 bit.");
 				}
 				p = pq[0];  q = pq[1];
 				a = procedure_C(p, q);
@@ -508,16 +508,16 @@ step3:
 				x0L = init_random.NextLong();
 				cL  = init_random.NextLong();
 
-				switch(size)
+				switch (size)
 				{
-					case 512:
-						procedure_Aa(x0L, cL, pq, 512);
-						break;
-					case 1024:
-						procedure_Bb(x0L, cL, pq);
-						break;
-					default:
-						throw new InvalidOperationException("Ooops! key size 512 or 1024 bit.");
+				case 512:
+					procedure_Aa(x0L, cL, pq, 512);
+					break;
+				case 1024:
+					procedure_Bb(x0L, cL, pq);
+					break;
+				default:
+					throw new InvalidOperationException("Ooops! key size 512 or 1024 bit.");
 				}
 				p = pq[0];  q = pq[1];
 				a = procedure_C(p, q);
